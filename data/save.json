@@ -1,0 +1,32 @@
+{
+  "high_score": 300,
+  "total_kills": 7,
+  "coins": 99199,
+  "player_level": 2,
+  "xp": 0,
+  "unlocked_weapons": [
+    "pistol",
+    "shotgun"
+  ],
+  "weapon_upgrades": {},
+  "player_upgrades": {},
+  "achievements": [
+    "first_blood",
+    "master_shooter",
+    "rich"
+  ],
+  "quests_claimed": [],
+  "settings": {
+    "master_volume": 1.0,
+    "music_volume": 0.0,
+    "sfx_volume": 0.0,
+    "fullscreen": true,
+    "show_fps": true,
+    "resolution_index": 2,
+    "screen_shake": true,
+    "damage_numbers": true,
+    "hit_effects": true
+  },
+  "permanent_max_hp": 20,
+  "permanent_armor": 10
+}

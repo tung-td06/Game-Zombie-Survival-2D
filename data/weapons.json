@@ -1,0 +1,58 @@
+{
+  "pistol": {
+    "name": "PISTOL",
+    "damage": 25, "magazine": 12, "fire_rate": 0.30, "reload_time": 1.2,
+    "bullet_speed": 1000, "spread_deg": 2.5, "pellets": 1,
+    "critical_chance": 0.10, "critical_multiplier": 2.0,
+    "auto": false, "price": 0, "start_reserve": 96
+  },
+  "shotgun": {
+    "name": "SHOTGUN",
+    "damage": 20, "magazine": 6, "fire_rate": 0.80, "reload_time": 1.8,
+    "bullet_speed": 850, "spread_deg": 12, "pellets": 8,
+    "critical_chance": 0.05, "critical_multiplier": 2.0,
+    "auto": false, "price": 500, "start_reserve": 24
+  },
+  "smg": {
+    "name": "SMG",
+    "damage": 15, "magazine": 30, "fire_rate": 0.08, "reload_time": 1.5,
+    "bullet_speed": 1100, "spread_deg": 5.0, "pellets": 1,
+    "critical_chance": 0.08, "critical_multiplier": 2.0,
+    "auto": true, "price": 800, "start_reserve": 90
+  },
+  "rifle": {
+    "name": "AK-47",
+    "damage": 30, "magazine": 30, "fire_rate": 0.12, "reload_time": 1.7,
+    "bullet_speed": 1300, "spread_deg": 3.0, "pellets": 1,
+    "critical_chance": 0.12, "critical_multiplier": 2.2,
+    "auto": true, "price": 1500, "start_reserve": 60
+  },
+  "sniper": {
+    "name": "SNIPER",
+    "damage": 150, "magazine": 5, "fire_rate": 1.50, "reload_time": 2.2,
+    "bullet_speed": 1800, "spread_deg": 0.5, "pellets": 1,
+    "critical_chance": 0.30, "critical_multiplier": 3.0,
+    "auto": false, "price": 3000, "start_reserve": 15
+  },
+  "flamethrower": {
+    "name": "FLAMETHROWER",
+    "damage": 18, "magazine": 60, "fire_rate": 0.05, "reload_time": 2.5,
+    "bullet_speed": 700, "spread_deg": 18, "pellets": 1,
+    "critical_chance": 0.05, "critical_multiplier": 1.5,
+    "auto": true, "price": 1800, "start_reserve": 120
+  },
+  "plasma": {
+    "name": "PLASMA RIFLE",
+    "damage": 55, "magazine": 20, "fire_rate": 0.20, "reload_time": 1.9,
+    "bullet_speed": 1400, "spread_deg": 2.0, "pellets": 1,
+    "critical_chance": 0.20, "critical_multiplier": 2.5,
+    "auto": true, "price": 4500, "start_reserve": 40
+  },
+  "crossbow": {
+    "name": "CROSSBOW",
+    "damage": 90, "magazine": 1, "fire_rate": 0.85, "reload_time": 1.4,
+    "bullet_speed": 1500, "spread_deg": 0.0, "pellets": 1,
+    "critical_chance": 0.40, "critical_multiplier": 2.5,
+    "auto": false, "price": 1200, "start_reserve": 20
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "normal": {
+    "name": "Zombie",
+    "hp": 100, "speed": 90, "damage": 10, "radius": 16,
+    "attack_range": 40, "attack_cooldown": 1.0, "detection_range": 430,
+    "score": 100, "coins": 10, "xp": 20
+  },
+  "fast": {
+    "name": "Runner",
+    "hp": 60, "speed": 180, "damage": 8, "radius": 13,
+    "attack_range": 36, "attack_cooldown": 0.8, "detection_range": 520,
+    "score": 150, "coins": 15, "xp": 25
+  },
+  "tank": {
+    "name": "Brute",
+    "hp": 600, "speed": 45, "damage": 30, "radius": 25,
+    "attack_range": 52, "attack_cooldown": 1.6, "detection_range": 420,
+    "score": 500, "coins": 50, "xp": 80
+  },
+  "exploder": {
+    "name": "Bloater",
+    "hp": 80, "speed": 70, "damage": 12, "radius": 18,
+    "attack_range": 44, "attack_cooldown": 1.2, "detection_range": 440,
+    "explosion_damage": 55, "explosion_radius": 140,
+    "score": 200, "coins": 25, "xp": 35
+  },
+  "ranged": {
+    "name": "Spitter",
+    "hp": 90, "speed": 75, "damage": 14, "radius": 16,
+    "attack_range": 380, "attack_cooldown": 2.2, "detection_range": 560,
+    "projectile_speed": 420,
+    "score": 250, "coins": 30, "xp": 45
+  },
+  "boss": {
+    "name": "ABOMINATION",
+    "hp": 5000, "speed": 55, "damage": 40, "radius": 42,
+    "attack_range": 78, "attack_cooldown": 1.4, "detection_range": 100000,
+    "barrage_interval": 6.0, "barrage_bullets": 14,
+    "score": 5000, "coins": 500, "xp": 600
+  }
+}

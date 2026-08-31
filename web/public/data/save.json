@@ -1,0 +1,23 @@
+{
+  "high_score": 300,
+  "total_kills": 7,
+  "coins": 90,
+  "player_level": 2,
+  "xp": 0,
+  "unlocked_weapons": [
+    "pistol"
+  ],
+  "weapon_upgrades": {},
+  "player_upgrades": {},
+  "achievements": [
+    "first_blood"
+  ],
+  "quests_claimed": [],
+  "settings": {
+    "master_volume": 1.0,
+    "music_volume": 0.0,
+    "sfx_volume": 0.0,
+    "fullscreen": true,
+    "show_fps": true
+  }
+}

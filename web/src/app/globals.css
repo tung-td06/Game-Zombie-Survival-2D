@@ -1,0 +1,10 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: #10120E;
+  color: #DEDED6;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: #5AB4FF; text-decoration: none; }
+a:hover { text-decoration: underline; }

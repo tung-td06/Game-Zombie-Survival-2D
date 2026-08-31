@@ -1,0 +1,16 @@
+{
+  "upgrades": [
+    {"id": "max_hp",    "text": "+20 MAX HP",        "desc": "Increase max health"},
+    {"id": "damage",    "text": "+10% DAMAGE",       "desc": "All weapons hit harder"},
+    {"id": "speed",     "text": "+8% MOVE SPEED",    "desc": "Run faster"},
+    {"id": "fire_rate", "text": "+8% FIRE RATE",     "desc": "Shoot faster"},
+    {"id": "reload",    "text": "+10% RELOAD SPEED", "desc": "Reload quicker"},
+    {"id": "armor",     "text": "+10 ARMOR",         "desc": "Absorb damage first"},
+    {"id": "crit_ch",   "text": "+5% CRIT CHANCE",   "desc": "More critical hits"},
+    {"id": "crit_dmg",  "text": "+25% CRIT DAMAGE",  "desc": "Crits hurt more"}
+  ],
+  "limits": {
+    "max_hp": 10,
+    "armor": 10
+  }
+}
