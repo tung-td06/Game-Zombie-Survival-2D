@@ -18,8 +18,6 @@
     "assets": "node scripts/generate-assets.mjs",
     "d1:migrate:local": "wrangler d1 migrations apply zombie-survival-db --local",
     "d1:migrate:remote": "wrangler d1 migrations apply zombie-survival-db --remote",
-    "d1:seed:local": "wrangler d1 execute zombie-survival-db --local --file=migrations/0002_seed.sql",
-    "d1:seed:remote": "wrangler d1 execute zombie-survival-db --remote --file=migrations/0002_seed.sql",
     "pages:dev": "wrangler pages dev .vercel/output/static --d1=DB",
     "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=zombie-survival-2d"
   },

@@ -76,10 +76,46 @@ web/
 
 ## Persistence
 
-Profile data (high score, total kills, coins, level, XP, unlocked
-weapons, achievements, quests, settings, key bindings) is stored in
-`localStorage` under the key `zs.save.v1`. Use the Settings → Reset
-button in-game (or `localStorage.clear()` in DevTools) to start over.
+**Cloudflare D1 is the database of record** for accounts, leaderboard
+scores and cloud save games (`wrangler.toml` binds `DB`; the schema lives
+in `migrations/`). On the deployed site every account you register, every
+score you post and every save you write goes to D1 through the App Router
+API routes under `src/app/api/` (all `runtime = "edge"`):
+
+- `/api/player/register|login|me|stats` — accounts (PBKDF2-hashed
+  passwords, HMAC-signed 30-day session cookie)
+- `/api/game/save|load` + `/api/game/submit-score` — one active save per
+  player + the leaderboard feed
+- `/api/leaderboard` — top-100 best runs (`game_scores` joined to `players`)
+
+Apply migrations to the remote database with:
+
+```bash
+npm run d1:migrate:remote
+```
+
+and deploy with:
+
+```bash
+npm run build:cf   # next build + @cloudflare/next-on-pages
+npm run pages:deploy
+```
+
+**Running locally without Cloudflare:** `npm run dev` serves the game and
+keeps per-player settings/profile in `localStorage` (`zs.save.v1`), but the
+API routes run in Next's Edge sandbox there, so account/leaderboard/save
+writes are not persisted by plain `npm run dev`. To exercise the real D1
+code path locally, build once and run under the Cloudflare emulator, which
+provides the `DB` binding backed by a local D1 database:
+
+```bash
+npm run build:cf
+npm run d1:migrate:local
+npm run pages:dev   # http://localhost:8788
+```
+
+Unit tests exercise the same D1 SQL through a Node JSON-file fallback in
+`src/server/persistent-storage.ts`; it is never bundled for Edge/CF.
 
 ## Asset notes
 
