@@ -1,7 +1,21 @@
+// ---------------------------------------------------------------------------
+// D1 Binding Lookup
+// ---------------------------------------------------------------------------
+// On Cloudflare Pages (Edge runtime), `getRequestContext()` exposes the
+// `env.DB` binding configured in `wrangler.toml`. In any other environment
+// (Node.js dev server, tests, plain `next dev`) the require() throws and we
+// fall back to `null`, which makes the rest of this module automatically
+// route reads/writes to the on-disk persistent JSON store.
+
 export function getD1Database(): D1Database | null {
   try {
-    const { getRequestContext } = require("@cloudflare/next-on-pages");
-    const ctx = getRequestContext();
+    // Guarded require so Edge bundlers don't trip on the dynamic import.
+    const req = (eval("require") as NodeRequire | undefined);
+    if (!req) return null;
+    const { getRequestContext } = req("@cloudflare/next-on-pages") as {
+      getRequestContext?: () => { env?: { DB?: D1Database } };
+    };
+    const ctx = getRequestContext?.();
     return (ctx?.env as any)?.DB ?? null;
   } catch {
     return null;
@@ -213,23 +227,40 @@ export async function verifySessionToken(
 }
 
 // ---------------------------------------------------------------------------
+// Persistent Fallback Storage (for local dev / missing D1 binding)
+// ---------------------------------------------------------------------------
+// In production on Cloudflare Pages, D1 is used directly. In any other
+// environment (Node dev server, tests), reads/writes route to an on-disk
+// JSON store so data survives process restarts, hot reloads and commits.
+// See `persistent-storage.ts` for the file layout.
+
+import {
+  psGetPlayer,
+  psGetPlayerById,
+  psUpsertPlayer,
+  psGetStats,
+  psUpsertStats,
+  psGetSave,
+  psUpsertSave,
+  psDeleteSave,
+  psAddScore,
+  psListScores,
+  PersistentScoreEntry,
+} from "./persistent-storage";
+
+// ---------------------------------------------------------------------------
 // In-Memory Fallback Storage (for local dev / missing D1 binding)
 // ---------------------------------------------------------------------------
+//
+// A small in-process cache sits on top of the persistent store to avoid
+// hitting the filesystem for every read. The cache is rebuilt lazily on
+// first access; the persistent store is the source of truth.
 
-const memoryPlayers = new Map<string, PlayerRecord>(); // clean username -> record
-const memoryPlayersById = new Map<string, PlayerRecord>(); // id -> record
-const memoryStats = new Map<string, PlayerStats>(); // playerId -> stats
-const memorySaves = new Map<string, GameSaveRecord>(); // playerId -> save
-const memoryScores: Array<{
-  id: string;
-  player_id: string;
-  username: string;
-  score: number;
-  wave: number;
-  zombies_killed: number;
-  survival_time: number;
-  created_at: number;
-}> = [];
+const memoryPlayers = new Map<string, PlayerRecord>(); // clean username -> record (cache)
+const memoryPlayersById = new Map<string, PlayerRecord>(); // id -> record (cache)
+const memoryStats = new Map<string, PlayerStats>(); // playerId -> stats (cache)
+const memorySaves = new Map<string, GameSaveRecord>(); // playerId -> save (cache)
+const memoryScores: PersistentScoreEntry[] = []; // recent scores (cache)
 
 // ---------------------------------------------------------------------------
 // Compatibility profile helpers
@@ -317,6 +348,23 @@ export async function createPlayer(
     } catch (err) {
       console.warn("D1 createPlayer write warning:", err);
     }
+  } else {
+    // Local dev / tests: persist to on-disk JSON so the account survives
+    // process restarts and hot reloads.
+    try {
+      await psUpsertPlayer(playerRecord);
+      await psUpsertStats({
+        player_id: id,
+        total_games: 0,
+        best_score: 0,
+        best_wave: 0,
+        total_zombies_killed: 0,
+        best_survival_time: 0,
+        updated_at: now,
+      });
+    } catch (err) {
+      console.warn("persistent createPlayer write warning:", err);
+    }
   }
 
   return playerRecord;
@@ -352,7 +400,20 @@ export async function getPlayerByUsername(
     }
   }
 
-  return memoryPlayers.get(clean) || null;
+  // No D1 (or D1 missed): consult in-memory cache, then persistent JSON.
+  const cached = memoryPlayers.get(clean);
+  if (cached) return cached;
+  try {
+    const persisted = await psGetPlayer(clean);
+    if (persisted) {
+      memoryPlayers.set(persisted.username, persisted);
+      memoryPlayersById.set(persisted.id, persisted);
+    }
+    return persisted;
+  } catch (err) {
+    console.warn("persistent getPlayerByUsername read warning:", err);
+    return null;
+  }
 }
 
 export async function getPlayerById(
@@ -384,7 +445,20 @@ export async function getPlayerById(
     }
   }
 
-  return memoryPlayersById.get(playerId) || null;
+  // Fall back to cache, then to persistent JSON store.
+  const cached = memoryPlayersById.get(playerId);
+  if (cached) return cached;
+  try {
+    const persisted = await psGetPlayerById(playerId);
+    if (persisted) {
+      memoryPlayersById.set(persisted.id, persisted);
+      memoryPlayers.set(persisted.username, persisted);
+    }
+    return persisted;
+  } catch (err) {
+    console.warn("persistent getPlayerById read warning:", err);
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -439,7 +513,7 @@ export async function submitScore(
   const player = await getPlayerById(db, playerId);
   const username = player?.display_name || player?.username || "Survivor";
 
-  memoryScores.push({
+  const newScore: PersistentScoreEntry = {
     id: scoreId,
     player_id: playerId,
     username,
@@ -448,7 +522,8 @@ export async function submitScore(
     zombies_killed: input.zombies_killed,
     survival_time: input.survival_time,
     created_at: now,
-  });
+  };
+  memoryScores.push(newScore);
 
   const prevStats = memoryStats.get(playerId) || {
     player_id: playerId,
@@ -516,6 +591,33 @@ export async function submitScore(
     } catch (err) {
       console.warn("D1 submitScore error:", err);
     }
+  } else {
+    // Persistent fallback path (local dev / tests).
+    try {
+      await psAddScore(newScore);
+
+      // Mirror the stats update in the persistent store too.
+      const persistedPrev = (await psGetStats(playerId)) || {
+        player_id: playerId,
+        total_games: 0,
+        best_score: 0,
+        best_wave: 0,
+        total_zombies_killed: 0,
+        best_survival_time: 0,
+        updated_at: now,
+      };
+      await psUpsertStats({
+        player_id: playerId,
+        total_games: persistedPrev.total_games + 1,
+        best_score: Math.max(persistedPrev.best_score, input.score),
+        best_wave: Math.max(persistedPrev.best_wave, input.wave),
+        total_zombies_killed: persistedPrev.total_zombies_killed + input.zombies_killed,
+        best_survival_time: Math.max(persistedPrev.best_survival_time, input.survival_time),
+        updated_at: now,
+      });
+    } catch (err) {
+      console.warn("persistent submitScore error:", err);
+    }
   }
 }
 
@@ -558,7 +660,20 @@ export async function getLeaderboardTop100(
     }
   }
 
-  const sorted = [...memoryScores].sort((a, b) => {
+  // Merge in-memory cache with any new entries from persistent store, then
+  // sort + cap to top 100.
+  let allScores: PersistentScoreEntry[] = [...memoryScores];
+  try {
+    const persisted = await psListScores();
+    if (persisted.length > 0) {
+      const seen = new Set(allScores.map((s) => s.id));
+      for (const s of persisted) if (!seen.has(s.id)) allScores.push(s);
+    }
+  } catch (err) {
+    console.warn("persistent getLeaderboardTop100 read warning:", err);
+  }
+
+  const sorted = allScores.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
     if (b.wave !== a.wave) return b.wave - a.wave;
     return b.survival_time - a.survival_time;
@@ -603,17 +718,27 @@ export async function getPlayerStats(
     }
   }
 
-  return (
-    memoryStats.get(playerId) || {
-      player_id: playerId,
-      total_games: 0,
-      best_score: 0,
-      best_wave: 0,
-      total_zombies_killed: 0,
-      best_survival_time: 0,
-      updated_at: Date.now(),
+  const cached = memoryStats.get(playerId);
+  if (cached) return cached;
+  try {
+    const persisted = await psGetStats(playerId);
+    if (persisted) {
+      memoryStats.set(playerId, persisted);
+      return persisted;
     }
-  );
+  } catch (err) {
+    console.warn("persistent getPlayerStats read warning:", err);
+  }
+
+  return {
+    player_id: playerId,
+    total_games: 0,
+    best_score: 0,
+    best_wave: 0,
+    total_zombies_killed: 0,
+    best_survival_time: 0,
+    updated_at: Date.now(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -655,7 +780,19 @@ export async function getGameSave(
     }
   }
 
-  return memorySaves.get(playerId) || null;
+  const cached = memorySaves.get(playerId);
+  if (cached) return cached;
+  try {
+    const persisted = await psGetSave(playerId);
+    if (persisted) {
+      memorySaves.set(playerId, persisted);
+      return persisted;
+    }
+  } catch (err) {
+    console.warn("persistent getGameSave read warning:", err);
+  }
+
+  return null;
 }
 
 export async function saveGameSave(
@@ -724,6 +861,13 @@ export async function saveGameSave(
     } catch (err) {
       console.warn("D1 saveGameSave error:", err);
     }
+  } else {
+    // Local dev / tests: write to the on-disk JSON store.
+    try {
+      await psUpsertSave(saveRec);
+    } catch (err) {
+      console.warn("persistent saveGameSave write warning:", err);
+    }
   }
 }
 
@@ -740,6 +884,12 @@ export async function deleteGameSave(
         .run();
     } catch (err) {
       console.warn("D1 deleteGameSave error:", err);
+    }
+  } else {
+    try {
+      await psDeleteSave(playerId);
+    } catch (err) {
+      console.warn("persistent deleteGameSave write warning:", err);
     }
   }
 }
