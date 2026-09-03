@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getD1Database,
   getPlayerByUsername,
   verifyPassword,
   createSessionToken,
 } from "@/lib/db";
 
-export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
@@ -24,9 +22,8 @@ export async function POST(req: NextRequest) {
     }
 
     const isProd = process.env.NODE_ENV === "production";
-    const db = getD1Database();
 
-    const player = await getPlayerByUsername(db, username);
+    const player = await getPlayerByUsername(username);
     if (!player) {
       return NextResponse.json(
         { success: false, error: "Tên đăng nhập hoặc mật khẩu không chính xác" },

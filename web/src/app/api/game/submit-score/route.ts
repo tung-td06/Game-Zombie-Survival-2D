@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getD1Database,
   verifySessionToken,
   validateScoreInput,
   submitScore,
   SubmitScoreInput,
 } from "@/lib/db";
 
-export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
@@ -31,8 +29,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getD1Database();
-    await submitScore(db, session.playerId, {
+    await submitScore(session.playerId, {
       score: Number(body.score) || 0,
       wave: Number(body.wave) || 0,
       zombies_killed: Number(body.zombies_killed) || 0,

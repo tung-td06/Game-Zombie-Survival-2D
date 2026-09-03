@@ -225,7 +225,7 @@ export default function Home() {
         setAuthError(data.error || "Đã xảy ra lỗi khi xác thực");
       }
     } catch (err: any) {
-      setAuthError("Không thể kết nối đến Cloudflare API");
+      setAuthError("Không thể kết nối đến máy chủ");
     } finally {
       setAuthLoading(false);
     }
@@ -342,7 +342,7 @@ export default function Home() {
               letterSpacing: 1.5,
             }}
           >
-            CLOUDFLARE D1 POWERED TOP-DOWN SHOOTER
+            POST-APOCALYPTIC TOP-DOWN SHOOTER
           </p>
         </header>
 
@@ -368,7 +368,7 @@ export default function Home() {
             {/* Survivor Profile / Auth */}
             <div style={{ ...cardBase, padding: 22 }}>
               <h2 style={sectionHeading}>
-                {isLoggedIn ? "MY RECORD (HỒ SƠ SURVIVOR)" : "CLOUDFLARE AUTH"}
+                {isLoggedIn ? "MY RECORD (HỒ SƠ SURVIVOR)" : "PLAYER ACCOUNT"}
               </h2>
 
               {!isLoggedIn ? (
@@ -882,7 +882,7 @@ export default function Home() {
                         maxWidth: 340,
                       }}
                     >
-                      Hãy **ĐĂNG NHẬP** hoặc **ĐĂNG KÝ** tài khoản ở khung bên trái để lưu thành tích vào Cloudflare D1 và tham gia bảng xếp hạng.
+                      Hãy **ĐĂNG NHẬP** hoặc **ĐĂNG KÝ** tài khoản ở khung bên trái để lưu thành tích, save game và tham gia bảng xếp hạng.
                     </p>
                   </div>
                 ) : (
@@ -1280,7 +1280,7 @@ export default function Home() {
                     >
                       CHƯA CÓ DỮ LIỆU ĐIỂM CAO.
                       <br />
-                      HÃY CHƠI VÀ LƯU THÀNH TÍCH VÀO CLOUDFLARE D1!
+                      HÃY CHƠI MỘT TRẬN VÀ LƯU THÀNH TÍCH ĐỂ XUẤT HIỆN Ở ĐÂY!
                     </div>
                   ) : (
                     <div

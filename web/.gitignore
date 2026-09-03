@@ -8,5 +8,5 @@ test-results/
 *.tsbuildinfo
 .env*.local
 
-# Local dev persistent store (replaces in-memory Map when D1 binding is absent)
+# Local server data store (players, stats, saves, scores)
 data/persistent/

@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getD1Database,
   verifySessionToken,
   getGameSave,
   saveGameSave,
   deleteGameSave,
 } from "@/lib/db";
 
-export const runtime = "edge";
 
 export async function GET(req: NextRequest) {
   try {
@@ -21,8 +19,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const db = getD1Database();
-    const save = await getGameSave(db, session.playerId);
+    const save = await getGameSave(session.playerId);
     return NextResponse.json({ success: true, save });
   } catch (err) {
     console.error("Game save GET error:", err);
@@ -55,8 +52,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getD1Database();
-    await saveGameSave(db, session.playerId, savePayload);
+    await saveGameSave(session.playerId, savePayload);
 
     return NextResponse.json({ success: true });
   } catch (err) {
@@ -80,8 +76,7 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    const db = getD1Database();
-    await deleteGameSave(db, session.playerId);
+    await deleteGameSave(session.playerId);
 
     return NextResponse.json({ success: true });
   } catch (err) {

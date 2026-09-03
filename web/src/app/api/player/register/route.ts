@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  getD1Database,
   getPlayerByUsername,
   createPlayer,
   hashPassword,
   createSessionToken,
 } from "@/lib/db";
 
-export const runtime = "edge";
 
 export async function POST(req: NextRequest) {
   try {
@@ -41,9 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     const isProd = process.env.NODE_ENV === "production";
-    const db = getD1Database();
 
-    const existing = await getPlayerByUsername(db, cleanUsername);
+    const existing = await getPlayerByUsername(cleanUsername);
     if (existing) {
       return NextResponse.json(
         { success: false, error: "Tên người chơi đã tồn tại" },
@@ -52,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
 
     const passwordHash = await hashPassword(password);
-    const player = await createPlayer(db, cleanUsername, passwordHash, display_name);
+    const player = await createPlayer(cleanUsername, passwordHash, display_name);
     const token = await createSessionToken(player.id, player.username);
 
     const res = NextResponse.json({

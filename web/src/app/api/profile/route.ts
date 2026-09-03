@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProfile, saveProfile, getD1Database } from "@/lib/db";
+import { getProfile, saveProfile } from "@/lib/db";
 
-export const runtime = "edge";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -22,9 +21,8 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const db = getD1Database();
 
-  let profile = await getProfile(db, key);
+  let profile = await getProfile(key);
 
   // Auto-create a clean default profile for new users or local dev fallback
   if (!profile) {
@@ -41,7 +39,7 @@ export async function GET(req: NextRequest) {
       quests_claimed: [],
       settings: {},
     };
-    await saveProfile(db, key, profile);
+    await saveProfile(key, profile);
   }
 
   const response = NextResponse.json({ profile });
@@ -74,10 +72,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getD1Database();
 
     const key = username.trim().toLowerCase();
-    await saveProfile(db, key, profileData);
+    await saveProfile(key, profileData);
     const response = NextResponse.json({ success: true });
 
     response.cookies.set("session_user", key, {
