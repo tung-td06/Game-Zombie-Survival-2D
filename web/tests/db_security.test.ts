@@ -9,7 +9,7 @@ import {
   getPlayerByUsername,
 } from "../src/lib/db";
 
-describe("Security & Anti-Cheat Utilities", () => {
+describe("Cloudflare D1 Security & Anti-Cheat Utilities", () => {
   it("hashes and verifies password using Web Crypto PBKDF2", async () => {
     const password = "SuperSecretPassword123!";
     const hash = await hashPassword(password);
@@ -76,12 +76,12 @@ describe("Security & Anti-Cheat Utilities", () => {
     const displayName = "Pro Survivor";
 
     const hash = await hashPassword(password);
-    const player = await createPlayer(username, hash, displayName);
+    const player = await createPlayer(null, username, hash, displayName);
     expect(player.id).toBeDefined();
     expect(player.username).toBe("newplayertest");
     expect(player.display_name).toBe(displayName);
 
-    const fetched = await getPlayerByUsername("NewPlayerTest");
+    const fetched = await getPlayerByUsername(null, "NewPlayerTest");
     expect(fetched).not.toBeNull();
     expect(fetched?.id).toBe(player.id);
 

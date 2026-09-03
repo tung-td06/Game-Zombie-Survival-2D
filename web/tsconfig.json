@@ -22,7 +22,9 @@
         "name": "next"
       }
     ],
-    "types": [],
+    "types": [
+      "@cloudflare/workers-types"
+    ],
     "paths": {
       "@/*": [
         "./src/*"

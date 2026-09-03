@@ -40,13 +40,13 @@ beforeEach(() => {
   _resetCacheForTests();
 });
 
-describe("Persistent JSON storage", () => {
+describe("Persistent JSON storage (no D1 binding)", () => {
   it("persists a registered player across cache resets", async () => {
     const username = "alice";
     const password = "Password123!";
     const hash = await hashPassword(password);
 
-    const created = await createPlayer(username, hash, "Alice");
+    const created = await createPlayer(null, username, hash, "Alice");
     expect(created.username).toBe(username);
     expect(created.id).toBeDefined();
 
@@ -54,13 +54,13 @@ describe("Persistent JSON storage", () => {
     // the in-memory cache.
     await _flushNowForTests();
     _resetCacheForTests();
-    const refetched = await getPlayerByUsername(username);
+    const refetched = await getPlayerByUsername(null, username);
     expect(refetched).not.toBeNull();
     expect(refetched?.id).toBe(created.id);
 
     // And by id as well (cache was already reset above; no new writes since).
     _resetCacheForTests();
-    const byId = await getPlayerById(created.id);
+    const byId = await getPlayerById(null, created.id);
     expect(byId?.username).toBe(username);
 
     // Password still verifies after a "restart".
@@ -72,7 +72,7 @@ describe("Persistent JSON storage", () => {
     const username = "bob";
     const password = "Password123!";
     const hash = await hashPassword(password);
-    await createPlayer(username, hash);
+    await createPlayer(null, username, hash);
 
     // Allow the debounced flush to land.
     await new Promise((r) => setTimeout(r, 300));
@@ -90,9 +90,9 @@ describe("Persistent JSON storage", () => {
     const username = "carol";
     const password = "Password123!";
     const hash = await hashPassword(password);
-    const created = await createPlayer(username, hash);
+    const created = await createPlayer(null, username, hash);
 
-    await saveGameSave(created.id, {
+    await saveGameSave(null, created.id, {
       save_version: 1,
       level: 3,
       wave: 7,
@@ -107,12 +107,12 @@ describe("Persistent JSON storage", () => {
 
     await _flushNowForTests();
     _resetCacheForTests();
-    const save = await getGameSave(created.id);
+    const save = await getGameSave(null, created.id);
     expect(save).not.toBeNull();
     expect(save?.wave).toBe(7);
     expect(save?.player_data?.hp).toBe(80);
 
-    await submitScore(created.id, {
+    await submitScore(null, created.id, {
       score: 5000,
       wave: 9,
       zombies_killed: 80,
@@ -123,21 +123,21 @@ describe("Persistent JSON storage", () => {
 
     await _flushNowForTests();
     _resetCacheForTests();
-    const stats = await getPlayerStats(created.id);
+    const stats = await getPlayerStats(null, created.id);
     expect(stats).not.toBeNull();
     expect(stats?.total_games).toBe(1);
     expect(stats?.best_score).toBe(5000);
     expect(stats?.best_wave).toBe(9);
 
-    const leaderboard = await getLeaderboardTop100();
+    const leaderboard = await getLeaderboardTop100(null);
     const carolRow = leaderboard.find((r) => r.username.toLowerCase() === username);
     expect(carolRow).toBeDefined();
     expect(carolRow?.score).toBe(5000);
 
-    await deleteGameSave(created.id);
+    await deleteGameSave(null, created.id);
     await _flushNowForTests();
     _resetCacheForTests();
-    const afterDelete = await getGameSave(created.id);
+    const afterDelete = await getGameSave(null, created.id);
     expect(afterDelete).toBeNull();
   });
 });

@@ -22,16 +22,16 @@ async function main() {
 
   if (mode === "register") {
     // Idempotency: if user already exists, just succeed.
-    const existing = await getPlayerByUsername(username);
+    const existing = await getPlayerByUsername(null, username);
     if (existing) {
       console.log(`[register] user ${username} already exists, id=${existing.id}`);
       return;
     }
     const hash = await hashPassword(password);
-    const created = await createPlayer(username, hash, "HOHO");
+    const created = await createPlayer(null, username, hash, "HOHO");
     console.log(`[register] created id=${created.id} username=${created.username}`);
   } else {
-    const player = await getPlayerByUsername(username);
+    const player = await getPlayerByUsername(null, username);
     if (!player) {
       console.log(`[login] FAIL: user ${username} not found`);
       process.exit(1);

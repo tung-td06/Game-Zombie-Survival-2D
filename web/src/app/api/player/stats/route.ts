@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, getPlayerStats } from "@/lib/db";
+import { getD1Database, verifySessionToken, getPlayerStats } from "@/lib/db";
 
+export const runtime = "edge";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,7 +15,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const stats = await getPlayerStats(session.playerId);
+    const db = getD1Database();
+    const stats = await getPlayerStats(db, session.playerId);
     return NextResponse.json({
       success: true,
       data: stats,

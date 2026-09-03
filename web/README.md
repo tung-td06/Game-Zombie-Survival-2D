@@ -76,35 +76,46 @@ web/
 
 ## Persistence
 
-**Accounts, leaderboard scores and cloud save games are stored on the
-server** (no external database required). The App Router API routes under
-`src/app/api/` are the single data layer:
+**Cloudflare D1 is the database of record** for accounts, leaderboard
+scores and cloud save games (`wrangler.toml` binds `DB`; the schema lives
+in `migrations/`). On the deployed site every account you register, every
+score you post and every save you write goes to D1 through the App Router
+API routes under `src/app/api/` (all `runtime = "edge"`):
 
 - `/api/player/register|login|me|stats` — accounts (PBKDF2-hashed
   passwords, HMAC-signed 30-day session cookie)
 - `/api/game/save|load` + `/api/game/submit-score` — one active save per
   player + the leaderboard feed
-- `/api/leaderboard` — top-100 best runs
+- `/api/leaderboard` — top-100 best runs (`game_scores` joined to `players`)
 
-Every write is persisted by the Node JSON store in
-`src/server/persistent-storage.ts` as files under `web/data/persistent/`
-(`players.json`, `player_stats.json`, `game_saves.json`, `scores.json`),
-so registration, save games and the leaderboard all survive a server
-restart. Per-player settings and key bindings remain in the browser's
-`localStorage` (`zs.save.v1`).
-
-Run locally with:
+Apply migrations to the remote database with:
 
 ```bash
-npm run dev      # http://localhost:3000
+npm run d1:migrate:remote
 ```
 
-Writes are debounced (200 ms); the data directory is created
-automatically and is git-ignored. Set `SESSION_SECRET` to a long random
-string in production so session cookies stay valid across restarts.
+and deploy with:
 
-Unit tests exercise the same storage module directly (each test run uses
-an isolated temp directory).
+```bash
+npm run build:cf   # next build + @cloudflare/next-on-pages
+npm run pages:deploy
+```
+
+**Running locally without Cloudflare:** `npm run dev` serves the game and
+keeps per-player settings/profile in `localStorage` (`zs.save.v1`), but the
+API routes run in Next's Edge sandbox there, so account/leaderboard/save
+writes are not persisted by plain `npm run dev`. To exercise the real D1
+code path locally, build once and run under the Cloudflare emulator, which
+provides the `DB` binding backed by a local D1 database:
+
+```bash
+npm run build:cf
+npm run d1:migrate:local
+npm run pages:dev   # http://localhost:8788
+```
+
+Unit tests exercise the same D1 SQL through a Node JSON-file fallback in
+`src/server/persistent-storage.ts`; it is never bundled for Edge/CF.
 
 ## Asset notes
 

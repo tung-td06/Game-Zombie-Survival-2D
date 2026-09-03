@@ -1511,7 +1511,7 @@ export class Game {
           shots_fired: Math.max(0, Math.floor(this.stats.shots_fired || 0)),
           shots_hit: Math.max(0, Math.floor(this.stats.shots_hit || 0)),
         }),
-      }).catch((err) => console.error("Failed to submit score to server:", err));
+      }).catch((err) => console.error("Failed to submit score to Cloudflare D1:", err));
     }
 
     return isNewHigh;

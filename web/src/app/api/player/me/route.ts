@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, getPlayerById } from "@/lib/db";
+import { getD1Database, verifySessionToken, getPlayerById } from "@/lib/db";
 
+export const runtime = "edge";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,7 +15,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const player = await getPlayerById(session.playerId);
+    const db = getD1Database();
+    const player = await getPlayerById(db, session.playerId);
     if (!player) {
       return NextResponse.json(
         { success: false, error: "Player not found" },

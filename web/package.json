@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "scripts": {
     "dev": "node server.js",
+    "dev:cf": "next dev",
     "build": "next build",
+    "build:cf": "next build && npx @cloudflare/next-on-pages",
     "build:next": "next build",
     "start": "node server.js",
     "lint": "eslint .",
@@ -13,15 +15,21 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "verify": "npm run lint && npm run typecheck && npm test",
-    "assets": "node scripts/generate-assets.mjs"
+    "assets": "node scripts/generate-assets.mjs",
+    "d1:migrate:local": "wrangler d1 migrations apply zombie-survival-db --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply zombie-survival-db --remote",
+    "pages:dev": "wrangler pages dev .vercel/output/static --d1=DB",
+    "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=zombie-survival-2d"
   },
   "dependencies": {
+    "@cloudflare/next-on-pages": "^1.13.16",
     "next": "15.5.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240208.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
@@ -32,6 +40,7 @@
     "eslint-config-next": "^14.2.35",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "wrangler": "^4.127.1"
   }
 }

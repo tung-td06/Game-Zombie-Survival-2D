@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifySessionToken, getGameSave } from "@/lib/db";
+import { getD1Database, verifySessionToken, getGameSave } from "@/lib/db";
 
+export const runtime = "edge";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,7 +15,8 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const save = await getGameSave(session.playerId);
+    const db = getD1Database();
+    const save = await getGameSave(db, session.playerId);
     return NextResponse.json({ success: true, save });
   } catch (err) {
     console.error("Game load GET error:", err);
