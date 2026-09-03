@@ -667,7 +667,7 @@ class Game:
         cam = self.camera
         surf = self.screen
         self.map.draw_ground(surf, cam, biome=self.wave_manager.biome)
-        self.map.draw_obstacles(surf, cam)
+        self.map.draw_obstacles(surf, cam, settings=self.save.settings)
         view = cam.view_rect
         # Supply crates — render before zombies/loot so moving entities
         # can stack on top. Highlight the one the player can interact with.

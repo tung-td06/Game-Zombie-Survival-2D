@@ -196,13 +196,13 @@ class MenuSystem:
         """Pause-scoped settings (overlay). Reuses the existing audio keys
         and adds gameplay toggles. All values persist to save.json."""
         self._draw_pause_overlay(surface)
-        # Taller card: the GAMEPLAY section now lists 5 toggles
+        # Taller card: the GAMEPLAY section now lists 6 toggles
         # (SCREEN SHAKE, DAMAGE NUMBERS, HIT EFFECTS, FOOTSTEP DUST,
-        # SHOW FPS) plus the DISPLAY block. The default 560px panel
-        # overflows on a 720-tall screen, so request a 680px card so
-        # every row — including FOOTSTEP DUST — sits inside the frame.
+        # WINDOW LIGHTS, SHOW FPS) plus the DISPLAY block. The default
+        # 560px panel overflows on a 720-tall screen, so request a
+        # 700px card so every row sits inside the frame.
         panel = self._draw_pause_frame(
-            surface, "PAUSED", "// SETTINGS", panel_h=680)
+            surface, "PAUSED", "// SETTINGS", panel_h=700)
         cx = S.SCREEN_WIDTH / 2
         st = game.save.settings
         buttons: list[Button] = []
@@ -244,6 +244,7 @@ class MenuSystem:
             ("damage_numbers",  "DAMAGE NUMBERS"),
             ("hit_effects",     "HIT EFFECTS"),
             ("footstep_dust",   "FOOTSTEP DUST"),
+            ("window_lights",   "WINDOW LIGHTS"),
             ("show_fps",        "SHOW FPS"),
         ]
         for key, label in toggles:
@@ -411,7 +412,7 @@ class MenuSystem:
                                   width=44, height=36))
             buttons.append(Button("+", (cx + 310, y + 16), f"inc:{key}",
                                   width=44, height=36))
-            y += 70
+            y += 64
 
         # GAMEPLAY toggles — share the same backing settings the Pause
         # Menu uses, so toggling in either place updates everywhere.
@@ -420,6 +421,7 @@ class MenuSystem:
             ("damage_numbers",  "DAMAGE NUMBERS"),
             ("hit_effects",     "HIT EFFECTS"),
             ("footstep_dust",   "FOOTSTEP DUST"),
+            ("window_lights",   "WINDOW LIGHTS"),
         ]
         for key, label in toggles:
             val = bool(st.get(key, False))
@@ -428,21 +430,21 @@ class MenuSystem:
                                   width=400, height=36,
                                   accent=S.color("ui_green") if val
                                          else (90, 90, 96)))
-            y += 44
+            y += 40
 
         fs = "FULLSCREEN: ON" if st["fullscreen"] else "FULLSCREEN: OFF"
-        buttons.append(Button(fs, (cx - 100, y + 26), "toggle_fullscreen",
+        buttons.append(Button(fs, (cx - 100, y + 22), "toggle_fullscreen",
                               width=360))
         idx = int(st.get("resolution_index", 0))
         res = S.RESOLUTIONS[idx] if 0 <= idx < len(S.RESOLUTIONS) \
             else (S.SCREEN_WIDTH, S.SCREEN_HEIGHT)
         buttons.append(Button(f"RESOLUTION: {res[0]}x{res[1]}",
-                              (cx + 290, y + 26), "cycle_resolution",
+                              (cx + 290, y + 22), "cycle_resolution",
                               width=280))
         fps = "SHOW FPS: ON" if st["show_fps"] else "SHOW FPS: OFF"
-        buttons.append(Button(fps, (cx - 195, y + 96), "toggle_fps",
+        buttons.append(Button(fps, (cx - 195, y + 78), "toggle_fps",
                               width=280))
-        buttons.append(Button("BACK", (cx + 195, y + 96), "back"))
+        buttons.append(Button("BACK", (cx + 195, y + 78), "back"))
         return self._handle(buttons), buttons
 
     # ---------------------------------------------------------------- shop --

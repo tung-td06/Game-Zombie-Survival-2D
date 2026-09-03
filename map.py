@@ -319,7 +319,8 @@ class GameMap:
                         pygame.draw.rect(surface, line_c, (xx, sr.centery - 3, 36, 6))
                         xx += 70
 
-    def draw_obstacles(self, surface: pygame.Surface, cam) -> None:
+    def draw_obstacles(self, surface: pygame.Surface, cam,
+                       settings: dict | None = None) -> None:
         view = cam.view_rect
         x0 = view.left // CELL
         x1 = view.right // CELL
@@ -334,10 +335,12 @@ class GameMap:
                     drawn.add(id(rect))
                     if not view.colliderect(rect):
                         continue
-                    self._draw_obstacle(surface, cam, rect, kind)
+                    self._draw_obstacle(surface, cam, rect, kind,
+                                        settings)
 
     def _draw_obstacle(self, surface: pygame.Surface, cam,
-                       rect: pygame.Rect, kind: str) -> None:
+                       rect: pygame.Rect, kind: str,
+                       settings: dict | None = None) -> None:
         sr = cam.apply_rect(rect)
         # Deterministic lit/dark pattern locked to the obstacle's
         # world position. The old implementation mixed in
@@ -347,8 +350,19 @@ class GameMap:
         # real source of eye strain. Now each building is either
         # "lit" (some windows on) or "dark" (all windows off) for
         # the entire run, with no time-based component.
+        #
+        # The `window_lights` setting (default OFF) lets players
+        # turn the lit windows off entirely. When OFF every window
+        # is drawn dark — that removes the only remaining bright
+        # point-light on the map background, which is the
+        # preferred option for players who find the lit windows
+        # distracting.
+        _window_lights_on = bool(
+            settings is not None
+            and settings.get("window_lights", False)
+        )
         flicker_seed = (rect.x * 13 + rect.y * 7) % 100
-        flicker = flicker_seed >= 30  # ~70% lit, 30% dark
+        flicker = _window_lights_on and flicker_seed >= 30  # ~70% lit, 30% dark
 
         if kind == "building":
             sh = sr.move(3, 4)

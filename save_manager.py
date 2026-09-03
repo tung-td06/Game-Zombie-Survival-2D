@@ -28,6 +28,7 @@ DEFAULT_SAVE: dict[str, Any] = {
         "damage_numbers": True,
         "hit_effects": True,
         "footstep_dust": False,
+        "window_lights": False,
     },
 }
 
