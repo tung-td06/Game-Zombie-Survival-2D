@@ -342,7 +342,7 @@ export default function Home() {
               letterSpacing: 1.5,
             }}
           >
-            POST-APOCALYPTIC TOP-DOWN SHOOTER
+            SURVIVE THE HORDE
           </p>
         </header>
 
