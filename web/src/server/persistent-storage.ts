@@ -18,14 +18,22 @@
 //   Node.js dev server, after the Edge bundler has already been
 //   satisfied with the `db-core.ts` code path.
 //
-// File layout (all under web/data/persistent/):
-//   players.json   - Map<cleanUsername, PlayerRecord>
-//   player_stats.json - Map<playerId, PlayerStats>
-//   game_saves.json  - Map<playerId, GameSaveRecord>
-//   scores.json      - Array<{...}>
+// IMPORTANT — Disk-authoritative (no in-memory cache):
+//   Next.js dev compiles this module into a separate chunk per route, so
+//   every API route holds its OWN instance of this module. A shared
+//   in-memory cache (or debounced writes that live in one instance) would
+//   therefore be invisible to the other routes: a player registered
+//   through one route chunk would not be found by the login route chunk,
+//   and pending debounced writes could be lost entirely. To keep every
+//   route consistent we therefore read the JSON files from disk on every
+//   access and write them through immediately on every mutation — no
+//   module-level cache, no debounce timers.
 //
-// Writes are debounced (200ms) to avoid hammering the disk while still
-// giving strong durability guarantees between commits and restarts.
+// File layout (all under web/data/persistent/):
+//   players.json   - Record<cleanUsername, PlayerRecord>
+//   player_stats.json - Record<playerId, PlayerStats>
+//   game_saves.json  - Record<playerId, GameSaveRecord>
+//   scores.json      - Array<{...}>
 
 // Node builtins are loaded lazily via a guarded require (never statically
 // imported) so this module compiles cleanly inside the Next.js dev Edge
@@ -117,12 +125,6 @@ const EMPTY: FileShape = {
   scores: [],
 };
 
-// In-memory cache that mirrors the on-disk JSON file.
-let cache: FileShape | null = null;
-let loaded = false;
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
-let pendingWrite = false;
-
 function isNodeRuntime(): boolean {
   // fs/promises are only available in Node, not in Edge/Workers.
   // We do a soft check to avoid hard failures on Edge.
@@ -165,8 +167,7 @@ async function readJson<T>(name: keyof FileShape, fallback: T): Promise<T> {
   }
 }
 
-async function loadAll(): Promise<FileShape> {
-  if (loaded && cache) return cache;
+async function readAllFresh(): Promise<FileShape> {
   await ensureDir();
   const [players, player_stats, game_saves, scores] = await Promise.all([
     readJson<Record<string, PlayerRecord>>("players", {}),
@@ -174,76 +175,68 @@ async function loadAll(): Promise<FileShape> {
     readJson<Record<string, GameSaveRecord>>("game_saves", {}),
     readJson<FileShape["scores"]>("scores", []),
   ]);
-  cache = { players, player_stats, game_saves, scores };
-  loaded = true;
-  return cache;
+  return { players, player_stats, game_saves, scores };
 }
 
-async function flushNow(): Promise<void> {
-  if (!isNodeRuntime() || !cache) return;
+// Always reads a fresh snapshot from disk — never a module-level cache.
+// Queued after any in-flight mutation in this process so the read sees the
+// latest write-through result.
+async function loadAll(): Promise<FileShape> {
+  if (!isNodeRuntime()) return EMPTY;
+  return writeQueue.run(() => readAllFresh());
+}
+
+// A tiny in-process promise queue. Next.js dev compiles this module into
+// several independent chunks (one per route), so there is no shared mutable
+// state to lock — but when two requests in the SAME process mutate the store
+// concurrently, this chain still prevents a read-modify-write from being
+// interleaved by another mutation between its read and its write.
+const writeQueue = {
+  tail: Promise.resolve() as Promise<unknown>,
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.tail.then(fn);
+    // Keep the chain alive even when a step rejects.
+    this.tail = next.catch(() => undefined);
+    return next;
+  },
+};
+
+// Atomic read-modify-write: loads the four JSON files, applies `mutate` to
+// the fresh snapshot, then writes all files back — entirely inside one queue
+// task so concurrent mutations in the same process cannot interleave.
+async function mutate<T>(fn: (data: FileShape) => T | Promise<T>): Promise<T> {
+  if (!isNodeRuntime()) return fn(EMPTY) as T;
   const nb = nodeBuiltins();
-  if (!nb) return;
-  pendingWrite = false;
-  const snapshot = cache;
-  await ensureDir();
-  await Promise.all([
-    nb.fs
-      .writeFile(filePath("players"), JSON.stringify(snapshot.players, null, 2), "utf8")
-      .catch((e) =>
-        console.warn("persistent-storage: write players.json failed:", e?.message)
-      ),
-    nb.fs
-      .writeFile(
-        filePath("player_stats"),
-        JSON.stringify(snapshot.player_stats, null, 2),
-        "utf8"
-      )
-      .catch((e) =>
-        console.warn("persistent-storage: write player_stats.json failed:", e?.message)
-      ),
-    nb.fs
-      .writeFile(filePath("game_saves"), JSON.stringify(snapshot.game_saves, null, 2), "utf8")
-      .catch((e) =>
-        console.warn("persistent-storage: write game_saves.json failed:", e?.message)
-      ),
-    nb.fs
-      .writeFile(filePath("scores"), JSON.stringify(snapshot.scores, null, 2), "utf8")
-      .catch((e) =>
-        console.warn("persistent-storage: write scores.json failed:", e?.message)
-      ),
-  ]);
-}
-
-function scheduleFlush(): void {
-  if (!isNodeRuntime()) return;
-  pendingWrite = true;
-  if (writeTimer) return;
-  writeTimer = setTimeout(async () => {
-    writeTimer = null;
-    if (pendingWrite) await flushNow();
-  }, 200);
-}
-
-// Ensure writes hit disk on process exit (Ctrl+C, dev shutdown, etc.)
-function attachExitHandlers(): void {
-  if (!isNodeRuntime()) return;
-  const flush = () => {
-    if (pendingWrite) {
-      // Best-effort sync flush
-      flushNow().catch(() => undefined);
-    }
-  };
-  // Node 18+ exposes beforeExit; older runtimes still get exit.
-  (process as any).once?.("beforeExit", flush);
-  process.once("exit", flush);
-  // SIGINT/SIGTERM are common in dev mode.
-  process.once("SIGINT", () => {
-    flush();
-    process.exit(0);
-  });
-  process.once("SIGTERM", () => {
-    flush();
-    process.exit(0);
+  if (!nb) return fn(EMPTY) as T;
+  return writeQueue.run(async () => {
+    await ensureDir();
+    const [players, player_stats, game_saves, scores] = await Promise.all([
+      readJson<Record<string, PlayerRecord>>("players", {}),
+      readJson<Record<string, PlayerStats>>("player_stats", {}),
+      readJson<Record<string, GameSaveRecord>>("game_saves", {}),
+      readJson<FileShape["scores"]>("scores", []),
+    ]);
+    const data: FileShape = { players, player_stats, game_saves, scores };
+    const result = await fn(data);
+    await Promise.all([
+      nb.fs
+        .writeFile(filePath("players"), JSON.stringify(data.players, null, 2), "utf8")
+        .catch((e) => console.warn("persistent-storage: write players.json failed:", e?.message)),
+      nb.fs
+        .writeFile(filePath("player_stats"), JSON.stringify(data.player_stats, null, 2), "utf8")
+        .catch((e) =>
+          console.warn("persistent-storage: write player_stats.json failed:", e?.message)
+        ),
+      nb.fs
+        .writeFile(filePath("game_saves"), JSON.stringify(data.game_saves, null, 2), "utf8")
+        .catch((e) =>
+          console.warn("persistent-storage: write game_saves.json failed:", e?.message)
+        ),
+      nb.fs
+        .writeFile(filePath("scores"), JSON.stringify(data.scores, null, 2), "utf8")
+        .catch((e) => console.warn("persistent-storage: write scores.json failed:", e?.message)),
+    ]);
+    return result;
   });
 }
 
@@ -270,9 +263,9 @@ function findPlayerById(data: FileShape, playerId: string): PlayerRecord | null 
 
 export async function psUpsertPlayer(player: PlayerRecord): Promise<void> {
   if (!isNodeRuntime()) return;
-  const data = await loadAll();
-  data.players[player.username] = player;
-  scheduleFlush();
+  await mutate((data) => {
+    data.players[player.username] = player;
+  });
 }
 
 export async function psListPlayers(): Promise<PlayerRecord[]> {
@@ -291,9 +284,9 @@ export async function psGetStats(playerId: string): Promise<PlayerStats | null> 
 
 export async function psUpsertStats(stats: PlayerStats): Promise<void> {
   if (!isNodeRuntime()) return;
-  const data = await loadAll();
-  data.player_stats[stats.player_id] = stats;
-  scheduleFlush();
+  await mutate((data) => {
+    data.player_stats[stats.player_id] = stats;
+  });
 }
 
 // --- Game Save CRUD ---------------------------------------------------------
@@ -306,16 +299,16 @@ export async function psGetSave(playerId: string): Promise<GameSaveRecord | null
 
 export async function psUpsertSave(save: GameSaveRecord): Promise<void> {
   if (!isNodeRuntime()) return;
-  const data = await loadAll();
-  data.game_saves[save.player_id] = save;
-  scheduleFlush();
+  await mutate((data) => {
+    data.game_saves[save.player_id] = save;
+  });
 }
 
 export async function psDeleteSave(playerId: string): Promise<void> {
   if (!isNodeRuntime()) return;
-  const data = await loadAll();
-  delete data.game_saves[playerId];
-  scheduleFlush();
+  await mutate((data) => {
+    delete data.game_saves[playerId];
+  });
 }
 
 // --- Score CRUD -------------------------------------------------------------
@@ -333,13 +326,13 @@ export interface PersistentScoreEntry {
 
 export async function psAddScore(entry: PersistentScoreEntry): Promise<void> {
   if (!isNodeRuntime()) return;
-  const data = await loadAll();
-  data.scores.push(entry);
-  // Cap to last 5000 to avoid unbounded growth.
-  if (data.scores.length > 5000) {
-    data.scores.splice(0, data.scores.length - 5000);
-  }
-  scheduleFlush();
+  await mutate((data) => {
+    data.scores.push(entry);
+    // Cap to last 5000 to avoid unbounded growth.
+    if (data.scores.length > 5000) {
+      data.scores.splice(0, data.scores.length - 5000);
+    }
+  });
 }
 
 export async function psListScores(): Promise<PersistentScoreEntry[]> {
@@ -350,21 +343,17 @@ export async function psListScores(): Promise<PersistentScoreEntry[]> {
 
 // --- Maintenance ------------------------------------------------------------
 
-/** Force the next access to re-read from disk. Used by tests. */
+/** No-op kept for API compatibility (the store is always disk-fresh now). */
 export function _resetCacheForTests(): void {
-  cache = null;
-  loaded = false;
+  // nothing to reset — every access already re-reads from disk
 }
 
-/** Force pending debounced writes to disk immediately. Used by tests. */
-export function _flushNowForTests(): Promise<void> {
-  return flushNow();
+/** No-op kept for API compatibility (writes are immediate, not debounced). */
+export async function _flushNowForTests(): Promise<void> {
+  // nothing to flush — writes already went through synchronously
 }
 
 /** Returns the directory used for the JSON files. */
 export function _dataDir(): string {
   return getDataDir();
 }
-
-// Attach best-effort exit handlers the first time this module is loaded.
-attachExitHandlers();

@@ -13,16 +13,26 @@
 // from `db.ts` and lives in `src/server/persistent-storage.ts` so the
 // Cloudflare Pages Edge bundler never sees it.
 
+// Cloudflare's request context symbol, kept in sync with the one used by
+// `@cloudflare/next-on-pages` (`dist/api/getRequestContext.ts`). Reading the
+// binding this way works both in the Pages worker (where the main entry sets
+// globalThis[SYMBOL] with { env, ctx, cf } per request) and in the Next.js
+// dev server with `setupDevPlatform()` — without requiring a static import
+// of the next-on-pages package, which would drag `server-only` into the
+// edge bundle.
+const CLOUDFLARE_REQUEST_CONTEXT_SYMBOL =
+  typeof Symbol !== "undefined" && Symbol.for
+    ? Symbol.for("__cloudflare-request-context__")
+    : "__cloudflare-request-context__";
+
 export function getD1Database(): D1Database | null {
   try {
-    // Guarded require so Edge bundlers don't trip on the dynamic import.
-    const req = (eval("require") as NodeRequire | undefined);
-    if (!req) return null;
-    const { getRequestContext } = req("@cloudflare/next-on-pages") as {
-      getRequestContext?: () => { env?: { DB?: D1Database } };
-    };
-    const ctx = getRequestContext?.();
-    return (ctx?.env as any)?.DB ?? null;
+    const g = globalThis as Record<PropertyKey, unknown>;
+    const holder = g[CLOUDFLARE_REQUEST_CONTEXT_SYMBOL] as
+      | { env?: Record<string, unknown> }
+      | undefined;
+    const db = holder?.env?.DB;
+    return (db as D1Database | undefined) ?? null;
   } catch {
     return null;
   }
