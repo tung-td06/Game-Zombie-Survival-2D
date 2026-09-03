@@ -5,6 +5,8 @@ import {
   createSessionToken,
   verifySessionToken,
   validateScoreInput,
+  createPlayer,
+  getPlayerByUsername,
 } from "../src/lib/db";
 
 describe("Cloudflare D1 Security & Anti-Cheat Utilities", () => {
@@ -66,5 +68,24 @@ describe("Cloudflare D1 Security & Anti-Cheat Utilities", () => {
     expect(
       validateScoreInput({ ...validRun, wave: 300 }).valid
     ).toBe(false);
+  });
+
+  it("registers account and retrieves player with fallback DB", async () => {
+    const username = "NewPlayerTest";
+    const password = "Password123!";
+    const displayName = "Pro Survivor";
+
+    const hash = await hashPassword(password);
+    const player = await createPlayer(null, username, hash, displayName);
+    expect(player.id).toBeDefined();
+    expect(player.username).toBe("newplayertest");
+    expect(player.display_name).toBe(displayName);
+
+    const fetched = await getPlayerByUsername(null, "NewPlayerTest");
+    expect(fetched).not.toBeNull();
+    expect(fetched?.id).toBe(player.id);
+
+    const passwordValid = await verifyPassword(password, fetched!.password_hash);
+    expect(passwordValid).toBe(true);
   });
 });

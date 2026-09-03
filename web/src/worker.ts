@@ -61,21 +61,34 @@ const worker = {
       if (path === "/api/player/register" && method === "POST") {
         const body = (await request.json()) as any;
         const { username, password, display_name } = body;
-        if (!username || !password || username.length < 3 || password.length < 6) {
+        if (!username || typeof username !== "string" || username.trim().length < 3) {
           return Response.json(
-            { success: false, error: "Invalid registration input" },
+            { success: false, error: "Tên đăng nhập phải có ít nhất 3 ký tự" },
             { status: 400, headers: corsHeaders }
           );
         }
-        const existing = await getPlayerByUsername(env.DB, username);
+        if (!password || typeof password !== "string" || password.length < 6) {
+          return Response.json(
+            { success: false, error: "Mật khẩu phải có ít nhất 6 ký tự" },
+            { status: 400, headers: corsHeaders }
+          );
+        }
+        const cleanUsername = username.trim().toLowerCase();
+        if (!/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+          return Response.json(
+            { success: false, error: "Tên đăng nhập chỉ được chứa chữ cái, số và dấu gạch dưới" },
+            { status: 400, headers: corsHeaders }
+          );
+        }
+        const existing = await getPlayerByUsername(env.DB, cleanUsername);
         if (existing) {
           return Response.json(
-            { success: false, error: "Username already exists" },
+            { success: false, error: "Tên người chơi đã tồn tại" },
             { status: 409, headers: corsHeaders }
           );
         }
         const passwordHash = await hashPassword(password);
-        const player = await createPlayer(env.DB, username, passwordHash, display_name);
+        const player = await createPlayer(env.DB, cleanUsername, passwordHash, display_name);
         const newToken = await createSessionToken(player.id, player.username);
         return new Response(
           JSON.stringify({

@@ -69,8 +69,12 @@ export interface SubmitScoreInput {
 // Security: Web Crypto Password Hashing (PBKDF2)
 // ---------------------------------------------------------------------------
 
-function bufferToHex(buf: ArrayBuffer): string {
-  return Array.from(new Uint8Array(buf))
+function bufferToHex(buf: ArrayBuffer | Uint8Array): string {
+  const arr =
+    buf instanceof Uint8Array
+      ? new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
+      : new Uint8Array(buf);
+  return Array.from(arr)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
@@ -103,7 +107,7 @@ export async function hashPassword(password: string): Promise<string> {
     keyMaterial,
     256
   );
-  return `$pbkdf2$${bufferToHex(salt.buffer)}$${bufferToHex(derivedKey)}`;
+  return `$pbkdf2$${bufferToHex(salt)}$${bufferToHex(derivedKey)}`;
 }
 
 export async function verifyPassword(
@@ -209,11 +213,30 @@ export async function verifySessionToken(
 }
 
 // ---------------------------------------------------------------------------
+// In-Memory Fallback Storage (for local dev / missing D1 binding)
+// ---------------------------------------------------------------------------
+
+const memoryPlayers = new Map<string, PlayerRecord>(); // clean username -> record
+const memoryPlayersById = new Map<string, PlayerRecord>(); // id -> record
+const memoryStats = new Map<string, PlayerStats>(); // playerId -> stats
+const memorySaves = new Map<string, GameSaveRecord>(); // playerId -> save
+const memoryScores: Array<{
+  id: string;
+  player_id: string;
+  username: string;
+  score: number;
+  wave: number;
+  zombies_killed: number;
+  survival_time: number;
+  created_at: number;
+}> = [];
+
+// ---------------------------------------------------------------------------
 // Compatibility profile helpers
 // ---------------------------------------------------------------------------
 
 export async function getProfile(
-  db: D1Database,
+  db: D1Database | null | undefined,
   username: string
 ): Promise<any> {
   const player = await getPlayerByUsername(db, username);
@@ -227,7 +250,7 @@ export async function getProfile(
 }
 
 export async function saveProfile(
-  db: D1Database,
+  db: D1Database | null | undefined,
   username: string,
   _profileData: any
 ): Promise<void> {
@@ -243,7 +266,7 @@ export async function saveProfile(
 // ---------------------------------------------------------------------------
 
 export async function createPlayer(
-  db: D1Database,
+  db: D1Database | null | undefined,
   username: string,
   passwordHash: string,
   displayName?: string
@@ -253,24 +276,7 @@ export async function createPlayer(
   const now = Date.now();
   const dispName = displayName?.trim() || cleanUsername;
 
-  await db
-    .prepare(
-      `INSERT INTO players (id, username, display_name, password_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .bind(id, cleanUsername, dispName, passwordHash, now, now)
-    .run();
-
-  // Initialize player_stats
-  await db
-    .prepare(
-      `INSERT INTO player_stats (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
-       VALUES (?, 0, 0, 0, 0, 0, ?)`
-    )
-    .bind(id, now)
-    .run();
-
-  return {
+  const playerRecord: PlayerRecord = {
     id,
     username: cleanUsername,
     display_name: dispName,
@@ -278,47 +284,107 @@ export async function createPlayer(
     created_at: now,
     updated_at: now,
   };
+
+  memoryPlayers.set(cleanUsername, playerRecord);
+  memoryPlayersById.set(id, playerRecord);
+  memoryStats.set(id, {
+    player_id: id,
+    total_games: 0,
+    best_score: 0,
+    best_wave: 0,
+    total_zombies_killed: 0,
+    best_survival_time: 0,
+    updated_at: now,
+  });
+
+  if (db) {
+    try {
+      await db
+        .prepare(
+          `INSERT INTO players (id, username, display_name, password_hash, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(id, cleanUsername, dispName, passwordHash, now, now)
+        .run();
+
+      await db
+        .prepare(
+          `INSERT INTO player_stats (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
+           VALUES (?, 0, 0, 0, 0, 0, ?)`
+        )
+        .bind(id, now)
+        .run();
+    } catch (err) {
+      console.warn("D1 createPlayer write warning:", err);
+    }
+  }
+
+  return playerRecord;
 }
 
 export async function getPlayerByUsername(
-  db: D1Database,
+  db: D1Database | null | undefined,
   username: string
 ): Promise<PlayerRecord | null> {
   const clean = username.trim().toLowerCase();
-  const row = await db
-    .prepare("SELECT * FROM players WHERE username = ?")
-    .bind(clean)
-    .first<Record<string, any>>();
+  if (db) {
+    try {
+      const row = await db
+        .prepare("SELECT * FROM players WHERE username = ?")
+        .bind(clean)
+        .first<Record<string, any>>();
 
-  if (!row) return null;
-  return {
-    id: row.id as string,
-    username: row.username as string,
-    display_name: (row.display_name as string) || (row.username as string),
-    password_hash: row.password_hash as string,
-    created_at: row.created_at as number,
-    updated_at: row.updated_at as number,
-  };
+      if (row) {
+        const player: PlayerRecord = {
+          id: row.id as string,
+          username: row.username as string,
+          display_name: (row.display_name as string) || (row.username as string),
+          password_hash: row.password_hash as string,
+          created_at: row.created_at as number,
+          updated_at: row.updated_at as number,
+        };
+        memoryPlayers.set(clean, player);
+        memoryPlayersById.set(player.id, player);
+        return player;
+      }
+    } catch (err) {
+      console.warn("D1 getPlayerByUsername read error:", err);
+    }
+  }
+
+  return memoryPlayers.get(clean) || null;
 }
 
 export async function getPlayerById(
-  db: D1Database,
+  db: D1Database | null | undefined,
   playerId: string
 ): Promise<PlayerRecord | null> {
-  const row = await db
-    .prepare("SELECT * FROM players WHERE id = ?")
-    .bind(playerId)
-    .first<Record<string, any>>();
+  if (db) {
+    try {
+      const row = await db
+        .prepare("SELECT * FROM players WHERE id = ?")
+        .bind(playerId)
+        .first<Record<string, any>>();
 
-  if (!row) return null;
-  return {
-    id: row.id as string,
-    username: row.username as string,
-    display_name: (row.display_name as string) || (row.username as string),
-    password_hash: row.password_hash as string,
-    created_at: row.created_at as number,
-    updated_at: row.updated_at as number,
-  };
+      if (row) {
+        const player: PlayerRecord = {
+          id: row.id as string,
+          username: row.username as string,
+          display_name: (row.display_name as string) || (row.username as string),
+          password_hash: row.password_hash as string,
+          created_at: row.created_at as number,
+          updated_at: row.updated_at as number,
+        };
+        memoryPlayers.set(player.username, player);
+        memoryPlayersById.set(playerId, player);
+        return player;
+      }
+    } catch (err) {
+      console.warn("D1 getPlayerById read error:", err);
+    }
+  }
+
+  return memoryPlayersById.get(playerId) || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,97 +429,182 @@ export function validateScoreInput(input: SubmitScoreInput): { valid: boolean; e
 }
 
 export async function submitScore(
-  db: D1Database,
+  db: D1Database | null | undefined,
   playerId: string,
   input: SubmitScoreInput
 ): Promise<void> {
   const scoreId = crypto.randomUUID();
   const now = Date.now();
 
-  const insertScoreStmt = db
-    .prepare(
-      `INSERT INTO game_scores
-       (id, player_id, score, wave, zombies_killed, survival_time, shots_fired, shots_hit, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      scoreId,
-      playerId,
-      input.score,
-      input.wave,
-      input.zombies_killed,
-      input.survival_time,
-      input.shots_fired,
-      input.shots_hit,
-      now
-    );
+  const player = await getPlayerById(db, playerId);
+  const username = player?.display_name || player?.username || "Survivor";
 
-  const updateStatsStmt = db
-    .prepare(
-      `INSERT INTO player_stats
-       (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
-       VALUES (?, 1, ?, ?, ?, ?, ?)
-       ON CONFLICT(player_id) DO UPDATE SET
-         total_games          = total_games + 1,
-         best_score           = MAX(best_score, excluded.best_score),
-         best_wave            = MAX(best_wave, excluded.best_wave),
-         total_zombies_killed = total_zombies_killed + excluded.total_zombies_killed,
-         best_survival_time   = MAX(best_survival_time, excluded.best_survival_time),
-         updated_at           = excluded.updated_at`
-    )
-    .bind(
-      playerId,
-      input.score,
-      input.wave,
-      input.zombies_killed,
-      input.survival_time,
-      now
-    );
+  memoryScores.push({
+    id: scoreId,
+    player_id: playerId,
+    username,
+    score: input.score,
+    wave: input.wave,
+    zombies_killed: input.zombies_killed,
+    survival_time: input.survival_time,
+    created_at: now,
+  });
 
-  await db.batch([insertScoreStmt, updateStatsStmt]);
+  const prevStats = memoryStats.get(playerId) || {
+    player_id: playerId,
+    total_games: 0,
+    best_score: 0,
+    best_wave: 0,
+    total_zombies_killed: 0,
+    best_survival_time: 0,
+    updated_at: now,
+  };
+
+  memoryStats.set(playerId, {
+    player_id: playerId,
+    total_games: prevStats.total_games + 1,
+    best_score: Math.max(prevStats.best_score, input.score),
+    best_wave: Math.max(prevStats.best_wave, input.wave),
+    total_zombies_killed: prevStats.total_zombies_killed + input.zombies_killed,
+    best_survival_time: Math.max(prevStats.best_survival_time, input.survival_time),
+    updated_at: now,
+  });
+
+  if (db) {
+    try {
+      const insertScoreStmt = db
+        .prepare(
+          `INSERT INTO game_scores
+           (id, player_id, score, wave, zombies_killed, survival_time, shots_fired, shots_hit, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          scoreId,
+          playerId,
+          input.score,
+          input.wave,
+          input.zombies_killed,
+          input.survival_time,
+          input.shots_fired,
+          input.shots_hit,
+          now
+        );
+
+      const updateStatsStmt = db
+        .prepare(
+          `INSERT INTO player_stats
+           (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
+           VALUES (?, 1, ?, ?, ?, ?, ?)
+           ON CONFLICT(player_id) DO UPDATE SET
+             total_games          = total_games + 1,
+             best_score           = MAX(best_score, excluded.best_score),
+             best_wave            = MAX(best_wave, excluded.best_wave),
+             total_zombies_killed = total_zombies_killed + excluded.total_zombies_killed,
+             best_survival_time   = MAX(best_survival_time, excluded.best_survival_time),
+             updated_at           = excluded.updated_at`
+        )
+        .bind(
+          playerId,
+          input.score,
+          input.wave,
+          input.zombies_killed,
+          input.survival_time,
+          now
+        );
+
+      await db.batch([insertScoreStmt, updateStatsStmt]);
+    } catch (err) {
+      console.warn("D1 submitScore error:", err);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
 // D1 Database Operations: Leaderboard & Stats
 // ---------------------------------------------------------------------------
 
-export async function getLeaderboardTop100(db: D1Database): Promise<LeaderboardEntry[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT
-         gs.score,
-         gs.wave,
-         gs.zombies_killed,
-         gs.survival_time,
-         COALESCE(p.display_name, p.username) AS username
-       FROM game_scores gs
-       JOIN players p ON p.id = gs.player_id
-       ORDER BY gs.score DESC, gs.wave DESC, gs.survival_time DESC
-       LIMIT 100`
-    )
-    .all<Record<string, any>>();
+export async function getLeaderboardTop100(
+  db: D1Database | null | undefined
+): Promise<LeaderboardEntry[]> {
+  if (db) {
+    try {
+      const { results } = await db
+        .prepare(
+          `SELECT
+             gs.score,
+             gs.wave,
+             gs.zombies_killed,
+             gs.survival_time,
+             COALESCE(p.display_name, p.username) AS username
+           FROM game_scores gs
+           JOIN players p ON p.id = gs.player_id
+           ORDER BY gs.score DESC, gs.wave DESC, gs.survival_time DESC
+           LIMIT 100`
+        )
+        .all<Record<string, any>>();
 
-  return (results || []).map((row, idx) => ({
+      if (results && results.length > 0) {
+        return results.map((row, idx) => ({
+          rank: idx + 1,
+          username: (row.username as string) || "Survivor",
+          score: (row.score as number) || 0,
+          wave: (row.wave as number) || 0,
+          zombies_killed: (row.zombies_killed as number) || 0,
+          survival_time: (row.survival_time as number) || 0,
+        }));
+      }
+    } catch (err) {
+      console.warn("D1 getLeaderboardTop100 error:", err);
+    }
+  }
+
+  const sorted = [...memoryScores].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.wave !== a.wave) return b.wave - a.wave;
+    return b.survival_time - a.survival_time;
+  });
+
+  return sorted.slice(0, 100).map((item, idx) => ({
     rank: idx + 1,
-    username: (row.username as string) || "Survivor",
-    score: (row.score as number) || 0,
-    wave: (row.wave as number) || 0,
-    zombies_killed: (row.zombies_killed as number) || 0,
-    survival_time: (row.survival_time as number) || 0,
+    username: item.username,
+    score: item.score,
+    wave: item.wave,
+    zombies_killed: item.zombies_killed,
+    survival_time: item.survival_time,
   }));
 }
 
 export async function getPlayerStats(
-  db: D1Database,
+  db: D1Database | null | undefined,
   playerId: string
 ): Promise<PlayerStats | null> {
-  const row = await db
-    .prepare("SELECT * FROM player_stats WHERE player_id = ?")
-    .bind(playerId)
-    .first<Record<string, any>>();
+  if (db) {
+    try {
+      const row = await db
+        .prepare("SELECT * FROM player_stats WHERE player_id = ?")
+        .bind(playerId)
+        .first<Record<string, any>>();
 
-  if (!row) {
-    return {
+      if (row) {
+        const stats: PlayerStats = {
+          player_id: row.player_id as string,
+          total_games: row.total_games as number,
+          best_score: row.best_score as number,
+          best_wave: row.best_wave as number,
+          total_zombies_killed: row.total_zombies_killed as number,
+          best_survival_time: row.best_survival_time as number,
+          updated_at: row.updated_at as number,
+        };
+        memoryStats.set(playerId, stats);
+        return stats;
+      }
+    } catch (err) {
+      console.warn("D1 getPlayerStats error:", err);
+    }
+  }
+
+  return (
+    memoryStats.get(playerId) || {
       player_id: playerId,
       total_games: 0,
       best_score: 0,
@@ -461,18 +612,8 @@ export async function getPlayerStats(
       total_zombies_killed: 0,
       best_survival_time: 0,
       updated_at: Date.now(),
-    };
-  }
-
-  return {
-    player_id: row.player_id as string,
-    total_games: row.total_games as number,
-    best_score: row.best_score as number,
-    best_wave: row.best_wave as number,
-    total_zombies_killed: row.total_zombies_killed as number,
-    best_survival_time: row.best_survival_time as number,
-    updated_at: row.updated_at as number,
-  };
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -480,85 +621,125 @@ export async function getPlayerStats(
 // ---------------------------------------------------------------------------
 
 export async function getGameSave(
-  db: D1Database,
+  db: D1Database | null | undefined,
   playerId: string
 ): Promise<GameSaveRecord | null> {
-  const row = await db
-    .prepare("SELECT * FROM game_saves WHERE player_id = ?")
-    .bind(playerId)
-    .first<Record<string, any>>();
+  if (db) {
+    try {
+      const row = await db
+        .prepare("SELECT * FROM game_saves WHERE player_id = ?")
+        .bind(playerId)
+        .first<Record<string, any>>();
 
-  if (!row) return null;
+      if (row) {
+        const saveRec: GameSaveRecord = {
+          player_id: row.player_id as string,
+          save_version: row.save_version as number,
+          level: row.level as number,
+          wave: row.wave as number,
+          score: row.score as number,
+          money: row.money as number,
+          player_data: JSON.parse(row.player_data as string),
+          weapon_data: row.weapon_data ? JSON.parse(row.weapon_data as string) : null,
+          inventory_data: JSON.parse(row.inventory_data as string),
+          progression_data: JSON.parse(row.progression_data as string),
+          world_data: JSON.parse(row.world_data as string),
+          created_at: row.created_at as number,
+          updated_at: row.updated_at as number,
+        };
+        memorySaves.set(playerId, saveRec);
+        return saveRec;
+      }
+    } catch (err) {
+      console.warn("D1 getGameSave error:", err);
+    }
+  }
 
-  return {
-    player_id: row.player_id as string,
-    save_version: row.save_version as number,
-    level: row.level as number,
-    wave: row.wave as number,
-    score: row.score as number,
-    money: row.money as number,
-    player_data: JSON.parse(row.player_data as string),
-    weapon_data: row.weapon_data ? JSON.parse(row.weapon_data as string) : null,
-    inventory_data: JSON.parse(row.inventory_data as string),
-    progression_data: JSON.parse(row.progression_data as string),
-    world_data: JSON.parse(row.world_data as string),
-    created_at: row.created_at as number,
-    updated_at: row.updated_at as number,
-  };
+  return memorySaves.get(playerId) || null;
 }
 
 export async function saveGameSave(
-  db: D1Database,
+  db: D1Database | null | undefined,
   playerId: string,
   savePayload: any
 ): Promise<void> {
   const now = Date.now();
-  const existingSave = await getGameSave(db, playerId);
+  const existingSave = memorySaves.get(playerId);
   const createdAt = existingSave ? existingSave.created_at : now;
 
-  await db
-    .prepare(
-      `INSERT INTO game_saves
-         (player_id, save_version, level, wave, score, money,
-          player_data, weapon_data, inventory_data, progression_data, world_data, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(player_id) DO UPDATE SET
-         save_version     = excluded.save_version,
-         level            = excluded.level,
-         wave             = excluded.wave,
-         score            = excluded.score,
-         money            = excluded.money,
-         player_data      = excluded.player_data,
-         weapon_data      = excluded.weapon_data,
-         inventory_data   = excluded.inventory_data,
-         progression_data = excluded.progression_data,
-         world_data       = excluded.world_data,
-         updated_at       = excluded.updated_at`
-    )
-    .bind(
-      playerId,
-      savePayload.save_version || 1,
-      savePayload.level || 1,
-      savePayload.wave || 1,
-      savePayload.score || 0,
-      savePayload.money || 0,
-      JSON.stringify(savePayload.player || {}),
-      savePayload.weapons ? JSON.stringify(savePayload.weapons) : null,
-      JSON.stringify(savePayload.inventory || {}),
-      JSON.stringify(savePayload.progression || {}),
-      JSON.stringify(savePayload.world || {}),
-      createdAt,
-      now
-    )
-    .run();
+  const saveRec: GameSaveRecord = {
+    player_id: playerId,
+    save_version: savePayload.save_version || 1,
+    level: savePayload.level || 1,
+    wave: savePayload.wave || 1,
+    score: savePayload.score || 0,
+    money: savePayload.money || 0,
+    player_data: savePayload.player || {},
+    weapon_data: savePayload.weapons || null,
+    inventory_data: savePayload.inventory || {},
+    progression_data: savePayload.progression || {},
+    world_data: savePayload.world || {},
+    created_at: createdAt,
+    updated_at: now,
+  };
+  memorySaves.set(playerId, saveRec);
+
+  if (db) {
+    try {
+      await db
+        .prepare(
+          `INSERT INTO game_saves
+             (player_id, save_version, level, wave, score, money,
+              player_data, weapon_data, inventory_data, progression_data, world_data, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(player_id) DO UPDATE SET
+             save_version     = excluded.save_version,
+             level            = excluded.level,
+             wave             = excluded.wave,
+             score            = excluded.score,
+             money            = excluded.money,
+             player_data      = excluded.player_data,
+             weapon_data      = excluded.weapon_data,
+             inventory_data   = excluded.inventory_data,
+             progression_data = excluded.progression_data,
+             world_data       = excluded.world_data,
+             updated_at       = excluded.updated_at`
+        )
+        .bind(
+          playerId,
+          saveRec.save_version,
+          saveRec.level,
+          saveRec.wave,
+          saveRec.score,
+          saveRec.money,
+          JSON.stringify(saveRec.player_data),
+          saveRec.weapon_data ? JSON.stringify(saveRec.weapon_data) : null,
+          JSON.stringify(saveRec.inventory_data),
+          JSON.stringify(saveRec.progression_data),
+          JSON.stringify(saveRec.world_data),
+          createdAt,
+          now
+        )
+        .run();
+    } catch (err) {
+      console.warn("D1 saveGameSave error:", err);
+    }
+  }
 }
 
 export async function deleteGameSave(
-  db: D1Database,
+  db: D1Database | null | undefined,
   playerId: string
 ): Promise<void> {
-  await db
-    .prepare("DELETE FROM game_saves WHERE player_id = ?")
-    .bind(playerId)
-    .run();
+  memorySaves.delete(playerId);
+  if (db) {
+    try {
+      await db
+        .prepare("DELETE FROM game_saves WHERE player_id = ?")
+        .bind(playerId)
+        .run();
+    } catch (err) {
+      console.warn("D1 deleteGameSave error:", err);
+    }
+  }
 }

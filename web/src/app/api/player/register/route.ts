@@ -40,13 +40,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const isProd = process.env.NODE_ENV === "production";
     const db = getD1Database();
-    if (!db) {
-      return NextResponse.json(
-        { success: false, error: "Database unavailable" },
-        { status: 500 }
-      );
-    }
 
     const existing = await getPlayerByUsername(db, cleanUsername);
     if (existing) {
@@ -71,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     res.cookies.set("zs_session", token, {
       httpOnly: true,
-      secure: true,
+      secure: isProd,
       sameSite: "lax",
       path: "/",
       maxAge: 30 * 24 * 60 * 60,
@@ -79,7 +74,7 @@ export async function POST(req: NextRequest) {
     // Set session_user for backwards compatibility if needed
     res.cookies.set("session_user", player.username, {
       httpOnly: true,
-      secure: true,
+      secure: isProd,
       sameSite: "lax",
       path: "/",
       maxAge: 30 * 24 * 60 * 60,
