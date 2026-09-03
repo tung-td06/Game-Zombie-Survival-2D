@@ -1,10 +1,6 @@
-import dynamic from "next/dynamic";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-
-const GameCanvas = dynamic(() => import("@/components/GameCanvas"), {
-  ssr: false,
-});
+import GameCanvas from "@/components/GameCanvas";
 
 interface PlayPageProps {
   searchParams: Promise<{

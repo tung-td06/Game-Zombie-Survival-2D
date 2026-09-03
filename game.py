@@ -315,9 +315,6 @@ class Game:
             self.menus.set_profile(self.save.high_score,
                                    self.save.total_kills)
             self.state = MENU
-        elif action == "settings":
-            self.return_state = prev
-            self.state = SETTINGS
         elif action == "back":
             self.state = self.return_state
         elif action == "shop":

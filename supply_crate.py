@@ -110,9 +110,9 @@ class SupplyCrate:
         if kind == "ammo":
             # Fill reserve for every weapon the player owns; primary weapon
             # gets the bulk. The existing ``Weapon.add_reserve`` is reused.
+            other_count = max(1, len(p.weapons.weapons) - 1)
             primary_share = int(amt * 0.6)
-            per_other = max(1, (amt - primary_share)
-                            // max(1, len(p.weapons.weapons) - 1))
+            per_other = max(1, (amt - primary_share) // other_count)
             primary = p.weapons.current
             primary.add_reserve(primary_share)
             for wid, w in p.weapons.weapons.items():

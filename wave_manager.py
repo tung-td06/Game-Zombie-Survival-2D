@@ -114,7 +114,10 @@ class WaveManager:
         self.spawn_timer -= dt * night_mult
 
         alive_ok = len(game.zombies) < S.MAX_ALIVE_ZOMBIES
-        while self.spawn_timer <= 0 and self.to_spawn > 0 and alive_ok:
+        spawn_attempts = 0
+        while self.spawn_timer <= 0 and self.to_spawn > 0 \
+                and alive_ok and spawn_attempts < 20:
+            spawn_attempts += 1
             kind = game.spawner.pick_type(self.wave, self.modifier)
             pos = game.spawner.spawn_position(game.player.pos, game.map)
             if pos is not None:

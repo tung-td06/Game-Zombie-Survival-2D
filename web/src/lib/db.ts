@@ -1,5 +1,5 @@
-import fs from "fs";
-import path from "path";
+// src/lib/db.ts
+// Cloudflare D1 database layer — replaces the old fs-based JSON db
 
 export interface LeaderboardEntry {
   username: string;
@@ -9,9 +9,6 @@ export interface LeaderboardEntry {
   level: number;
   date: string;
 }
-
-const DB_DIR = path.join(process.cwd(), "..", "data");
-const DB_FILE = path.join(DB_DIR, "db.json");
 
 export interface GameSave {
   username: string;
@@ -29,136 +26,216 @@ export interface GameSave {
   updated_at: string;
 }
 
-interface DbSchema {
-  profiles: Record<string, any>;
-  leaderboard: LeaderboardEntry[];
-  saves: Record<string, GameSave>;
+export interface ProfileData {
+  high_score: number;
+  total_kills: number;
+  coins: number;
+  player_level: number;
+  xp: number;
+  unlocked_weapons: string[];
+  weapon_upgrades: Record<string, any>;
+  player_upgrades: Record<string, any>;
+  achievements: string[];
+  quests_claimed: string[];
+  settings: Record<string, any>;
 }
 
-const DEFAULT_DB: DbSchema = {
-  profiles: {},
-  leaderboard: [],
-  saves: {},
-};
+// ---------------------------------------------------------------------------
+// Profile operations
+// ---------------------------------------------------------------------------
 
-// Ensure database directory and file exist
-function initDb(): DbSchema {
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify(DEFAULT_DB, null, 2), "utf8");
-    return DEFAULT_DB;
-  }
-  try {
-    const raw = fs.readFileSync(DB_FILE, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed.saves) {
-      parsed.saves = {};
-    }
-    
-    // Clean up any remaining mock data to ensure ONLY real data is displayed
-    let changed = false;
-    const mockNames = ["alice_99", "doomslayer", "leon_s_k", "zombiehunter", "survivor_01"];
-    if (parsed.profiles) {
-      for (const key of Object.keys(parsed.profiles)) {
-        if (mockNames.includes(key.toLowerCase())) {
-          delete parsed.profiles[key];
-          changed = true;
-        }
-      }
-    }
-    if (parsed.leaderboard) {
-      const origLen = parsed.leaderboard.length;
-      parsed.leaderboard = parsed.leaderboard.filter(
-        (e: any) => !mockNames.includes(e.username.toLowerCase())
-      );
-      if (parsed.leaderboard.length !== origLen) {
-        changed = true;
-      }
-    }
-    
-    if (changed) {
-      writeDb(parsed);
-    }
-    return parsed;
-  } catch (err) {
-    console.error("Failed to read database, resetting to default:", err);
-    return DEFAULT_DB;
-  }
+export async function getProfile(
+  db: D1Database,
+  username: string
+): Promise<ProfileData | null> {
+  const row = await db
+    .prepare("SELECT * FROM profiles WHERE username = ?")
+    .bind(username.toLowerCase())
+    .first<Record<string, any>>();
+
+  if (!row) return null;
+
+  return {
+    high_score: row.high_score as number,
+    total_kills: row.total_kills as number,
+    coins: row.coins as number,
+    player_level: row.player_level as number,
+    xp: row.xp as number,
+    unlocked_weapons: JSON.parse(row.unlocked_weapons as string),
+    weapon_upgrades: JSON.parse(row.weapon_upgrades as string),
+    player_upgrades: JSON.parse(row.player_upgrades as string),
+    achievements: JSON.parse(row.achievements as string),
+    quests_claimed: JSON.parse(row.quests_claimed as string),
+    settings: JSON.parse(row.settings as string),
+  };
 }
 
-function writeDb(data: DbSchema) {
-  try {
-    if (!fs.existsSync(DB_DIR)) {
-      fs.mkdirSync(DB_DIR, { recursive: true });
-    }
-    fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), "utf8");
-  } catch (err) {
-    console.error("Failed to write database:", err);
-  }
+export async function saveProfile(
+  db: D1Database,
+  username: string,
+  profileData: ProfileData
+): Promise<void> {
+  const key = username.toLowerCase();
+  await db
+    .prepare(
+      `INSERT INTO profiles
+         (username, high_score, total_kills, coins, player_level, xp,
+          unlocked_weapons, weapon_upgrades, player_upgrades,
+          achievements, quests_claimed, settings)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(username) DO UPDATE SET
+         high_score       = excluded.high_score,
+         total_kills      = excluded.total_kills,
+         coins            = excluded.coins,
+         player_level     = excluded.player_level,
+         xp               = excluded.xp,
+         unlocked_weapons = excluded.unlocked_weapons,
+         weapon_upgrades  = excluded.weapon_upgrades,
+         player_upgrades  = excluded.player_upgrades,
+         achievements     = excluded.achievements,
+         quests_claimed   = excluded.quests_claimed,
+         settings         = excluded.settings`
+    )
+    .bind(
+      key,
+      profileData.high_score ?? 0,
+      profileData.total_kills ?? 0,
+      profileData.coins ?? 0,
+      profileData.player_level ?? 1,
+      profileData.xp ?? 0,
+      JSON.stringify(profileData.unlocked_weapons ?? ["pistol"]),
+      JSON.stringify(profileData.weapon_upgrades ?? {}),
+      JSON.stringify(profileData.player_upgrades ?? {}),
+      JSON.stringify(profileData.achievements ?? []),
+      JSON.stringify(profileData.quests_claimed ?? []),
+      JSON.stringify(profileData.settings ?? {})
+    )
+    .run();
 }
 
-export function getProfile(username: string): any | null {
-  const db = initDb();
-  return db.profiles[username.toLowerCase()] || null;
+// ---------------------------------------------------------------------------
+// Leaderboard operations
+// ---------------------------------------------------------------------------
+
+export async function getLeaderboard(
+  db: D1Database
+): Promise<LeaderboardEntry[]> {
+  const { results } = await db
+    .prepare(
+      "SELECT username, score, kills, wave, level, date FROM leaderboard ORDER BY score DESC LIMIT 20"
+    )
+    .all<LeaderboardEntry>();
+  return results;
 }
 
-export function saveProfile(username: string, profileData: any): void {
-  const db = initDb();
-  db.profiles[username.toLowerCase()] = profileData;
-  writeDb(db);
+export async function addLeaderboardEntry(
+  db: D1Database,
+  entry: LeaderboardEntry
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO leaderboard (username, score, kills, wave, level, date)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(username) DO UPDATE SET
+         score = CASE WHEN excluded.score > leaderboard.score THEN excluded.score ELSE leaderboard.score END,
+         kills = CASE WHEN excluded.score > leaderboard.score THEN excluded.kills ELSE leaderboard.kills END,
+         wave  = CASE WHEN excluded.score > leaderboard.score THEN excluded.wave  ELSE leaderboard.wave  END,
+         level = CASE WHEN excluded.score > leaderboard.score THEN excluded.level ELSE leaderboard.level END,
+         date  = CASE WHEN excluded.score > leaderboard.score THEN excluded.date  ELSE leaderboard.date  END`
+    )
+    .bind(
+      entry.username.toLowerCase(),
+      entry.score,
+      entry.kills,
+      entry.wave,
+      entry.level,
+      entry.date
+    )
+    .run();
 }
 
-export function getLeaderboard(): LeaderboardEntry[] {
-  const db = initDb();
-  // Return sorted by score descending
-  return db.leaderboard.sort((a, b) => b.score - a.score);
+// ---------------------------------------------------------------------------
+// Game save operations
+// ---------------------------------------------------------------------------
+
+export async function getGameSave(
+  db: D1Database,
+  username: string
+): Promise<GameSave | null> {
+  const row = await db
+    .prepare("SELECT * FROM game_saves WHERE username = ?")
+    .bind(username.toLowerCase())
+    .first<Record<string, any>>();
+
+  if (!row) return null;
+
+  return {
+    username: (row.username as string).toLowerCase(),
+    save_version: row.save_version as number,
+    level: row.level as number,
+    wave: row.wave as number,
+    score: row.score as number,
+    money: row.money as number,
+    player_data: JSON.parse(row.player_data as string),
+    weapon_data: row.weapon_data ? JSON.parse(row.weapon_data as string) : null,
+    inventory_data: JSON.parse(row.inventory_data as string),
+    progression_data: JSON.parse(row.progression_data as string),
+    world_data: JSON.parse(row.world_data as string),
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
 }
 
-export function addLeaderboardEntry(entry: LeaderboardEntry): void {
-  const db = initDb();
-  
-  // Clean up entry to prevent duplicates from the same player unless it's a higher score
-  const existingIndex = db.leaderboard.findIndex(
-    (e) => e.username.toLowerCase() === entry.username.toLowerCase()
-  );
-  
-  if (existingIndex !== -1) {
-    if (entry.score > db.leaderboard[existingIndex]!.score) {
-      db.leaderboard[existingIndex] = entry;
-    }
-  } else {
-    db.leaderboard.push(entry);
-  }
-  
-  // Sort and cap to top 20
-  db.leaderboard = db.leaderboard
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 20);
-    
-  writeDb(db);
+export async function saveGameSave(
+  db: D1Database,
+  username: string,
+  save: GameSave
+): Promise<void> {
+  const key = username.toLowerCase();
+  await db
+    .prepare(
+      `INSERT INTO game_saves
+         (username, save_version, level, wave, score, money,
+          player_data, weapon_data, inventory_data, progression_data,
+          world_data, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(username) DO UPDATE SET
+         save_version     = excluded.save_version,
+         level            = excluded.level,
+         wave             = excluded.wave,
+         score            = excluded.score,
+         money            = excluded.money,
+         player_data      = excluded.player_data,
+         weapon_data      = excluded.weapon_data,
+         inventory_data   = excluded.inventory_data,
+         progression_data = excluded.progression_data,
+         world_data       = excluded.world_data,
+         updated_at       = excluded.updated_at`
+    )
+    .bind(
+      key,
+      save.save_version,
+      save.level,
+      save.wave,
+      save.score,
+      save.money,
+      JSON.stringify(save.player_data),
+      save.weapon_data ? JSON.stringify(save.weapon_data) : null,
+      JSON.stringify(save.inventory_data ?? {}),
+      JSON.stringify(save.progression_data ?? {}),
+      JSON.stringify(save.world_data ?? {}),
+      save.created_at,
+      save.updated_at
+    )
+    .run();
 }
 
-export function getGameSave(username: string): GameSave | null {
-  const db = initDb();
-  return db.saves?.[username] || null;
+export async function deleteGameSave(
+  db: D1Database,
+  username: string
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM game_saves WHERE username = ?")
+    .bind(username.toLowerCase())
+    .run();
 }
-
-export function saveGameSave(username: string, save: GameSave): void {
-  const db = initDb();
-  if (!db.saves) {
-    db.saves = {};
-  }
-  db.saves[username] = save;
-  writeDb(db);
-}
-
-export function deleteGameSave(username: string): void {
-  const db = initDb();
-  if (db.saves && db.saves[username]) {
-    delete db.saves[username];
-    writeDb(db);
-  }
-}
-

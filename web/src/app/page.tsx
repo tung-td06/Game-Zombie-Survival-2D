@@ -75,16 +75,22 @@ export default function Home() {
     const savedName = localStorage.getItem("zs.username");
     if (savedName) {
       setUsername(savedName);
-      setIsLoggedIn(true);
-      fetchProfile(savedName);
+      // Await the full profile fetch (including cookie set) before marking
+      // the user as logged-in so the Play button is only enabled once the
+      // session cookie is guaranteed to be in place.
+      fetchProfile(savedName).then(() => {
+        setIsLoggedIn(true);
+      });
     }
     fetchLeaderboard();
   }, []);
 
-  const fetchProfile = async (name: string) => {
+  const fetchProfile = async (name: string): Promise<void> => {
     try {
-      const res = await fetch(`/api/profile?username=${encodeURIComponent(name)}`);
-      const data = await res.json();
+      // GET /api/profile auto-creates a default profile if the user is new
+      // and also sets the session_user cookie in the same response.
+      const res = await fetch(`/api/profile?username=${encodeURIComponent(name.trim())}`);
+      const data = await res.json() as any;
       if (data.profile) {
         localStorage.setItem("zs.save.v1", JSON.stringify(data.profile));
         setStats({
@@ -92,45 +98,24 @@ export default function Home() {
           totalKills: data.profile.total_kills || 0,
           level: data.profile.player_level || 1,
         });
-      } else {
-        const localSave = localStorage.getItem("zs.save.v1");
-        const defaultProfile = localSave
-          ? JSON.parse(localSave)
-          : {
-              high_score: 0,
-              total_kills: 0,
-              coins: 0,
-              player_level: 1,
-              xp: 0,
-              unlocked_weapons: ["pistol"],
-              weapon_upgrades: {},
-              player_upgrades: {},
-              achievements: [],
-              quests_claimed: [],
-              settings: {},
-            };
-        await fetch("/api/profile", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: name, profileData: defaultProfile }),
-        });
-        setStats({
-          highScore: defaultProfile.high_score || 0,
-          totalKills: defaultProfile.total_kills || 0,
-          level: defaultProfile.player_level || 1,
-        });
       }
 
-      // Check if user has a save game
-      const saveRes = await fetch(`/api/game/save?username=${encodeURIComponent(name)}`);
-      const saveData = await saveRes.json();
-      if (saveData.save) {
-        setHasSave(true);
-      } else {
-        setHasSave(false);
-      }
+      // Check if user has a save game. This is a separate request made AFTER
+      // the profile GET has returned, so the session_user cookie is now set
+      // and the /api/game/save endpoint will accept the request (no 401).
+      await checkSave(name.trim());
     } catch (err) {
       console.error("Failed to fetch profile:", err);
+    }
+  };
+
+  const checkSave = async (name: string): Promise<void> => {
+    try {
+      const saveRes = await fetch(`/api/game/save?username=${encodeURIComponent(name.toLowerCase())}`);
+      const saveData = await saveRes.json() as any;
+      setHasSave(!!saveData.save);
+    } catch {
+      setHasSave(false);
     }
   };
 
@@ -138,7 +123,7 @@ export default function Home() {
     setIsRefreshing(true);
     try {
       const res = await fetch("/api/leaderboard");
-      const data = await res.json();
+      const data = await res.json() as any;
       if (data.leaderboard) {
         setLeaderboard(data.leaderboard);
         setLastUpdated(new Date().toLocaleTimeString("vi-VN", { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -150,13 +135,16 @@ export default function Home() {
     }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!username.trim()) return;
-    const cleanName = username.trim();
+    const cleanName = username.trim().toLowerCase();
     localStorage.setItem("zs.username", cleanName);
+    setUsername(cleanName);
+    // Await the full fetchProfile so the session_user cookie is set before
+    // the user can click PLAY (prevents redirect-to-home race condition).
+    await fetchProfile(cleanName);
     setIsLoggedIn(true);
-    fetchProfile(cleanName);
   };
 
   const handleLogout = () => {

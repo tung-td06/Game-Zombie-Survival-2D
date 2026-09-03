@@ -1,6 +1,8 @@
 """Bullets fired by both the player and ranged zombies."""
 from __future__ import annotations
 
+import math
+
 import pygame
 
 import settings as S
@@ -62,8 +64,9 @@ class Bullet:
                         z.take_damage(self.damage, self.crit, game)
                         if self.elem == "fire":
                             game.particles.burn_trail(self.pos,
-                                                      self.vel.angle_to(
-                                                          (1, 0)), 4)
+                                                      math.degrees(
+                                                          math.atan2(self.vel.y,
+                                                                     self.vel.x)), 4)
                         elif self.elem == "plasma":
                             game.particles.explosion(self.pos, big=False)
                             game.shake_camera(2)

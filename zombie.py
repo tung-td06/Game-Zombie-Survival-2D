@@ -173,8 +173,8 @@ class Zombie:
                     d2 = dx * dx + dy * dy
                     md = min_d + other.radius * 0.4
                     if 0.001 < d2 < md * md:
-                        d = d2 ** 0.5
-                        f = (md - d) / d
+                        d = max(0.05, d2 ** 0.5)
+                        f = min(8.0, (md - d) / d)
                         push_x += dx * f
                         push_y += dy * f
         return pygame.Vector2(push_x * 2.0, push_y * 2.0)
