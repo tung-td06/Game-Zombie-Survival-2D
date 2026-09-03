@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "node server.js",
     "dev:cf": "next dev",
-    "build": "next build",
-    "build:cf": "npx @cloudflare/next-on-pages",
+    "build": "next build && npx @cloudflare/next-on-pages",
+    "build:next": "next build",
     "start": "node server.js",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
@@ -30,7 +30,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260831.1",
+    "@cloudflare/workers-types": "^4.20240208.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
