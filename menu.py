@@ -105,15 +105,22 @@ class MenuSystem:
         surface.blit(overlay, (0, 0))
 
     def _draw_pause_frame(self, surface: pygame.Surface, title: str,
-                          subtitle: str = "") -> pygame.Rect:
+                          subtitle: str = "",
+                          panel_h: int | None = None) -> pygame.Rect:
         """Draw the standard pause header + frame. Returns the inner
-        content rect (centered, responsive to screen width)."""
+        content rect (centered, responsive to screen width).
+
+        ``panel_h`` lets callers request a taller card (e.g. the Settings
+        sub-view needs extra room for the full GAMEPLAY + DISPLAY blocks
+        now that FOOTSTEP DUST is in the toggle list).
+        """
         sw, sh = S.SCREEN_WIDTH, S.SCREEN_HEIGHT
         cx = sw / 2
 
         # Outer frame card.
         panel_w = min(640, sw - 80)
-        panel_h = min(560, sh - 120)
+        if panel_h is None:
+            panel_h = min(560, sh - 120)
         panel = pygame.Rect(0, 0, panel_w, panel_h)
         panel.center = (cx, sh / 2)
         psurf = pygame.Surface(panel.size, pygame.SRCALPHA)
@@ -189,7 +196,13 @@ class MenuSystem:
         """Pause-scoped settings (overlay). Reuses the existing audio keys
         and adds gameplay toggles. All values persist to save.json."""
         self._draw_pause_overlay(surface)
-        panel = self._draw_pause_frame(surface, "PAUSED", "// SETTINGS")
+        # Taller card: the GAMEPLAY section now lists 5 toggles
+        # (SCREEN SHAKE, DAMAGE NUMBERS, HIT EFFECTS, FOOTSTEP DUST,
+        # SHOW FPS) plus the DISPLAY block. The default 560px panel
+        # overflows on a 720-tall screen, so request a 680px card so
+        # every row — including FOOTSTEP DUST — sits inside the frame.
+        panel = self._draw_pause_frame(
+            surface, "PAUSED", "// SETTINGS", panel_h=680)
         cx = S.SCREEN_WIDTH / 2
         st = game.save.settings
         buttons: list[Button] = []
