@@ -230,6 +230,7 @@ class MenuSystem:
             ("screen_shake",    "SCREEN SHAKE"),
             ("damage_numbers",  "DAMAGE NUMBERS"),
             ("hit_effects",     "HIT EFFECTS"),
+            ("footstep_dust",   "FOOTSTEP DUST"),
             ("show_fps",        "SHOW FPS"),
         ]
         for key, label in toggles:
@@ -405,6 +406,7 @@ class MenuSystem:
             ("screen_shake",    "SCREEN SHAKE"),
             ("damage_numbers",  "DAMAGE NUMBERS"),
             ("hit_effects",     "HIT EFFECTS"),
+            ("footstep_dust",   "FOOTSTEP DUST"),
         ]
         for key, label in toggles:
             val = bool(st.get(key, False))

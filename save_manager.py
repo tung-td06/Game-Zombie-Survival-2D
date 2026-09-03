@@ -27,6 +27,7 @@ DEFAULT_SAVE: dict[str, Any] = {
         "screen_shake": True,
         "damage_numbers": True,
         "hit_effects": True,
+        "footstep_dust": False,
     },
 }
 

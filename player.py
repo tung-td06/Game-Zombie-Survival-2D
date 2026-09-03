@@ -129,13 +129,22 @@ class Player:
         if self.regen > 0 and not self.dead:
             self.heal(self.regen * dt)
         if self.moving and not self.dead:
-            self._dust_cd = getattr(self, "_dust_cd", 0.0) - dt
-            if self._dust_cd <= 0:
-                self._dust_cd = 0.18
-                offset = pygame.Vector2(
-                    math.cos(self.walk_cycle + math.pi) * 8,
-                    math.sin(self.walk_cycle + math.pi) * 8)
-                game.particles.dust(self.pos + offset)
+            # Respect the `footstep_dust` setting so players can turn off
+            # the moving dust puffs if they find them distracting. The
+            # setting defaults to False (off) to avoid a swarm of bright
+            # dots orbiting the player every 0.18s.
+            _footstep_on = bool(
+                (getattr(game, "save", None) is not None)
+                and game.save.settings.get("footstep_dust", False)
+            )
+            if _footstep_on:
+                self._dust_cd = getattr(self, "_dust_cd", 0.0) - dt
+                if self._dust_cd <= 0:
+                    self._dust_cd = 0.18
+                    offset = pygame.Vector2(
+                        math.cos(self.walk_cycle + math.pi) * 8,
+                        math.sin(self.walk_cycle + math.pi) * 8)
+                    game.particles.dust(self.pos + offset)
         self._drone_tick(dt, game)
 
     def _fire(self, game) -> None:
