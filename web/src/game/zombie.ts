@@ -14,6 +14,7 @@ import type { IGame } from "./types";
 import type { Vec } from "./vec";
 import type { Camera } from "./camera";
 import { Bullet } from "./bullet";
+import { drawZombieSprite } from "./pixelArt";
 
 export const ZOMBIE_COLORS: Record<string, string> = {
   normal: "#56963E",
@@ -220,31 +221,8 @@ export class Zombie {
 
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
     const sp = cam.apply(this.pos);
-    const col = ZOMBIE_COLORS[this.KIND] ?? ZOMBIE_COLORS["normal"]!;
     const r = this.radius;
-    const wob = Math.sin(performance.now() / 120 + this.pos.x) * 1.5;
-    const bodyCol =
-      this.flash > 0 && Math.floor(this.flash * 40) % 2 === 0 ? "#FFFFFF" : col;
-    ctx.fillStyle = "#0E140E";
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y, r + 2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = bodyCol;
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y + wob, r, 0, Math.PI * 2);
-    ctx.fill();
-    // Eyes
-    const ang = this.faceAngle;
-    const eyeOffX = Math.cos(ang) * r * 0.45;
-    const eyeOffY = Math.sin(ang) * r * 0.45;
-    const perpX = r > 10 ? -Math.sin(ang) * 4 : 0;
-    const perpY = r > 10 ? Math.cos(ang) * 4 : 0;
-    for (const sign of [-1, 1]) {
-      ctx.fillStyle = "#DC1E1E";
-      ctx.beginPath();
-      ctx.arc(sp.x + eyeOffX + perpX * sign, sp.y + eyeOffY + perpY * sign, Math.max(1, Math.floor(r / 5)), 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawZombieSprite(ctx, sp, this.KIND, this.faceAngle, this.flash > 0, r);
     // HP bar
     if (this.hp < this.maxHp) {
       const w = r * 2;

@@ -17,6 +17,7 @@ import { Bullet } from "./bullet";
 import type { IGame } from "./types";
 import type { Vec } from "./vec";
 import type { Camera } from "./camera";
+import { drawPlayerSprite } from "./pixelArt";
 
 export interface PlayerOpts {
   unlocked?: string[];
@@ -58,6 +59,7 @@ export class Player {
   weapons: WeaponManager;
 
   flashTimer = 0;
+  recoilTimer = 0;
   emptyClickTimer = 0;
   invuln = 0;
   walkCycle = 0;
@@ -164,6 +166,7 @@ export class Player {
     this.weapons.update(dt);
 
     this.flashTimer = Math.max(0, this.flashTimer - dt);
+    this.recoilTimer = Math.max(0, this.recoilTimer - dt);
     this.invuln = Math.max(0, this.invuln - dt);
   }
 
@@ -186,6 +189,7 @@ export class Player {
       );
     }
     game.particles.muzzleFlash(muzzle, this.angle);
+    this.recoilTimer = 0.09;
     game.camera.shake(w.pellets === 1 ? 1.5 : 4);
     const sbw = game.stats.shots_by_weapon;
     sbw[w.id] = (sbw[w.id] ?? 0) + 1;
@@ -234,50 +238,14 @@ export class Player {
       ctx.fillText(this.username, sp.x, sp.y - this.radius - 10);
     }
 
-    const bob = this.moving ? Math.sin(this.walkCycle) * 2 : 0;
-    let bodyCol = "#5ADCFF";
-    if (this.flashTimer > 0 && Math.floor(this.flashTimer * 20) % 2 === 0) {
-      bodyCol = "#FFFFFF";
-    }
-    // Gun barrel.
-    const bex = sp.x + Math.cos(this.angle) * 26;
-    const bey = sp.y + Math.sin(this.angle) * 26;
-    ctx.strokeStyle = "#1E1E22";
-    ctx.lineWidth = 7;
-    ctx.beginPath();
-    ctx.moveTo(sp.x, sp.y);
-    ctx.lineTo(bex, bey);
-    ctx.stroke();
-    ctx.strokeStyle = "#2878A0";
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    // Body.
-    ctx.fillStyle = "#121214";
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y, this.radius + 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = bodyCol;
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y, this.radius, 0, Math.PI * 2);
-    ctx.fill();
-    // Legs.
-    ctx.fillStyle = "#2878A0";
-    ctx.beginPath();
-    ctx.arc(sp.x - 8 + bob, sp.y + 12 + bob, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(sp.x + 8 - bob, sp.y + 12 - bob, 5, 0, Math.PI * 2);
-    ctx.fill();
-    // Facing marker.
-    ctx.fillStyle = "#F0FAFF";
-    ctx.beginPath();
-    ctx.arc(
-      sp.x + Math.cos(this.angle) * this.radius * 0.6,
-      sp.y + Math.sin(this.angle) * this.radius * 0.6,
-      3,
-      0,
-      Math.PI * 2,
+    drawPlayerSprite(
+      ctx,
+      sp,
+      this.angle,
+      this.moving ? this.walkCycle : 0,
+      this.recoilTimer,
+      this.weapons.currentId,
+      this.flashTimer > 0 && Math.floor(this.flashTimer * 20) % 2 === 0,
     );
-    ctx.fill();
   }
 }

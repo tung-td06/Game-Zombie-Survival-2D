@@ -4,6 +4,7 @@
 import type { IGame } from "./types";
 import type { Vec } from "./vec";
 import type { Camera } from "./camera";
+import { drawLootSprite } from "./pixelArt";
 
 export type LootKind = "coin" | "ammo" | "health" | "armor" | "weapon";
 
@@ -90,23 +91,10 @@ export class Loot {
   }
 
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
-    const s = STYLE[this.kind] ?? { color: "#FFFFFF", glyph: "?" };
     const phase = ((performance.now() % 800) / 400) - 1;
     const bob = -4 + 3 * Math.abs(phase);
     const sp = cam.apply({ x: this.pos.x, y: this.pos.y + bob });
-    const r = 10;
-    ctx.fillStyle = s.color;
-    roundRect(ctx, sp.x - r, sp.y - r, r * 2, r * 2, 4);
-    ctx.fill();
-    ctx.strokeStyle = "#0C0C0E";
-    ctx.lineWidth = 2;
-    roundRect(ctx, sp.x - r, sp.y - r, r * 2, r * 2, 4);
-    ctx.stroke();
-    ctx.fillStyle = "#101012";
-    ctx.font = "bold 13px ui-monospace, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(s.glyph, sp.x, sp.y);
+    drawLootSprite(ctx, sp, this.kind, Math.abs(phase));
   }
 }
 

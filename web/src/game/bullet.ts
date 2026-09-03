@@ -6,6 +6,7 @@ import { circleRectCollide } from "./collision";
 import type { Camera } from "./camera";
 import type { Vec } from "./vec";
 import type { IGame as Game } from "./types";
+import { drawProjectileSprite } from "./pixelArt";
 
 export class Bullet {
   pos: Vec;
@@ -107,20 +108,6 @@ export class Bullet {
     const sp = cam.apply(this.pos);
     const ta = cam.apply(this.trailA);
     const tb = cam.apply(this.trailB);
-    const col = this.owner === "player" ? "#FFE88C" : "#FF6E5A";
-    ctx.strokeStyle = col;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(ta.x, ta.y);
-    ctx.lineTo(tb.x, tb.y);
-    ctx.stroke();
-    ctx.fillStyle = col;
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y, this.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#FFFFFF";
-    ctx.beginPath();
-    ctx.arc(sp.x, sp.y, Math.max(1, this.radius - 2), 0, Math.PI * 2);
-    ctx.fill();
+    drawProjectileSprite(ctx, sp, ta, tb, this.owner === "enemy");
   }
 }
