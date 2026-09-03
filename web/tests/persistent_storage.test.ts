@@ -14,7 +14,11 @@ import {
   getPlayerStats,
   deleteGameSave,
 } from "../src/lib/db";
-import { _resetCacheForTests, _dataDir } from "../src/server/persistent-storage";
+import {
+  _resetCacheForTests,
+  _flushNowForTests,
+  _dataDir,
+} from "../src/server/persistent-storage";
 
 // These tests exercise the on-disk persistent store. They use a dedicated
 // sub-directory so they never interfere with real dev data.
@@ -46,13 +50,16 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(created.username).toBe(username);
     expect(created.id).toBeDefined();
 
-    // Force a re-read from disk by clearing the in-memory cache.
+    // Force a re-read from disk by flushing pending writes, then clearing
+    // the in-memory cache.
+    await _flushNowForTests();
     _resetCacheForTests();
     const refetched = await getPlayerByUsername(null, username);
     expect(refetched).not.toBeNull();
     expect(refetched?.id).toBe(created.id);
 
-    // And by id as well.
+    // And by id as well (cache was already reset above; no new writes since).
+    _resetCacheForTests();
     const byId = await getPlayerById(null, created.id);
     expect(byId?.username).toBe(username);
 
@@ -98,6 +105,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       world: {},
     });
 
+    await _flushNowForTests();
     _resetCacheForTests();
     const save = await getGameSave(null, created.id);
     expect(save).not.toBeNull();
@@ -113,6 +121,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       shots_hit: 150,
     });
 
+    await _flushNowForTests();
     _resetCacheForTests();
     const stats = await getPlayerStats(null, created.id);
     expect(stats).not.toBeNull();
@@ -126,6 +135,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(carolRow?.score).toBe(5000);
 
     await deleteGameSave(null, created.id);
+    await _flushNowForTests();
     _resetCacheForTests();
     const afterDelete = await getGameSave(null, created.id);
     expect(afterDelete).toBeNull();

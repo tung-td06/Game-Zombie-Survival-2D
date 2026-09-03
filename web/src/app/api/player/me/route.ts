@@ -16,13 +16,6 @@ export async function GET(req: NextRequest) {
     }
 
     const db = getD1Database();
-    if (!db) {
-      return NextResponse.json({
-        success: true,
-        user: { id: session.playerId, username: session.username, display_name: session.username },
-      });
-    }
-
     const player = await getPlayerById(db, session.playerId);
     if (!player) {
       return NextResponse.json(

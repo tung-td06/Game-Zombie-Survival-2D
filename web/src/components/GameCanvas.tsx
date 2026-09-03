@@ -81,7 +81,13 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
         document.pointerLockElement !== canvas &&
         game.state === "PLAYING"
       ) {
-        canvas.requestPointerLock?.();
+        // requestPointerLock returns a promise that rejects when the browser
+        // / embedder denies the request (e.g. embedded preview webviews) —
+        // swallow that so a denied lock never surfaces as an error on click.
+        const lockPromise = canvas.requestPointerLock?.() as
+          | Promise<void>
+          | undefined;
+        lockPromise?.catch?.(() => undefined);
       }
     };
     canvas.addEventListener("click", onClick);

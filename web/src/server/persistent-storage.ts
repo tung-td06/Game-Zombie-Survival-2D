@@ -27,8 +27,24 @@
 // Writes are debounced (200ms) to avoid hammering the disk while still
 // giving strong durability guarantees between commits and restarts.
 
-import { promises as fs } from "node:fs";
-import * as path from "node:path";
+// Node builtins are loaded lazily via a guarded require (never statically
+// imported) so this module compiles cleanly inside the Next.js dev Edge
+// bundler, where only runtime access decides whether fs/path are available.
+function nodeBuiltins(): {
+  fs: typeof import("node:fs")["promises"];
+  path: typeof import("node:path");
+} | null {
+  try {
+    const req = (eval("require") as NodeRequire | undefined);
+    if (!req) return null;
+    const fsMod = req("fs") as typeof import("node:fs");
+    const pathMod = req("path") as typeof import("node:path");
+    if (!fsMod?.promises || !pathMod?.join) return null;
+    return { fs: fsMod.promises, path: pathMod };
+  } catch {
+    return null;
+  }
+}
 
 // Local type duplicates — kept inline (and exported) to avoid pulling
 // the Edge-bundled `db-core.ts` into this Node-only file. The shapes
@@ -68,7 +84,15 @@ export interface GameSaveRecord {
   updated_at: number;
 }
 
-const DATA_DIR = path.join(process.cwd(), "data", "persistent");
+// Resolved per call so tests can redirect the store to a sandbox directory
+// via `PERSISTENT_TEST_DIR` before the first read/write.
+function getDataDir(): string {
+  const override = process.env.PERSISTENT_TEST_DIR;
+  if (override) return override;
+  const nb = nodeBuiltins();
+  if (!nb) return "";
+  return nb.path.join(process.cwd(), "data", "persistent");
+}
 
 type FileShape = {
   players: Record<string, PlayerRecord>;
@@ -111,21 +135,27 @@ function isNodeRuntime(): boolean {
 
 async function ensureDir(): Promise<void> {
   if (!isNodeRuntime()) return;
+  const nb = nodeBuiltins();
+  if (!nb) return;
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
+    await nb.fs.mkdir(getDataDir(), { recursive: true });
   } catch {
     // ignore
   }
 }
 
 function filePath(name: keyof FileShape): string {
-  return path.join(DATA_DIR, `${name}.json`);
+  const nb = nodeBuiltins();
+  if (!nb) return "";
+  return nb.path.join(getDataDir(), `${name}.json`);
 }
 
 async function readJson<T>(name: keyof FileShape, fallback: T): Promise<T> {
   if (!isNodeRuntime()) return fallback;
+  const nb = nodeBuiltins();
+  if (!nb) return fallback;
   try {
-    const buf = await fs.readFile(filePath(name), "utf8");
+    const buf = await nb.fs.readFile(filePath(name), "utf8");
     return JSON.parse(buf) as T;
   } catch (err: any) {
     if (err?.code === "ENOENT") return fallback;
@@ -151,22 +181,36 @@ async function loadAll(): Promise<FileShape> {
 
 async function flushNow(): Promise<void> {
   if (!isNodeRuntime() || !cache) return;
+  const nb = nodeBuiltins();
+  if (!nb) return;
   pendingWrite = false;
   const snapshot = cache;
   await ensureDir();
   await Promise.all([
-    fs.writeFile(filePath("players"), JSON.stringify(snapshot.players, null, 2), "utf8").catch((e) =>
-      console.warn("persistent-storage: write players.json failed:", e?.message)
-    ),
-    fs
-      .writeFile(filePath("player_stats"), JSON.stringify(snapshot.player_stats, null, 2), "utf8")
-      .catch((e) => console.warn("persistent-storage: write player_stats.json failed:", e?.message)),
-    fs.writeFile(filePath("game_saves"), JSON.stringify(snapshot.game_saves, null, 2), "utf8").catch((e) =>
-      console.warn("persistent-storage: write game_saves.json failed:", e?.message)
-    ),
-    fs.writeFile(filePath("scores"), JSON.stringify(snapshot.scores, null, 2), "utf8").catch((e) =>
-      console.warn("persistent-storage: write scores.json failed:", e?.message)
-    ),
+    nb.fs
+      .writeFile(filePath("players"), JSON.stringify(snapshot.players, null, 2), "utf8")
+      .catch((e) =>
+        console.warn("persistent-storage: write players.json failed:", e?.message)
+      ),
+    nb.fs
+      .writeFile(
+        filePath("player_stats"),
+        JSON.stringify(snapshot.player_stats, null, 2),
+        "utf8"
+      )
+      .catch((e) =>
+        console.warn("persistent-storage: write player_stats.json failed:", e?.message)
+      ),
+    nb.fs
+      .writeFile(filePath("game_saves"), JSON.stringify(snapshot.game_saves, null, 2), "utf8")
+      .catch((e) =>
+        console.warn("persistent-storage: write game_saves.json failed:", e?.message)
+      ),
+    nb.fs
+      .writeFile(filePath("scores"), JSON.stringify(snapshot.scores, null, 2), "utf8")
+      .catch((e) =>
+        console.warn("persistent-storage: write scores.json failed:", e?.message)
+      ),
   ]);
 }
 
@@ -312,9 +356,14 @@ export function _resetCacheForTests(): void {
   loaded = false;
 }
 
+/** Force pending debounced writes to disk immediately. Used by tests. */
+export function _flushNowForTests(): Promise<void> {
+  return flushNow();
+}
+
 /** Returns the directory used for the JSON files. */
 export function _dataDir(): string {
-  return DATA_DIR;
+  return getDataDir();
 }
 
 // Attach best-effort exit handlers the first time this module is loaded.

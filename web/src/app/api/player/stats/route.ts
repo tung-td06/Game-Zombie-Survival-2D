@@ -16,21 +16,6 @@ export async function GET(req: NextRequest) {
     }
 
     const db = getD1Database();
-    if (!db) {
-      return NextResponse.json({
-        success: true,
-        data: {
-          player_id: session.playerId,
-          total_games: 0,
-          best_score: 0,
-          best_wave: 0,
-          total_zombies_killed: 0,
-          best_survival_time: 0,
-          updated_at: Date.now(),
-        },
-      });
-    }
-
     const stats = await getPlayerStats(db, session.playerId);
     return NextResponse.json({
       success: true,

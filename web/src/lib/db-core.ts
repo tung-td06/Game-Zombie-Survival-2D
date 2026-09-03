@@ -29,6 +29,63 @@ export function getD1Database(): D1Database | null {
 }
 
 // ---------------------------------------------------------------------------
+// Lazy Node-only persistent fallback
+// ---------------------------------------------------------------------------
+// When no D1 binding exists (Node dev server, plain `next dev`, tests) every
+// read/write below routes to the JSON store in `src/server/persistent-storage.ts`.
+// That module uses `node:fs`/`node:path`, so it is loaded lazily through a
+// dynamic import whose path is assembled at runtime — the same trick used by
+// `src/lib/db.ts` — which keeps the Node imports out of the Cloudflare Pages /
+// Edge bundle. On Edge the loader returns null (not a Node runtime) and the
+// D1 SQL paths below run instead.
+
+type PersistentModule = typeof import("../server/persistent-storage");
+
+let persistentModulePromise: Promise<PersistentModule | null> | null = null;
+
+function isNodeRuntime(): boolean {
+  try {
+    return typeof process !== "undefined" && !!(process as any).versions?.node;
+  } catch {
+    return false;
+  }
+}
+
+async function loadPersistent(): Promise<PersistentModule | null> {
+  if (!isNodeRuntime()) return null;
+  if (persistentModulePromise) return persistentModulePromise;
+  // Runtime-loaded fallback for hosts without a D1 binding (vitest, plain Node
+  // ESM, Next Node dev). Specifiers are assembled at runtime so no bundler
+  // (webpack / next-on-pages Edge) can statically trace `node:fs`/`node:path`
+  // into the Edge bundle: relative-with-extension works on native ESM / vitest,
+  // relative extensionless under webpack-style Node resolution, and the "@/"
+  // alias form where the alias is applied. Cloudflare Pages always has the D1
+  // binding, so this fallback is never invoked there.
+  const candidates = [
+    ["..", "server", "persistent-storage.ts"].join("/"),
+    ["..", "server", "persistent-storage"].join("/"),
+    ["@", "server", "persistent-storage"].join("/"),
+  ];
+  persistentModulePromise = (async () => {
+    for (const dynamicPath of candidates) {
+      try {
+        const mod = (await import(/* @vite-ignore */ dynamicPath)) as PersistentModule;
+        if (mod && typeof mod.psUpsertPlayer === "function") return mod;
+      } catch (err) {
+        console.warn(
+          "db-core loadPersistent: candidate",
+          dynamicPath,
+          "failed:",
+          (err as Error)?.message
+        );
+      }
+    }
+    return null;
+  })();
+  return persistentModulePromise;
+}
+
+// ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
 
@@ -317,6 +374,22 @@ export async function createPlayer(
     } catch (err) {
       console.warn("D1 createPlayer write warning:", err);
     }
+  } else {
+    // No D1 binding (Node dev / tests): persist through the JSON store and
+    // seed an empty stats row, mirroring the D1 inserts above.
+    const m = await loadPersistent();
+    if (m) {
+      await m.psUpsertPlayer(playerRecord);
+      await m.psUpsertStats({
+        player_id: id,
+        total_games: 0,
+        best_score: 0,
+        best_wave: 0,
+        total_zombies_killed: 0,
+        best_survival_time: 0,
+        updated_at: now,
+      });
+    }
   }
 
   return playerRecord;
@@ -327,7 +400,11 @@ export async function getPlayerByUsername(
   username: string
 ): Promise<PlayerRecord | null> {
   const clean = username.trim().toLowerCase();
-  if (!db) return null;
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return null;
+    return m.psGetPlayer(clean);
+  }
   try {
     const row = await db
       .prepare("SELECT * FROM players WHERE username = ?")
@@ -353,7 +430,11 @@ export async function getPlayerById(
   db: D1Database | null | undefined,
   playerId: string
 ): Promise<PlayerRecord | null> {
-  if (!db) return null;
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return null;
+    return m.psGetPlayerById(playerId);
+  }
   try {
     const row = await db
       .prepare("SELECT * FROM players WHERE id = ?")
@@ -421,7 +502,39 @@ export async function submitScore(
   playerId: string,
   input: SubmitScoreInput
 ): Promise<void> {
-  if (!db) return;
+  if (!db) {
+    // No D1 binding: persist the score + update stats through the JSON store,
+    // mirroring the D1 batch insert / upsert below.
+    const m = await loadPersistent();
+    if (!m) return;
+    const player = await m.psGetPlayerById(playerId);
+    const now = Date.now();
+    await m.psAddScore({
+      id: crypto.randomUUID(),
+      player_id: playerId,
+      username: player?.display_name || player?.username || "Survivor",
+      score: input.score,
+      wave: input.wave,
+      zombies_killed: input.zombies_killed,
+      survival_time: input.survival_time,
+      created_at: now,
+    });
+    const prev = await m.psGetStats(playerId);
+    await m.psUpsertStats({
+      player_id: playerId,
+      total_games: (prev?.total_games || 0) + 1,
+      best_score: Math.max(prev?.best_score || 0, input.score),
+      best_wave: Math.max(prev?.best_wave || 0, input.wave),
+      total_zombies_killed:
+        (prev?.total_zombies_killed || 0) + input.zombies_killed,
+      best_survival_time: Math.max(
+        prev?.best_survival_time || 0,
+        input.survival_time
+      ),
+      updated_at: now,
+    });
+    return;
+  }
   const scoreId = crypto.randomUUID();
   const now = Date.now();
 
@@ -479,7 +592,25 @@ export async function submitScore(
 export async function getLeaderboardTop100(
   db: D1Database | null | undefined
 ): Promise<LeaderboardEntry[]> {
-  if (!db) return [];
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return [];
+    const scores = await m.psListScores();
+    const sorted = [...scores]
+      .sort(
+        (a, b) =>
+          b.score - a.score || b.wave - a.wave || b.survival_time - a.survival_time
+      )
+      .slice(0, 100);
+    return sorted.map((row, idx) => ({
+      rank: idx + 1,
+      username: row.username || "Survivor",
+      score: row.score || 0,
+      wave: row.wave || 0,
+      zombies_killed: row.zombies_killed || 0,
+      survival_time: row.survival_time || 0,
+    }));
+  }
   try {
     const { results } = await db
       .prepare(
@@ -515,7 +646,11 @@ export async function getPlayerStats(
   db: D1Database | null | undefined,
   playerId: string
 ): Promise<PlayerStats | null> {
-  if (!db) return null;
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return null;
+    return m.psGetStats(playerId);
+  }
   try {
     const row = await db
       .prepare("SELECT * FROM player_stats WHERE player_id = ?")
@@ -546,7 +681,27 @@ export async function getGameSave(
   db: D1Database | null | undefined,
   playerId: string
 ): Promise<GameSaveRecord | null> {
-  if (!db) return null;
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return null;
+    const rec = await m.psGetSave(playerId);
+    if (!rec) return null;
+    return {
+      player_id: rec.player_id,
+      save_version: rec.save_version,
+      level: rec.level,
+      wave: rec.wave,
+      score: rec.score,
+      money: rec.money,
+      player_data: rec.player_data,
+      weapon_data: rec.weapon_data ?? null,
+      inventory_data: rec.inventory_data,
+      progression_data: rec.progression_data,
+      world_data: rec.world_data,
+      created_at: rec.created_at,
+      updated_at: rec.updated_at,
+    };
+  }
   try {
     const row = await db
       .prepare("SELECT * FROM game_saves WHERE player_id = ?")
@@ -580,7 +735,32 @@ export async function saveGameSave(
   playerId: string,
   savePayload: any
 ): Promise<void> {
-  if (!db) return;
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return;
+    const now = Date.now();
+    const existing = await m.psGetSave(playerId);
+    await m.psUpsertSave({
+      player_id: playerId,
+      save_version: savePayload.save_version || 1,
+      level: savePayload.level || 1,
+      wave: savePayload.wave || 1,
+      score: savePayload.score || 0,
+      money: savePayload.money || 0,
+      player_data: savePayload.player ?? savePayload.player_data ?? {},
+      weapon_data: savePayload.weapons
+        ? savePayload.weapons
+        : savePayload.weapon_data ?? null,
+      inventory_data:
+        savePayload.inventory ?? savePayload.inventory_data ?? {},
+      progression_data:
+        savePayload.progression ?? savePayload.progression_data ?? {},
+      world_data: savePayload.world ?? savePayload.world_data ?? {},
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    });
+    return;
+  }
   const now = Date.now();
 
   // Read existing created_at if present so we can preserve it.
@@ -642,7 +822,12 @@ export async function deleteGameSave(
   db: D1Database | null | undefined,
   playerId: string
 ): Promise<void> {
-  if (!db) return;
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return;
+    await m.psDeleteSave(playerId);
+    return;
+  }
   try {
     await db
       .prepare("DELETE FROM game_saves WHERE player_id = ?")

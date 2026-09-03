@@ -6,7 +6,7 @@ export const runtime = "edge";
 export async function GET() {
   try {
     const db = getD1Database();
-    const data = db ? await getLeaderboardTop100(db) : [];
+    const data = await getLeaderboardTop100(db);
     return NextResponse.json({
       success: true,
       data,

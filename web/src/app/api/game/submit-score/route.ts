@@ -32,16 +32,14 @@ export async function POST(req: NextRequest) {
     }
 
     const db = getD1Database();
-    if (db) {
-      await submitScore(db, session.playerId, {
-        score: Number(body.score) || 0,
-        wave: Number(body.wave) || 0,
-        zombies_killed: Number(body.zombies_killed) || 0,
-        survival_time: Number(body.survival_time) || 0,
-        shots_fired: Number(body.shots_fired) || 0,
-        shots_hit: Number(body.shots_hit) || 0,
-      });
-    }
+    await submitScore(db, session.playerId, {
+      score: Number(body.score) || 0,
+      wave: Number(body.wave) || 0,
+      zombies_killed: Number(body.zombies_killed) || 0,
+      survival_time: Number(body.survival_time) || 0,
+      shots_fired: Number(body.shots_fired) || 0,
+      shots_hit: Number(body.shots_hit) || 0,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

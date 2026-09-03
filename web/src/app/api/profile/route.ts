@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
 
   const db = getD1Database();
 
-  let profile = db ? await getProfile(db, key) : null;
+  let profile = await getProfile(db, key);
 
   // Auto-create a clean default profile for new users or local dev fallback
   if (!profile) {
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
       quests_claimed: [],
       settings: {},
     };
-    if (db) await saveProfile(db, key, profile);
+    await saveProfile(db, key, profile);
   }
 
   const response = NextResponse.json({ profile });
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     const db = getD1Database();
 
     const key = username.trim().toLowerCase();
-    if (db) await saveProfile(db, key, profileData);
+    await saveProfile(db, key, profileData);
     const response = NextResponse.json({ success: true });
 
     response.cookies.set("session_user", key, {

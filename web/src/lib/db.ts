@@ -86,17 +86,27 @@ function isNodeRuntime(): boolean {
 async function loadPersistent(): Promise<PersistentModule | null> {
   if (!isNodeRuntime()) return null;
   if (persistentModulePromise) return persistentModulePromise;
-  // Build the path at runtime so static analysis cannot trace the
-  // `node:fs`/`node:path` import graph into the Edge bundle.
-  const segments = ["..", "server", "persistent-storage"];
-  const dynamicPath = ["@", ...segments].join("/");
+  // Runtime-loaded fallback for hosts without a D1 binding (vitest, plain Node
+  // ESM, Next Node dev). Specifiers are assembled at runtime so no bundler can
+  // statically trace `node:fs`/`node:path` into the Edge bundle:
+  // relative-with-extension works on native ESM / vitest, relative extensionless
+  // under webpack-style Node resolution, and the "@/" alias form where the
+  // alias is applied.
+  const candidates = [
+    ["..", "server", "persistent-storage.ts"].join("/"),
+    ["..", "server", "persistent-storage"].join("/"),
+    ["@", "server", "persistent-storage"].join("/"),
+  ];
   persistentModulePromise = (async () => {
-    try {
-      const mod = (await import(/* @vite-ignore */ dynamicPath)) as PersistentModule;
-      return mod;
-    } catch {
-      return null;
+    for (const dynamicPath of candidates) {
+      try {
+        const mod = (await import(/* @vite-ignore */ dynamicPath)) as PersistentModule;
+        if (mod && typeof mod.psUpsertPlayer === "function") return mod;
+      } catch {
+        // try the next candidate
+      }
     }
+    return null;
   })();
   return persistentModulePromise;
 }

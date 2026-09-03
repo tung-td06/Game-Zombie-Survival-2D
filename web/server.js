@@ -1,3 +1,9 @@
+// Running `node server.js` directly does not set NODE_ENV (the `next dev`
+// CLI does). Without it, next.config's `setupDevPlatform()` (which makes
+// the dev Edge compile handle node: builtins for the file-based fallback
+// store) is skipped, so default to development like `next dev` does.
+process.env.NODE_ENV = process.env.NODE_ENV || "development";
+
 const { createServer } = require("http");
 const { parse } = require("url");
 const next = require("next");

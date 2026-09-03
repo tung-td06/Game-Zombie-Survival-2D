@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
     }
 
     const db = getD1Database();
-    const save = db ? await getGameSave(db, session.playerId) : null;
+    const save = await getGameSave(db, session.playerId);
     return NextResponse.json({ success: true, save });
   } catch (err) {
     console.error("Game save GET error:", err);
@@ -56,9 +56,7 @@ export async function POST(req: NextRequest) {
     }
 
     const db = getD1Database();
-    if (db) {
-      await saveGameSave(db, session.playerId, savePayload);
-    }
+    await saveGameSave(db, session.playerId, savePayload);
 
     return NextResponse.json({ success: true });
   } catch (err) {
@@ -83,9 +81,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     const db = getD1Database();
-    if (db) {
-      await deleteGameSave(db, session.playerId);
-    }
+    await deleteGameSave(db, session.playerId);
 
     return NextResponse.json({ success: true });
   } catch (err) {
