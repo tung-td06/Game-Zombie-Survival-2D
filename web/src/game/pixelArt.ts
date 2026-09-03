@@ -62,6 +62,24 @@ function worldHash(seed: number, x: number, y: number): number {
  * regenerate, relocate, or recolour the pattern (the old code hashed the
  * screen position, so specks popped in and out while walking).
  */
+// Low-frequency tint used to break the flat look into soft meadow patches.
+// Deterministic from the tile's 128px block so it never changes with the
+// camera; drawn with low alpha so it reads as subtle tone variation.
+function blockTint(ctx: CanvasRenderingContext2D, sx: number, sy: number, worldX: number, worldY: number): void {
+  const h = worldHash(77, Math.floor(worldX / 128), Math.floor(worldY / 128));
+  const kind = h % 10;
+  if (kind === 0) {
+    ctx.fillStyle = "rgba(16,26,12,0.20)";
+  } else if (kind === 1) {
+    ctx.fillStyle = "rgba(52,62,34,0.10)";
+  } else if (kind === 2) {
+    ctx.fillStyle = "rgba(14,22,18,0.16)";
+  } else {
+    return;
+  }
+  ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+}
+
 export function drawGroundTile(
   ctx: CanvasRenderingContext2D,
   sx: number,
@@ -73,9 +91,10 @@ export function drawGroundTile(
   road = false,
 ): void {
   const base = road
-    ? ["#25262A", "#292A2E", "#222328"][variant % 3]!
+    ? ["#26272B", "#2A2B2F", "#232428"][variant % 3]!
     : ["#252B20", "#292E22", "#22291E", "#2C3024", "#20271C", "#303425"][variant % 6]!;
   rect(ctx, sx, sy, TILE_SIZE, TILE_SIZE, base);
+  if (!road) blockTint(ctx, sx, sy, worldX, worldY);
 
   const fleck = road
     ? ["#3A3A3D", "#17191A", "#4B4841"]
@@ -88,21 +107,68 @@ export function drawGroundTile(
     px(ctx, x, y, fleck[h % fleck.length]!, size);
   }
 
-  if (!road && variant % 4 === 0) {
+  if (road) {
+    // Worn tyre lane along the road middle + occasional crack.
+    const rh = worldHash(seed + 31, worldX, worldY);
+    if (rh % 3 === 0) {
+      rect(ctx, sx + 24, sy + 12, 2, TILE_SIZE - 24, "rgba(14,14,16,0.35)");
+      rect(ctx, sx + 38, sy + 12, 2, TILE_SIZE - 24, "rgba(14,14,16,0.35)");
+    }
+    if (rh % 7 === 0) {
+      const cx = sx + 6 + (Math.floor(rh / 5) % 50);
+      ctx.strokeStyle = "rgba(12,12,14,0.5)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, sy + 2);
+      ctx.lineTo(cx + 3, sy + TILE_SIZE - 4);
+      ctx.stroke();
+    }
+    if (variant === 2) {
+      rect(ctx, sx + 12, sy + 24, 20, 14, "rgba(10,10,12,0.4)");
+      rect(ctx, sx + 30, sy + 24, 2, 14, "#54504A");
+    }
+    return;
+  }
+
+  // Sparse grass-blade clusters, pebbles and tiny wildflowers — all hashed to
+  // the tile's world cell so the same tile always draws the same details.
+  const g = worldHash(seed + 41, worldX, worldY);
+  const micro = Math.floor(g / 3) % 40;
+  if (micro < 6) {
+    const bx = sx + 10 + (Math.floor(g / 7) % 42);
+    const by = sy + 12 + (Math.floor(g / 13) % 40);
+    rect(ctx, bx, by, 2, 5, "#3E5A2E");
+    rect(ctx, bx + 3, by - 2, 1, 5, "#4E6E38");
+    rect(ctx, bx + 6, by + 1, 2, 4, "#3A5230");
+  } else if (micro < 9) {
+    const px0 = sx + 14 + (Math.floor(g / 11) % 34);
+    const py0 = sy + 16 + (Math.floor(g / 19) % 34);
+    px(ctx, px0, py0, "#8B8F83", 2);
+    px(ctx, px0 + 5, py0 + 4, "#767A70", 2);
+  } else if (micro === 12 || micro === 13) {
+    const fx = sx + 16 + (Math.floor(g / 23) % 32);
+    const fy = sy + 14 + (Math.floor(g / 29) % 36);
+    px(ctx, fx, fy, micro === 12 ? "#E6E2C4" : "#D9C86B", 1);
+    px(ctx, fx + 2, fy + 1, micro === 12 ? "#F0EDD6" : "#E4D685", 1);
+  }
+
+  if (variant % 4 === 0) {
     rect(ctx, sx + 34, sy + 10, 14, 2, "#46502E");
     rect(ctx, sx + 42, sy + 8, 2, 7, "#46502E");
     rect(ctx, sx + 21, sy + 46, 9, 2, "#4A5430");
   }
-  if (!road && variant === 3) {
+  if (variant === 3) {
     rect(ctx, sx + 8, sy + 39, 16, 6, "#1C302A");
     rect(ctx, sx + 10, sy + 40, 11, 2, "#2E5146");
   }
-  if (road && variant === 2) {
-    rect(ctx, sx + 10, sy + 22, 22, 2, "#4A4140");
-    rect(ctx, sx + 28, sy + 22, 2, 8, "#4A4140");
-  }
 }
 
+/**
+ * Draw a road slab: asphalt base with worn edge lanes, subtle patchwork
+ * tone, painted markings (dashed centre, white edge lines) and a few
+ * potholes/manholes scattered along the way. All detail positions derive
+ * from the slab's world origin so nothing shifts with the camera.
+ */
 export function drawRoadDetails(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -111,17 +177,72 @@ export function drawRoadDetails(
   h: number,
   vertical: boolean,
 ): void {
-  rect(ctx, x, y, w, h, "#1B1D1C");
-  rect(ctx, x + 3, y + 3, w - 6, h - 6, "#2A2A2D");
-  rect(ctx, x + 5, y + 5, w - 10, h - 10, "#26272A");
-  const line = "#C29C4C";
+  rect(ctx, x, y, w, h, "#1C1D1F");
+  rect(ctx, x + 3, y + 3, w - 6, h - 6, "#2B2C30");
+  rect(ctx, x + 6, y + 6, w - 12, h - 12, "#26272B");
+
+  // Faded patchwork tone (low alpha blocks, deterministic from origin).
+  const step = 96;
+  const along0 = vertical ? y : x;
+  const span = vertical ? h : w;
+  for (let s = along0; s < along0 + span; s += step) {
+    const hh = worldHash(9011, Math.floor((vertical ? x : s) / step), Math.floor((vertical ? s : y) / step));
+    if (hh % 4 === 0) {
+      const seg = Math.min(step, along0 + span - s);
+      if (vertical) rect(ctx, x + 8, s, w - 16, seg, "rgba(20,20,22,0.35)");
+      else rect(ctx, s, y + 8, seg, h - 16, "rgba(20,20,22,0.35)");
+    }
+  }
+
+  // Curb wear at both long edges.
+  rect(ctx, x + 2, y + 2, w - 4, 3, "rgba(10,10,12,0.55)");
+  rect(ctx, x + 2, y + h - 5, w - 4, 3, "rgba(10,10,12,0.55)");
+  rect(ctx, x + 2, y + 2, 3, h - 4, "rgba(10,10,12,0.55)");
+  rect(ctx, x + w - 5, y + 2, 3, h - 4, "rgba(10,10,12,0.55)");
+
+  // Manhole covers + oil stains along the road, sparse and deterministic.
   if (vertical) {
-    for (let py = y + 8; py < y + h - 6; py += 70) {
+    for (let py = y + 180; py < y + h - 60; py += 640) {
+      const mh = worldHash(9023, x, py);
+      if (mh % 5 === 0) {
+        const mx = x + 14 + (Math.floor(mh / 7) % (w - 40));
+        px(ctx, mx, py, "#191A1C", 10);
+        px(ctx, mx + 2, py + 2, "#3A3B3E", 6);
+      }
+      if (mh % 9 === 0) {
+        const ox = x + 18 + (Math.floor(mh / 11) % (w - 44));
+        rect(ctx, ox, py + 20, 22, 12, "rgba(12,12,14,0.5)");
+      }
+    }
+  } else {
+    for (let px0 = x + 180; px0 < x + w - 60; px0 += 640) {
+      const mh = worldHash(9023, px0, y);
+      if (mh % 5 === 0) {
+        const my = y + 14 + (Math.floor(mh / 7) % (h - 40));
+        px(ctx, px0, my, "#191A1C", 10);
+        px(ctx, px0 + 2, my + 2, "#3A3B3E", 6);
+      }
+      if (mh % 9 === 0) {
+        const oy = y + 18 + (Math.floor(mh / 11) % (h - 44));
+        rect(ctx, px0 + 20, oy, 12, 22, "rgba(12,12,14,0.5)");
+      }
+    }
+  }
+
+  // Markings: dashed amber centre + continuous white edge lines.
+  const line = "#C29C4C";
+  const edge = "rgba(214,214,210,0.55)";
+  if (vertical) {
+    rect(ctx, x + 6, y, 2, h, edge);
+    rect(ctx, x + w - 8, y, 2, h, edge);
+    for (let py = y + 10; py < y + h - 6; py += 72) {
       rect(ctx, x + w / 2 - 3, py, 6, 34, line);
       rect(ctx, x + w / 2 - 2, py + 2, 2, 30, "#E1C86D");
     }
   } else {
-    for (let px0 = x + 8; px0 < x + w - 6; px0 += 70) {
+    rect(ctx, x, y + 6, w, 2, edge);
+    rect(ctx, x, y + h - 8, w, 2, edge);
+    for (let px0 = x + 10; px0 < x + w - 6; px0 += 72) {
       rect(ctx, px0, y + h / 2 - 3, 34, 6, line);
       rect(ctx, px0 + 2, y + h / 2 - 2, 30, 2, "#E1C86D");
     }
@@ -133,6 +254,15 @@ export function drawRoadDetails(
  * decision made by the map from the building's world position (never from
  * screen/camera state): when false every window is drawn dark.
  */
+// Building façades share the same footprint but get 4 palette variants keyed
+// to a stable per-building seed passed by the map (never camera state).
+const FACADE = [
+  { wall: "#4A4A58", dark: "#3A3A46", light: "#5A5A68", frame: "#1B1D23", trim: "#60606E" },
+  { wall: "#6B5A45", dark: "#564838", light: "#7C6A52", frame: "#241C12", trim: "#87735A" },
+  { wall: "#5C4A4E", dark: "#4A3A3E", light: "#6E5A5E", frame: "#1E1416", trim: "#7A666A" },
+  { wall: "#46545E", dark: "#38444C", light: "#57656F", frame: "#141C22", trim: "#66747E" },
+];
+
 export function drawPropSprite(
   ctx: CanvasRenderingContext2D,
   kind: string,
@@ -141,6 +271,7 @@ export function drawPropSprite(
   w: number,
   h: number,
   litWindows = false,
+  styleVariant = 0,
 ): void {
   getPixelArtAtlas(ctx);
   const shadowX = x + 5;
@@ -148,80 +279,164 @@ export function drawPropSprite(
   rect(ctx, shadowX, shadowY, w, h, "rgba(6,8,7,0.52)");
 
   if (kind === "building") {
-    rect(ctx, x, y, w, h, "#24262D");
-    rect(ctx, x + 4, y + 4, w - 8, h - 8, "#474754");
-    rect(ctx, x + 8, y + 8, w - 16, h - 16, "#3A3A46");
-    strokeRect(ctx, x, y, w, h, "#17191E", 3);
-    // Each window's lit/dark state is derived only from its local column/row
-    // index inside the building (plus the building's world-anchored
-    // litWindows flag), so no window ever changes while the camera moves.
+    const p = FACADE[((styleVariant % 4) + 4) % 4]!;
+    // Plinth / base.
+    rect(ctx, x, y + h - 22, w, 22, p.dark);
+    rect(ctx, x + 4, y + 4, w - 8, h - 8, p.wall);
+    // Roof parapet: darker cap with a lit lip so the top edge reads.
+    rect(ctx, x, y, w, 10, p.dark);
+    rect(ctx, x, y + 8, w, 2, p.light);
+    // Roof equipment (AC units / vents), deterministic spacing from origin.
+    const roofStep = 92;
+    for (let rx = x + 26; rx < x + w - 26; rx += roofStep) {
+      const rv = worldHash(3037, rx, y);
+      if (rv % 2 === 0) {
+        const ux = rx + (rv % 16);
+        const uh = 10 + (Math.floor(rv / 9) % 4);
+        rect(ctx, ux, y - uh + 4, 18, uh, "#9A9AA6");
+        rect(ctx, ux + 2, y - uh + 6, 14, 3, "#B9B9C4");
+      }
+    }
+    strokeRect(ctx, x, y, w, h, p.frame, 3);
+    // Windows with frames + sills. Lit/dark derived only from the local
+    // column/row index and the building's world-anchored litWindows flag, so
+    // no window changes while the camera moves.
     let rowIdx = 0;
-    for (let wy = y + 18; wy < y + h - 20; wy += 32) {
+    for (let wy = y + 22; wy < y + h - 34; wy += 34) {
       let colIdx = 0;
-      for (let wx = x + 16; wx < x + w - 18; wx += 28) {
+      const cols = Math.max(2, Math.floor((w - 34) / 30));
+      const startX = x + (w - (cols * 30 - 2)) / 2;
+      for (let c = 0; c < cols; c++) {
+        const wx = startX + c * 30;
         const windowLit = litWindows && (colIdx + rowIdx) % 3 !== 0;
-        rect(ctx, wx, wy, 12, 14, windowLit ? "#C9A34E" : "#1D222B");
-        if (windowLit) rect(ctx, wx + 2, wy + 2, 8, 2, "#E8CE80");
+        rect(ctx, wx, wy, 16, 18, p.frame);
+        rect(ctx, wx + 2, wy + 2, 12, 14, windowLit ? "#C9A34E" : "#161A22");
+        rect(ctx, wx + 2, wy + 2, 12, 3, windowLit ? "#E8CE80" : "#22262E");
+        rect(ctx, wx + 7, wy + 2, 2, 14, windowLit ? "#B98F3E" : "#1B1F28");
+        rect(ctx, wx - 1, wy + 17, 18, 2, p.light);
         colIdx++;
       }
       rowIdx++;
     }
-    rect(ctx, x + w * 0.42, y + h - 17, 18, 13, "#211D22");
+    // Door with steps at the base.
+    const dW = Math.max(14, Math.min(22, w * 0.16));
+    const dX = x + (w - dW) / 2;
+    rect(ctx, dX, y + h - 24, dW, 24, p.frame);
+    rect(ctx, dX + 2, y + h - 22, dW - 4, 20, "#14161B");
+    rect(ctx, dX + dW - 7, y + h - 14, 2, 6, "#C9A34E");
+    rect(ctx, dX - 2, y + h - 3, dW + 4, 3, p.light);
     return;
   }
   if (kind === "house") {
-    rect(ctx, x, y, w, h, "#342820");
-    rect(ctx, x + 4, y + 10, w - 8, h - 14, "#72503C");
-    ctx.fillStyle = "#4C302C";
+    const roof = ["#4C302C", "#3F3A3C", "#3E3A50"][((styleVariant % 3) + 3) % 3]!;
+    const wall = ["#72503C", "#8A7A68", "#7C6B62"][((styleVariant % 3) + 3) % 3]!;
+    rect(ctx, x, y, w, h, "#241A14");
+    rect(ctx, x + 4, y + 12, w - 8, h - 16, wall);
+    ctx.fillStyle = roof;
     ctx.beginPath();
-    ctx.moveTo(x + 4, y + 17);
+    ctx.moveTo(x + 2, y + 20);
     ctx.lineTo(x + w / 2, y + 2);
-    ctx.lineTo(x + w - 4, y + 17);
+    ctx.lineTo(x + w - 2, y + 20);
     ctx.closePath();
     ctx.fill();
-    for (let sx = x + 12; sx < x + w - 12; sx += 9) rect(ctx, sx, y + 14 - Math.abs(sx - (x + w / 2)) * 0.22, 7, 2, "#81594A");
-    rect(ctx, x + w * 0.45, y + h - 22, 16, 18, "#39251E");
-    // House windows obey the same deterministic per-building light decision:
-    // lit only when litWindows, otherwise uniform dark panes.
-    rect(ctx, x + 12, y + h * 0.48, 13, 12, litWindows ? "#C2A055" : "#171C24");
-    rect(ctx, x + w - 25, y + h * 0.48, 13, 12, litWindows ? "#C2A055" : "#171C24");
-    if (litWindows) {
-      rect(ctx, x + 14, y + h * 0.48 + 2, 4, 2, "#E2C97C");
-      rect(ctx, x + w - 23, y + h * 0.48 + 2, 4, 2, "#E2C97C");
+    // Roof tiles.
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    for (let sx = x + 14; sx < x + w - 8; sx += 9) {
+      const sy2 = y + 16 - Math.abs(sx - (x + w / 2)) * 0.24;
+      ctx.fillRect(sx, sy2, 6, 2);
     }
-    strokeRect(ctx, x, y, w, h, "#241914", 3);
+    // Chimney with cap + a roof overhang shadow under the eaves.
+    const chX = x + w * (0.62 + ((styleVariant % 3) * 0.1));
+    rect(ctx, chX, y + 6, 12, 14, "#6E4A3A");
+    rect(ctx, chX - 1, y + 4, 14, 4, "#8A5E48");
+    rect(ctx, x + 2, y + h * 0.62, w - 4, 2, "rgba(0,0,0,0.25)");
+    // Windows with dark frames + sills (lit only via litWindows).
+    for (const wx of [x + 14, x + w - 27]) {
+      rect(ctx, wx, y + h * 0.44, 13, 13, "#14181E");
+      rect(ctx, wx + 1, y + h * 0.44 + 1, 11, 11, litWindows ? "#C2A055" : "#11151C");
+      if (litWindows) rect(ctx, wx + 3, y + h * 0.44 + 3, 3, 2, "#E2C97C");
+      rect(ctx, wx - 1, y + h * 0.44 + 12, 15, 2, "rgba(255,255,255,0.08)");
+    }
+    // Door + step.
+    const dW = Math.max(13, Math.min(18, w * 0.14));
+    const dX = x + (w - dW) / 2;
+    rect(ctx, dX, y + h - 24, dW, 24, "#241A16");
+    rect(ctx, dX + 2, y + h - 22, dW - 4, 18, "#3A2418");
+    rect(ctx, dX + dW - 6, y + h - 14, 2, 5, "#C9A34E");
+    rect(ctx, dX - 3, y + h - 4, dW + 6, 4, "#5A5648");
+    strokeRect(ctx, x, y, w, h, "#1B130E", 3);
     return;
   }
   if (kind === "tree") {
-    rect(ctx, x + w * 0.45, y + h * 0.4, Math.max(5, w * 0.13), h * 0.5, "#4C321D");
-    rect(ctx, x + w * 0.48, y + h * 0.42, 3, h * 0.44, "#87613B");
-    const r = w * 0.38;
-    ctx.fillStyle = "#13271B";
-    ctx.beginPath(); ctx.arc(x + w / 2 + 4, y + h * 0.42 + 5, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#28583A";
-    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.38, r, 0, Math.PI * 2); ctx.fill();
+    const r = w * 0.36;
+    const trunk = "#4C321D";
+    rect(ctx, x + w * 0.45, y + h * 0.42, Math.max(5, w * 0.14), h * 0.5, "#241610");
+    rect(ctx, x + w * 0.48, y + h * 0.44, 4, h * 0.42, trunk);
+    rect(ctx, x + w * 0.44, y + h - 10, w * 0.2, 4, "#241610");
+    // Three-canopy shadow blobs then layered greens with a highlight rim.
+    ctx.fillStyle = "#0F1F14";
+    ctx.beginPath(); ctx.arc(x + w / 2 + 4, y + h * 0.42 + 5, r + 3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#17301F";
+    ctx.beginPath(); ctx.arc(x + w / 2 + 2, y + h * 0.36 + 2, r + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#275A35";
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.34, r, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#3C7545";
-    ctx.beginPath(); ctx.arc(x + w * 0.4, y + h * 0.28, r * 0.46, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w * 0.38, y + h * 0.24, r * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.10)";
+    ctx.beginPath(); ctx.arc(x + w * 0.36, y + h * 0.22, r * 0.28, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+  if (kind === "bush") {
+    rect(ctx, x + 4, y + h * 0.8, w - 8, h * 0.2, "#241610");
+    ctx.fillStyle = "#12291A";
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.55, w * 0.42, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#1E4528";
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.5, w * 0.36, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#2F6336";
+    ctx.beginPath(); ctx.arc(x + w * 0.36, y + h * 0.42, w * 0.2, 0, Math.PI * 2); ctx.fill();
     return;
   }
   if (kind.startsWith("car_")) {
     const body = kind === "car_red" ? "#A93B36" : kind === "car_blue" ? "#355A9C" : "#B49234";
-    rect(ctx, x, y + 8, w, h - 12, "#17191F");
-    rect(ctx, x + 3, y + 4, w - 6, h - 12, body);
-    rect(ctx, x + 12, y + 7, w - 24, h * 0.28, "#476878");
-    rect(ctx, x + 15, y + 9, w - 30, 3, "#8FB3BF");
-    rect(ctx, x + 4, y + h - 10, 10, 4, "#E5D071");
-    rect(ctx, x + w - 14, y + h - 10, 10, 4, "#C84643");
-    strokeRect(ctx, x + 3, y + 4, w - 6, h - 12, "#16161C", 2);
+    const dark = kind === "car_red" ? "#7E2A26" : kind === "car_blue" ? "#274273" : "#8A6E24";
+    rect(ctx, x, y + 8, w, h - 10, "#101116");
+    // Tyres.
+    px(ctx, x + 8, y + h - 9, "#0B0B0E", 8);
+    px(ctx, x + w - 16, y + h - 9, "#0B0B0E", 8);
+    px(ctx, x + 8, y + 4, "#0B0B0E", 8);
+    px(ctx, x + w - 16, y + 4, "#0B0B0E", 8);
+    // Body with roof shade.
+    rect(ctx, x + 4, y + 6, w - 8, h - 16, body);
+    rect(ctx, x + 4, y + 6, w - 8, 4, dark);
+    // Cabin glass (windscreen + side + rear).
+    rect(ctx, x + 9, y + 10, w * 0.22, h * 0.22, "#2C4A56");
+    rect(ctx, x + 12, y + 12, w * 0.22 - 6, 3, "#8FB3BF");
+    rect(ctx, x + w * 0.34, y + 10, w * 0.42, h * 0.22, "#344E58");
+    rect(ctx, x + w * 0.37, y + 12, w * 0.36, 3, "#9DBFC8");
+    rect(ctx, x + w * 0.78, y + 10, w * 0.14, h * 0.2, "#2C4A56");
+    // Hood/trunk seams + door line.
+    rect(ctx, x + 6, y + h * 0.34, 3, 2, dark);
+    rect(ctx, x + w - 9, y + h * 0.34, 3, 2, dark);
+    rect(ctx, x + w * 0.55, y + 6, 2, h * 0.3, "rgba(0,0,0,0.25)");
+    // Lights.
+    rect(ctx, x + 4, y + h - 12, 6, 3, "#E5D071");
+    rect(ctx, x + w - 10, y + h - 12, 6, 3, "#C84643");
+    rect(ctx, x + 4, y + 8, 5, 2, "#E5D071");
+    rect(ctx, x + w - 9, y + 8, 5, 2, "#8A2626");
+    strokeRect(ctx, x + 4, y + 6, w - 8, h - 16, "#131318", 2);
     return;
   }
   if (kind === "container") {
-    rect(ctx, x, y, w, h, "#173B3E");
+    rect(ctx, x, y, w, h, "#0E2A2C");
     rect(ctx, x + 3, y + 3, w - 6, h - 6, "#356B6C");
-    for (let sx = x + 9; sx < x + w - 5; sx += 13) rect(ctx, sx, y + 4, 3, h - 8, "#245456");
-    rect(ctx, x + w * 0.66, y + h * 0.25, 10, 4, "#9A552D");
-    rect(ctx, x + w * 0.21, y + h * 0.64, 14, 3, "#A95D31");
-    strokeRect(ctx, x, y, w, h, "#10292C", 3);
+    rect(ctx, x + 3, y + 3, w - 6, 4, "#4B8280");
+    for (let sx = x + 10; sx < x + w - 6; sx += 13) rect(ctx, sx, y + 6, 3, h - 12, "#245456");
+    // Corner casting blocks + rust streaks.
+    px(ctx, x + 2, y + 2, "#9A552D", 5);
+    px(ctx, x + w - 7, y + 2, "#9A552D", 5);
+    rect(ctx, x + 4, y + h - 14, 8, 6, "rgba(90,50,20,0.5)");
+    rect(ctx, x + w - 12, y + 10, 2, 18, "rgba(90,50,20,0.35)");
+    strokeRect(ctx, x, y, w, h, "#0C1F21", 3);
     return;
   }
   if (kind === "crate" || kind === "barricade") {
@@ -229,9 +444,13 @@ export function drawPropSprite(
     rect(ctx, x, y, w, h, c);
     strokeRect(ctx, x, y, w, h, "#29251F", 3);
     if (kind === "crate") {
+      // Wooden planks + nail heads.
+      rect(ctx, x, y + h * 0.5, w, 2, "rgba(0,0,0,0.25)");
       ctx.strokeStyle = "#4F341F"; ctx.lineWidth = 3;
       ctx.beginPath(); ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + w - 4, y + h - 4);
       ctx.moveTo(x + w - 4, y + 4); ctx.lineTo(x + 4, y + h - 4); ctx.stroke();
+      px(ctx, x + 4, y + 4, "#3C2816", 2);
+      px(ctx, x + w - 6, y + h - 6, "#3C2816", 2);
     } else {
       for (let i = -h; i < w; i += 24) {
         ctx.fillStyle = "#D5AA31";
@@ -241,14 +460,56 @@ export function drawPropSprite(
     }
     return;
   }
+  if (kind === "barrel") {
+    const c = ((styleVariant % 3) + 3) % 3;
+    const body = c === 0 ? "#A63B32" : c === 1 ? "#3F6B3C" : "#8A8A8E";
+    rect(ctx, x, y, w, h, "#1A1410");
+    rect(ctx, x + 2, y + 2, w - 4, h - 4, body);
+    rect(ctx, x + 2, y + h * 0.3, w - 4, 4, "rgba(0,0,0,0.35)");
+    rect(ctx, x + 2, y + h * 0.62, w - 4, 4, "rgba(255,255,255,0.16)");
+    rect(ctx, x + w * 0.18, y + 3, 3, h - 6, "rgba(0,0,0,0.18)");
+    rect(ctx, x + w * 0.7, y + 3, 3, h - 6, "rgba(0,0,0,0.18)");
+    rect(ctx, x + 4, y + 2, w - 8, 5, "rgba(255,255,255,0.10)");
+    return;
+  }
+  if (kind === "hydrant") {
+    rect(ctx, x, y, w, h, "#101014");
+    rect(ctx, x + 2, y + h - 6, w - 4, 6, "#8E3A2E");
+    rect(ctx, x + 5, y + 8, w - 10, h - 12, "#C04736");
+    rect(ctx, x + 2, y + 10, w - 4, 6, "#8E3A2E");
+    px(ctx, x + w / 2 - 2, y + h - 9, "#E8CE80", 4);
+    rect(ctx, x + 5, y + 2, 2, 6, "#E8CE80");
+    return;
+  }
+  if (kind === "dumpster") {
+    rect(ctx, x, y, w, h, "#10151B");
+    rect(ctx, x + 2, y + 3, w - 4, h - 8, "#2E4A38");
+    rect(ctx, x + 2, y + 3, w - 4, 5, "#3F644A");
+    for (let sx = x + 8; sx < x + w - 8; sx += 14) rect(ctx, sx, y + 8, 2, h - 14, "rgba(0,0,0,0.25)");
+    rect(ctx, x + 3, y + h - 12, w - 6, 4, "#1C2E22");
+    strokeRect(ctx, x, y, w, h, "#0A0D0F", 3);
+    return;
+  }
   rect(ctx, x, y, w, h, "#303137");
   strokeRect(ctx, x, y, w, h, "#17181C", 2);
 }
 
 export function drawStreetLamp(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  // Soft warm pool of light on the ground beneath the head.
+  const glowX = x + 4.5;
+  const glowY = y + 38;
+  const grad = ctx.createRadialGradient(glowX, glowY, 2, glowX, glowY, 42);
+  grad.addColorStop(0, "rgba(255,200,110,0.20)");
+  grad.addColorStop(1, "rgba(255,200,110,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(glowX - 44, glowY - 44, 88, 88);
+  // Pole with a highlight + lamp head with warm bulb.
   rect(ctx, x + 2, y + 6, 5, 26, "#1A2024");
+  rect(ctx, x + 3, y + 8, 2, 22, "#333E42");
   rect(ctx, x, y + 2, 9, 7, "#4A5658");
+  rect(ctx, x, y + 2, 2, 7, "#6C7A7C");
   rect(ctx, x + 2, y + 4, 5, 3, "#F3CA61");
+  rect(ctx, x + 2, y + 4, 5, 1, "#FFE9B0");
   rect(ctx, x, y + 31, 9, 3, "#101518");
 }
 

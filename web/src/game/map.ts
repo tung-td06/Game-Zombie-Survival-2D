@@ -26,11 +26,15 @@ export type ObstacleKind =
   | "building"
   | "house"
   | "tree"
+  | "bush"
   | "car_red"
   | "car_blue"
   | "car_yellow"
   | "container"
   | "crate"
+  | "barrel"
+  | "hydrant"
+  | "dumpster"
   | "barricade";
 
 export interface Obstacle {
@@ -38,10 +42,17 @@ export interface Obstacle {
   kind: ObstacleKind;
 }
 
+interface RoadCrossing {
+  v: Rect; // vertical road
+  h: Rect; // horizontal road
+  overlap: Rect;
+}
+
 export class GameMap {
   seed: number;
   rng: Rng;
   roads: Rect[] = [];
+  crossings: RoadCrossing[] = [];
   streetLamps: Vec[] = [];
   obstacles: Obstacle[] = [];
   minimap: HTMLCanvasElement | null = null;
@@ -130,6 +141,27 @@ export class GameMap {
         this.streetLamps.push(vertical
           ? { x: road.x + road.w - 18, y: along }
           : { x: along, y: road.y + road.h - 18 });
+      }
+    }
+
+    // Where a vertical road meets a horizontal one, remember the crossing so
+    // zebra markings can be painted at the four approaches.
+    for (let i = 0; i < this.roads.length; i++) {
+      for (let j = i + 1; j < this.roads.length; j++) {
+        const a = this.roads[i]!;
+        const b = this.roads[j]!;
+        const aVert = a.w < a.h;
+        const bVert = b.w < b.h;
+        if (aVert === bVert) continue; // parallel roads never cross
+        const v = aVert ? a : b; // the vertical road
+        const h = aVert ? b : a; // the horizontal road
+        const ox = Math.max(v.x, h.x);
+        const oy = Math.max(v.y, h.y);
+        const ow = Math.min(v.x + v.w, h.x + h.w) - ox;
+        const oh = Math.min(v.y + v.h, h.y + h.h) - oy;
+        if (ow > 0 && oh > 0) {
+          this.crossings.push({ v, h, overlap: { x: ox, y: oy, w: ow, h: oh } });
+        }
       }
     }
 
@@ -255,6 +287,62 @@ export class GameMap {
       const box: Rect = { x: cx - radius, y: cy - radius, w: radius * 2, h: radius * 2 };
       if (!this.overlaps(box, 10)) this.add("tree", box);
     }
+
+    // Shrubs: small leafy clumps scattered like trees.
+    for (let i = 0; i < 26; i++) {
+      const radius = randInt(rng, 12, 18);
+      const cx = randInt(rng, t + radius, w - t - radius);
+      const cy = randInt(rng, t + radius, h - t - radius);
+      const box: Rect = { x: cx - radius, y: cy - radius, w: radius * 2, h: radius * 2 };
+      if (!this.overlaps(box, 10)) this.add("bush", box);
+    }
+
+    // Barrels clustered near containers (props that read as a loading zone).
+    const containers = this.obstacles.filter((o) => o.kind === "container");
+    for (const cont of containers) {
+      const n = randInt(rng, 0, 3);
+      const longSide = cont.rect.w > cont.rect.h; // container orientation
+      for (let k = 0; k < n; k++) {
+        const side = rng.next() < 0.5 ? -1 : 1;
+        // Offset along the container's short axis so the barrel clears its
+        // footprint (> pad margin); position along the long axis is random.
+        const bx = longSide
+          ? cont.rect.x + cont.rect.w / 2 + side * (cont.rect.w / 2 + 26)
+          : cont.rect.x + cont.rect.w / 2 + side * randInt(rng, 0, 28);
+        const by = longSide
+          ? cont.rect.y + cont.rect.h / 2 + side * randInt(rng, 0, 28)
+          : cont.rect.y + cont.rect.h / 2 + side * (cont.rect.h / 2 + 26);
+        const box: Rect = { x: bx - 12, y: by - 16, w: 24, h: 32 };
+        if (box.x > t && box.y > t && box.x + box.w < w - t && box.y + box.h < h - t) {
+          if (!this.overlaps(box, 6)) this.add("barrel", box);
+        }
+      }
+    }
+
+    // Hydrants + dumpsters along random building / house façades.
+    const structures = this.obstacles.filter(
+      (o) => o.kind === "building" || o.kind === "house",
+    );
+    for (let i = 0; i < 7 && structures.length > 0; i++) {
+      const s = rng.pick(structures);
+      const side = rng.next() < 0.5 ? 0 : 1; // 0=top/bottom edge, 1=left/right edge
+      const edge = rng.next() < 0.5 ? -1 : 1;
+      // Prop box is 18x24 and must sit fully OUTSIDE the structure (> pad 8).
+      const gap = 20; // structure edge -> prop centre line
+      let cx: number;
+      let cy: number;
+      if (side === 0) {
+        cx = s.rect.x + s.rect.w / 2 + edge * randInt(rng, 0, Math.max(10, s.rect.w / 2 - 40));
+        cy = edge < 0 ? s.rect.y - gap : s.rect.y + s.rect.h + gap;
+      } else {
+        cx = edge < 0 ? s.rect.x - gap : s.rect.x + s.rect.w + gap;
+        cy = s.rect.y + s.rect.h / 2 + edge * randInt(rng, 0, Math.max(10, s.rect.h / 2 - 40));
+      }
+      const box: Rect = { x: cx - 9, y: cy - 12, w: 18, h: 24 };
+      if (box.x > t && box.y > t && box.x + box.w < w - t && box.y + box.h < h - t) {
+        if (!this.overlaps(box, 8)) this.add(i % 2 === 0 ? "hydrant" : "dumpster", box);
+      }
+    }
   }
 
   // ------------------------------------------------------------ queries --
@@ -331,11 +419,81 @@ export class GameMap {
         );
       }
     }
-    // Roads sit above terrain so worn edges, cracked asphalt, and markings stay sharp.
+    // Curb + worn shoulder strip along both long edges of every road, drawn
+    // BEFORE the slabs so road crossings naturally cover them. Reads as a
+    // raised concrete kerb against the grass.
+    const band = 10;
+    const shoulders: Array<{ ex: number; ey: number; ew: number; eh: number; vertical: boolean }> = [];
+    for (const road of this.roads) {
+      const vertical = road.w < road.h;
+      const edges = vertical
+        ? [
+            { ex: road.x - band, ey: road.y, ew: band, eh: road.h },
+            { ex: road.x + road.w, ey: road.y, ew: band, eh: road.h },
+          ]
+        : [
+            { ex: road.x, ey: road.y - band, ew: road.w, eh: band },
+            { ex: road.x, ey: road.y + road.h, ew: road.w, eh: band },
+          ];
+      for (const e of edges) shoulders.push({ ...e, vertical });
+    }
+    for (const e of shoulders) {
+      const se = applyRect(cam, { x: e.ex, y: e.ey, w: e.ew, h: e.eh });
+      if (!intersectsRect(se, vw, vh)) continue;
+      ctx.fillStyle = "#272C22";
+      ctx.fillRect(se.x, se.y, se.w, se.h);
+      // Lighter grass lip right next to the asphalt.
+      ctx.fillStyle = "#333A28";
+      if (e.vertical) ctx.fillRect(se.x, se.y, 3, se.h);
+      else ctx.fillRect(se.x, se.y, se.w, 3);
+      // Joint ticks every 64 world px along the shoulder.
+      const along = e.vertical ? e.ey : e.ex;
+      const span = e.vertical ? e.eh : e.ew;
+      const start = Math.max(along, e.vertical ? view.y : view.x);
+      const end = Math.min(along + span, e.vertical ? view.y + view.h : view.x + view.w);
+      ctx.fillStyle = "rgba(10,12,8,0.35)";
+      for (let p = Math.floor(start / 64) * 64; p < end; p += 64) {
+        if (e.vertical) ctx.fillRect(se.x + 4, p - cam.offset.y + cam.jitter.y, se.w - 5, 2);
+        else ctx.fillRect(p - cam.offset.x + cam.jitter.x, se.y + 4, 2, se.h - 5);
+      }
+    }
+
+    // Roads sit above terrain and shoulders so worn edges, cracked asphalt,
+    // and markings stay sharp.
     for (const road of this.roads) {
       const sr = applyRect(cam, road);
       if (!intersectsRect(sr, vw, vh)) continue;
       drawRoadDetails(ctx, sr.x, sr.y, sr.w, sr.h, road.w < road.h);
+    }
+
+    // Zebra crosswalks at the four approaches of every road crossing.
+    const zebra = "rgba(226,222,210,0.82)";
+    for (const c of this.crossings) {
+      const ov = applyRect(cam, c.overlap);
+      if (!intersectsRect(ov, vw, vh)) continue;
+      const vwRect = applyRect(cam, c.v);
+      const hwRect = applyRect(cam, c.h);
+      const drawStripes = (
+        x0: number,
+        y0: number,
+        len: number,
+        horiz: boolean,
+      ): void => {
+        ctx.fillStyle = zebra;
+        if (horiz) {
+          const cols = Math.floor(len / 14);
+          for (let i = 0; i < cols; i++) ctx.fillRect(x0 + i * 14, y0, 8, 6);
+        } else {
+          const rows = Math.floor(len / 14);
+          for (let i = 0; i < rows; i++) ctx.fillRect(x0, y0 + i * 14, 6, 8);
+        }
+      };
+      // Above and below the overlap, across the vertical road.
+      drawStripes(vwRect.x + 4, ov.y - 12, vwRect.w - 8, true);
+      drawStripes(vwRect.x + 4, ov.y + ov.h + 6, vwRect.w - 8, true);
+      // Left and right of the overlap, across the horizontal road.
+      drawStripes(ov.x - 12, hwRect.y + 4, hwRect.h - 8, false);
+      drawStripes(ov.x + ov.w + 6, hwRect.y + 4, hwRect.h - 8, false);
     }
   }
 
@@ -388,7 +546,9 @@ export class GameMap {
       // dark. Never derived from camera/screen state, so the exact same
       // buildings stay lit (or dark) no matter how the player moves.
       const litWindows = windowLights && windowLightSeed(rect.x, rect.y) >= 30;
-      drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h, litWindows);
+      // Façade / prop colour variety is also world-anchored (never camera).
+      const styleVariant = pixelVariant(1, rect.x, rect.y, 4);
+      drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h, litWindows, styleVariant);
       return;
     }
     switch (kind) {
