@@ -7,6 +7,7 @@ import { circleRectCollide, type Rect } from "./collision";
 import { mulberry32, type Rng } from "../lib/rng";
 import type { Vec } from "./vec";
 import type { Camera } from "./camera";
+import { TILE_SIZE, drawGroundTile, drawPropSprite, drawRoadDetails, pixelVariant } from "./pixelArt";
 
 export const CELL = 400;
 
@@ -292,48 +293,24 @@ export class GameMap {
     const vw = w ?? cam.viewW;
     const vh = h ?? cam.viewH;
     const view = cam.viewRect();
-    // BG + grid
-    ctx.fillStyle = "#10120E";
-    ctx.fillRect(0, 0, vw, vh);
-    ctx.strokeStyle = "#181C16";
-    ctx.lineWidth = 1;
-    const step = 100;
-    const xStart = Math.floor(view.x / step) * step;
-    for (let x = xStart; x < view.x + view.w; x += step) {
-      const sx = x - cam.offset.x + cam.jitter.x;
-      ctx.beginPath();
-      ctx.moveTo(sx, 0);
-      ctx.lineTo(sx, vh);
-      ctx.stroke();
+    const xStart = Math.floor(view.x / TILE_SIZE) * TILE_SIZE;
+    const yStart = Math.floor(view.y / TILE_SIZE) * TILE_SIZE;
+    for (let y = yStart; y < view.y + view.h + TILE_SIZE; y += TILE_SIZE) {
+      for (let x = xStart; x < view.x + view.w + TILE_SIZE; x += TILE_SIZE) {
+        drawGroundTile(
+          ctx,
+          x - cam.offset.x + cam.jitter.x,
+          y - cam.offset.y + cam.jitter.y,
+          pixelVariant(this.seed, x, y, 6),
+          this.seed,
+        );
+      }
     }
-    const yStart = Math.floor(view.y / step) * step;
-    for (let y = yStart; y < view.y + view.h; y += step) {
-      const sy = y - cam.offset.y + cam.jitter.y;
-      ctx.beginPath();
-      ctx.moveTo(0, sy);
-      ctx.lineTo(vw, sy);
-      ctx.stroke();
-    }
-    // Roads.
+    // Roads sit above terrain so worn edges, cracked asphalt, and markings stay sharp.
     for (const road of this.roads) {
       const sr = applyRect(cam, road);
       if (!intersectsRect(sr, vw, vh)) continue;
-      ctx.fillStyle = "#262628";
-      ctx.fillRect(sr.x, sr.y, sr.w, sr.h);
-      ctx.fillStyle = "#D2BE5A";
-      if (road.w < road.h) {
-        let yy = sr.y - ((sr.y % 70) + 70) % 70;
-        while (yy < sr.y + sr.h) {
-          ctx.fillRect(sr.x + sr.w / 2 - 3, yy, 6, 36);
-          yy += 70;
-        }
-      } else {
-        let xx = sr.x - ((sr.x % 70) + 70) % 70;
-        while (xx < sr.x + sr.w) {
-          ctx.fillRect(xx, sr.y + sr.h / 2 - 3, 36, 6);
-          xx += 70;
-        }
-      }
+      drawRoadDetails(ctx, sr.x, sr.y, sr.w, sr.h, road.w < road.h);
     }
   }
 
@@ -365,6 +342,10 @@ export class GameMap {
     kind: ObstacleKind,
   ): void {
     const sr = applyRect(cam, rect);
+    if (String(kind) !== "border") {
+      drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h);
+      return;
+    }
     switch (kind) {
       case "building": {
         ctx.fillStyle = "#3A3842";
