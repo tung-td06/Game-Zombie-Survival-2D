@@ -14,7 +14,7 @@ import {
   getPlayerStats,
   deleteGameSave,
 } from "../src/lib/db";
-import { _resetCacheForTests, _dataDir } from "../src/lib/persistent-storage";
+import { _resetCacheForTests, _dataDir } from "../src/server/persistent-storage";
 
 // These tests exercise the on-disk persistent store. They use a dedicated
 // sub-directory so they never interfere with real dev data.
