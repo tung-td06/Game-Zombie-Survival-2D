@@ -28,6 +28,7 @@ export class WaveManager {
   speedMult = 1;
   dmgMult = 1;
   bossAlive = false;
+  bossSpawnedThisWave = false;
 
   get waveSize(): number {
     return BASE_WAVE_SIZE + Math.max(0, this.wave - 1) * WAVE_SIZE_GROWTH;
@@ -62,6 +63,7 @@ export class WaveManager {
     this.spawned_this_wave = 0;
     this.spawnTimer = 0.5;
     this.bossAlive = false;
+    this.bossSpawnedThisWave = false;
     game.wave_announce?.(`WAVE ${this.wave}`, this.isBossWave);
     game.audio.playSFX(this.isBossWave ? "wave.boss" : "wave.start");
     if (this.isBossWave) {
@@ -98,7 +100,7 @@ export class WaveManager {
     }
     if (
       this.isBossWave &&
-      !this.bossAlive &&
+      !this.bossSpawnedThisWave &&
       game.zombies.length < MAX_ALIVE_ZOMBIES &&
       data
     ) {
@@ -114,6 +116,7 @@ export class WaveManager {
         );
         game.zombies.push(boss);
         this.bossAlive = true;
+        this.bossSpawnedThisWave = true;
         game.audio.playSFX("enemy.boss_spawn", pos);
         game.toast("!! THE ABOMINATION HAS AWAKENED !!");
       }

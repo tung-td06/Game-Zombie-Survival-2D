@@ -4,12 +4,20 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 interface LeaderboardEntry {
+  rank: number;
   username: string;
   score: number;
-  kills: number;
   wave: number;
-  level: number;
-  date: string;
+  zombies_killed: number;
+  survival_time: number;
+}
+
+interface PlayerStatsData {
+  total_games: number;
+  best_score: number;
+  best_wave: number;
+  total_zombies_killed: number;
+  best_survival_time: number;
 }
 
 type Tab = "play" | "leaderboard";
@@ -58,61 +66,93 @@ const sectionHeading: React.CSSProperties = {
   paddingBottom: 10,
 };
 
+function formatTime(seconds: number): string {
+  if (!seconds || seconds <= 0) return "00:00";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
 export default function Home() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+
+  // Auth & User state
+  const [authTab, setAuthTab] = useState<"login" | "register">("login");
+  const [usernameInput, setUsernameInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [displayNameInput, setDisplayNameInput] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  const [currentUser, setCurrentUser] = useState<{
+    id: string;
+    username: string;
+    display_name: string;
+  } | null>(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [stats, setStats] = useState({ highScore: 0, totalKills: 0, level: 1 });
+
+  // Player Stats
+  const [stats, setStats] = useState<PlayerStatsData>({
+    total_games: 0,
+    best_score: 0,
+    best_wave: 0,
+    total_zombies_killed: 0,
+    best_survival_time: 0,
+  });
+
+  // Room & Save state
   const [roomCodeInput, setRoomCodeInput] = useState("");
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<Tab>("play");
-  const [hovered, setHovered] = useState<string | null>(null);
   const [hasSave, setHasSave] = useState(false);
 
+  // Leaderboard state
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [leaderboardError, setLeaderboardError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+
+  // UI state
+  const [activeTab, setActiveTab] = useState<Tab>("play");
+  const [hovered, setHovered] = useState<string | null>(null);
+
   useEffect(() => {
-    const savedName = localStorage.getItem("zs.username");
-    if (savedName) {
-      setUsername(savedName);
-      // Await the full profile fetch (including cookie set) before marking
-      // the user as logged-in so the Play button is only enabled once the
-      // session cookie is guaranteed to be in place.
-      fetchProfile(savedName).then(() => {
-        setIsLoggedIn(true);
-      });
-    }
-    fetchLeaderboard();
+    const init = async () => {
+      try {
+        const res = await fetch("/api/player/me");
+        const data = (await res.json()) as any;
+        if (data.success && data.user) {
+          setCurrentUser(data.user);
+          setIsLoggedIn(true);
+          fetchPlayerStats();
+          checkSave();
+        } else {
+          setIsLoggedIn(false);
+          setCurrentUser(null);
+        }
+      } catch {
+        setIsLoggedIn(false);
+        setCurrentUser(null);
+      }
+      fetchLeaderboard();
+    };
+    init();
   }, []);
 
-  const fetchProfile = async (name: string): Promise<void> => {
+  const fetchPlayerStats = async () => {
     try {
-      // GET /api/profile auto-creates a default profile if the user is new
-      // and also sets the session_user cookie in the same response.
-      const res = await fetch(`/api/profile?username=${encodeURIComponent(name.trim())}`);
-      const data = await res.json() as any;
-      if (data.profile) {
-        localStorage.setItem("zs.save.v1", JSON.stringify(data.profile));
-        setStats({
-          highScore: data.profile.high_score || 0,
-          totalKills: data.profile.total_kills || 0,
-          level: data.profile.player_level || 1,
-        });
+      const res = await fetch("/api/player/stats");
+      const data = (await res.json()) as any;
+      if (data.success && data.data) {
+        setStats(data.data);
       }
-
-      // Check if user has a save game. This is a separate request made AFTER
-      // the profile GET has returned, so the session_user cookie is now set
-      // and the /api/game/save endpoint will accept the request (no 401).
-      await checkSave(name.trim());
     } catch (err) {
-      console.error("Failed to fetch profile:", err);
+      console.error("Failed to fetch player stats:", err);
     }
   };
 
-  const checkSave = async (name: string): Promise<void> => {
+  const checkSave = async () => {
     try {
-      const saveRes = await fetch(`/api/game/save?username=${encodeURIComponent(name.toLowerCase())}`);
-      const saveData = await saveRes.json() as any;
+      const saveRes = await fetch("/api/game/save");
+      const saveData = (await saveRes.json()) as any;
       setHasSave(!!saveData.save);
     } catch {
       setHasSave(false);
@@ -121,78 +161,148 @@ export default function Home() {
 
   const fetchLeaderboard = async () => {
     setIsRefreshing(true);
+    setLeaderboardError(null);
     try {
       const res = await fetch("/api/leaderboard");
-      const data = await res.json() as any;
-      if (data.leaderboard) {
-        setLeaderboard(data.leaderboard);
-        setLastUpdated(new Date().toLocaleTimeString("vi-VN", { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      const data = (await res.json()) as any;
+      if (data.success && (data.data || data.leaderboard)) {
+        const list = data.data || data.leaderboard;
+        setLeaderboard(list);
+        setLastUpdated(
+          new Date().toLocaleTimeString("vi-VN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })
+        );
+      } else {
+        setLeaderboardError("KHÔNG THỂ TẢI BẢNG XẾP HẠNG.");
       }
     } catch (err) {
       console.error("Failed to fetch leaderboard:", err);
+      setLeaderboardError("KHÔNG THỂ TẢI BẢNG XẾP HẠNG.");
     } finally {
       setIsRefreshing(false);
     }
   };
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) return;
-    const cleanName = username.trim().toLowerCase();
-    localStorage.setItem("zs.username", cleanName);
-    setUsername(cleanName);
-    // Await the full fetchProfile so the session_user cookie is set before
-    // the user can click PLAY (prevents redirect-to-home race condition).
-    await fetchProfile(cleanName);
-    setIsLoggedIn(true);
+    setAuthError(null);
+    setAuthLoading(true);
+
+    try {
+      const endpoint =
+        authTab === "register" ? "/api/player/register" : "/api/player/login";
+      const payload =
+        authTab === "register"
+          ? {
+              username: usernameInput,
+              password: passwordInput,
+              display_name: displayNameInput || usernameInput,
+            }
+          : {
+              username: usernameInput,
+              password: passwordInput,
+            };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await res.json()) as any;
+      if (data.success && data.user) {
+        setCurrentUser(data.user);
+        setIsLoggedIn(true);
+        setUsernameInput("");
+        setPasswordInput("");
+        setDisplayNameInput("");
+        await fetchPlayerStats();
+        await checkSave();
+      } else {
+        setAuthError(data.error || "Đã xảy ra lỗi khi xác thực");
+      }
+    } catch (err: any) {
+      setAuthError("Không thể kết nối đến Cloudflare API");
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("zs.username");
-    localStorage.removeItem("zs.save.v1");
-    setUsername("");
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/player/logout", { method: "POST" });
+    } catch {}
+    setCurrentUser(null);
     setIsLoggedIn(false);
-    setStats({ highScore: 0, totalKills: 0, level: 1 });
+    setStats({
+      total_games: 0,
+      best_score: 0,
+      best_wave: 0,
+      total_zombies_killed: 0,
+      best_survival_time: 0,
+    });
     setHasSave(false);
-    fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
   };
 
   const startSinglePlayer = () => {
-    if (!isLoggedIn) return;
-    router.push(`/play?mode=single&name=${encodeURIComponent(username)}`);
+    if (!isLoggedIn || !currentUser) return;
+    router.push(
+      `/play?mode=single&name=${encodeURIComponent(
+        currentUser.display_name || currentUser.username
+      )}`
+    );
   };
 
   const continueSinglePlayer = () => {
-    if (!isLoggedIn) return;
-    router.push(`/play?mode=single&continue=1&name=${encodeURIComponent(username)}`);
+    if (!isLoggedIn || !currentUser) return;
+    router.push(
+      `/play?mode=single&continue=1&name=${encodeURIComponent(
+        currentUser.display_name || currentUser.username
+      )}`
+    );
   };
 
   const startNewSinglePlayer = () => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || !currentUser) return;
     if (confirm("Bắt đầu chơi mới sẽ xóa file lưu cũ. Bạn có muốn tiếp tục?")) {
-      fetch(`/api/game/save?username=${encodeURIComponent(username)}`, {
-        method: "DELETE"
-      }).catch(err => console.error("Failed to delete old save:", err));
-      router.push(`/play?mode=single&name=${encodeURIComponent(username)}`);
+      fetch("/api/game/save", {
+        method: "DELETE",
+      }).catch((err) => console.error("Failed to delete old save:", err));
+      router.push(
+        `/play?mode=single&name=${encodeURIComponent(
+          currentUser.display_name || currentUser.username
+        )}`
+      );
     }
   };
 
   const hostRoom = () => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || !currentUser) return;
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     let code = "";
     for (let i = 0; i < 4; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    router.push(`/play?mode=host&room=${code}&name=${encodeURIComponent(username)}`);
+    router.push(
+      `/play?mode=host&room=${code}&name=${encodeURIComponent(
+        currentUser.display_name || currentUser.username
+      )}`
+    );
   };
 
   const joinRoom = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isLoggedIn) return;
+    if (!isLoggedIn || !currentUser) return;
     if (roomCodeInput.length !== 4) return;
     const code = roomCodeInput.toUpperCase();
-    router.push(`/play?mode=guest&room=${code}&name=${encodeURIComponent(username)}`);
+    router.push(
+      `/play?mode=guest&room=${code}&name=${encodeURIComponent(
+        currentUser.display_name || currentUser.username
+      )}`
+    );
   };
 
   return (
@@ -208,7 +318,7 @@ export default function Home() {
           "radial-gradient(circle at 50% 0%, rgba(255,60,70,0.06) 0%, rgba(10,10,10,0) 55%), radial-gradient(circle at center, rgba(30,8,8,0.45) 0%, rgba(10,10,10,0.95) 100%)",
       }}
     >
-      <div style={{ maxWidth: 1040, margin: "0 auto" }}>
+      <div style={{ maxWidth: 1080, margin: "0 auto" }}>
         {/* Header */}
         <header style={{ textAlign: "center", marginBottom: 28 }}>
           <h1
@@ -222,17 +332,17 @@ export default function Home() {
               lineHeight: 1.1,
             }}
           >
-            ZOMBIE SURVIVAL
+            ZOMBIE SURVIVAL 2D
           </h1>
           <p
             style={{
               color: C.dim,
               fontSize: "0.95rem",
               marginTop: 10,
-              letterSpacing: 1,
+              letterSpacing: 1.5,
             }}
           >
-            POST-APOCALYPTIC TOP-DOWN SHOOTER
+            CLOUDFLARE D1 POWERED TOP-DOWN SHOOTER
           </p>
         </header>
 
@@ -255,67 +365,223 @@ export default function Home() {
               minWidth: 0,
             }}
           >
-            {/* Survivor Profile */}
+            {/* Survivor Profile / Auth */}
             <div style={{ ...cardBase, padding: 22 }}>
-              <h2 style={sectionHeading}>Survivor Profile</h2>
+              <h2 style={sectionHeading}>
+                {isLoggedIn ? "MY RECORD (HỒ SƠ SURVIVOR)" : "CLOUDFLARE AUTH"}
+              </h2>
 
               {!isLoggedIn ? (
-                <form
-                  onSubmit={handleLogin}
-                  style={{ display: "flex", flexDirection: "column", gap: 10 }}
-                >
-                  <label
+                <div>
+                  {/* Auth Mode Toggle */}
+                  <div
                     style={{
-                      fontSize: 11,
-                      color: C.dim,
-                      letterSpacing: 1.5,
-                      textTransform: "uppercase",
+                      display: "flex",
+                      backgroundColor: C.panelDeep,
+                      borderRadius: 4,
+                      padding: 2,
+                      marginBottom: 16,
+                      border: `1px solid ${C.borderSoft}`,
                     }}
                   >
-                    Enter Codename
-                  </label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    maxLength={15}
-                    placeholder="Survivor Name"
-                    style={{
-                      padding: "10px 12px",
-                      backgroundColor: C.bgDeep,
-                      border: `1px solid ${C.border}`,
-                      color: C.text,
-                      fontFamily: "inherit",
-                      fontSize: "0.95rem",
-                      borderRadius: 4,
-                      outline: "none",
-                      width: "100%",
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    style={{
-                      padding: "10px 12px",
-                      backgroundColor: C.red,
-                      color: C.bgDeep,
-                      border: "none",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      fontSize: "0.9rem",
-                      letterSpacing: 1.5,
-                      borderRadius: 4,
-                      transition: "background-color 0.15s ease",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.currentTarget.style.backgroundColor = C.redHover)
-                    }
-                    onMouseLeave={(e) =>
-                      (e.currentTarget.style.backgroundColor = C.red)
-                    }
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab("login");
+                        setAuthError(null);
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: "8px 0",
+                        backgroundColor:
+                          authTab === "login" ? C.red : "transparent",
+                        color: authTab === "login" ? C.bgDeep : C.textSoft,
+                        border: "none",
+                        fontWeight: 700,
+                        fontSize: "0.8rem",
+                        letterSpacing: 1,
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      ĐĂNG NHẬP
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAuthTab("register");
+                        setAuthError(null);
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: "8px 0",
+                        backgroundColor:
+                          authTab === "register" ? C.red : "transparent",
+                        color: authTab === "register" ? C.bgDeep : C.textSoft,
+                        border: "none",
+                        fontWeight: 700,
+                        fontSize: "0.8rem",
+                        letterSpacing: 1,
+                        borderRadius: 3,
+                        cursor: "pointer",
+                        transition: "all 0.15s ease",
+                      }}
+                    >
+                      ĐĂNG KÝ
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={handleAuthSubmit}
+                    style={{ display: "flex", flexDirection: "column", gap: 12 }}
                   >
-                    SIGN IN
-                  </button>
-                </form>
+                    <div>
+                      <label
+                        style={{
+                          fontSize: 11,
+                          color: C.dim,
+                          letterSpacing: 1.5,
+                          textTransform: "uppercase",
+                          display: "block",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Tên đăng nhập
+                      </label>
+                      <input
+                        type="text"
+                        value={usernameInput}
+                        onChange={(e) => setUsernameInput(e.target.value)}
+                        maxLength={20}
+                        required
+                        placeholder="username"
+                        style={{
+                          padding: "10px 12px",
+                          backgroundColor: C.bgDeep,
+                          border: `1px solid ${C.border}`,
+                          color: C.text,
+                          fontFamily: "inherit",
+                          fontSize: "0.9rem",
+                          borderRadius: 4,
+                          outline: "none",
+                          width: "100%",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+
+                    {authTab === "register" && (
+                      <div>
+                        <label
+                          style={{
+                            fontSize: 11,
+                            color: C.dim,
+                            letterSpacing: 1.5,
+                            textTransform: "uppercase",
+                            display: "block",
+                            marginBottom: 4,
+                          }}
+                        >
+                          Tên hiển thị (Display Name)
+                        </label>
+                        <input
+                          type="text"
+                          value={displayNameInput}
+                          onChange={(e) => setDisplayNameInput(e.target.value)}
+                          maxLength={20}
+                          placeholder="Zombie Hunter"
+                          style={{
+                            padding: "10px 12px",
+                            backgroundColor: C.bgDeep,
+                            border: `1px solid ${C.border}`,
+                            color: C.text,
+                            fontFamily: "inherit",
+                            fontSize: "0.9rem",
+                            borderRadius: 4,
+                            outline: "none",
+                            width: "100%",
+                            boxSizing: "border-box",
+                          }}
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label
+                        style={{
+                          fontSize: 11,
+                          color: C.dim,
+                          letterSpacing: 1.5,
+                          textTransform: "uppercase",
+                          display: "block",
+                          marginBottom: 4,
+                        }}
+                      >
+                        Mật khẩu
+                      </label>
+                      <input
+                        type="password"
+                        value={passwordInput}
+                        onChange={(e) => setPasswordInput(e.target.value)}
+                        required
+                        placeholder="••••••••"
+                        style={{
+                          padding: "10px 12px",
+                          backgroundColor: C.bgDeep,
+                          border: `1px solid ${C.border}`,
+                          color: C.text,
+                          fontFamily: "inherit",
+                          fontSize: "0.9rem",
+                          borderRadius: 4,
+                          outline: "none",
+                          width: "100%",
+                          boxSizing: "border-box",
+                        }}
+                      />
+                    </div>
+
+                    {authError && (
+                      <div
+                        style={{
+                          color: C.red,
+                          fontSize: "0.78rem",
+                          backgroundColor: "rgba(255,60,70,0.1)",
+                          border: `1px solid ${C.redDeep}`,
+                          padding: "8px 10px",
+                          borderRadius: 4,
+                        }}
+                      >
+                        {authError}
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={authLoading}
+                      style={{
+                        padding: "11px 12px",
+                        backgroundColor: C.red,
+                        color: C.bgDeep,
+                        border: "none",
+                        fontWeight: 800,
+                        cursor: authLoading ? "not-allowed" : "pointer",
+                        fontSize: "0.9rem",
+                        letterSpacing: 1.5,
+                        borderRadius: 4,
+                        marginTop: 4,
+                        opacity: authLoading ? 0.7 : 1,
+                        transition: "background-color 0.15s ease",
+                      }}
+                    >
+                      {authLoading
+                        ? "ĐANG XỬ LÝ..."
+                        : authTab === "register"
+                        ? "TẠO TÀI KHOẢN"
+                        : "ĐĂNG NHẬP"}
+                    </button>
+                  </form>
+                </div>
               ) : (
                 <div>
                   <div
@@ -329,21 +595,27 @@ export default function Home() {
                       borderBottom: `1px solid ${C.borderSoft}`,
                     }}
                   >
-                    <span
-                      style={{
-                        fontSize: "1.05rem",
-                        fontWeight: 700,
-                        color: "#FFFFFF",
-                        letterSpacing: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        minWidth: 0,
-                      }}
-                      title={username}
-                    >
-                      {username}
-                    </span>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: "1.1rem",
+                          fontWeight: 800,
+                          color: "#FFFFFF",
+                          letterSpacing: 1,
+                        }}
+                      >
+                        {currentUser?.display_name || currentUser?.username}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.75rem",
+                          color: C.dim,
+                          letterSpacing: 1,
+                        }}
+                      >
+                        @{currentUser?.username}
+                      </div>
+                    </div>
                     <button
                       onClick={handleLogout}
                       style={{
@@ -353,11 +625,10 @@ export default function Home() {
                         cursor: "pointer",
                         fontSize: "0.75rem",
                         letterSpacing: 1.5,
-                        padding: "5px 10px",
+                        padding: "6px 12px",
                         borderRadius: 4,
                         fontWeight: 700,
                         transition: "all 0.15s ease",
-                        flexShrink: 0,
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.backgroundColor = C.red;
@@ -368,11 +639,11 @@ export default function Home() {
                         e.currentTarget.style.color = C.red;
                       }}
                     >
-                      LOG OUT
+                      ĐĂNG XUẤT
                     </button>
                   </div>
 
-                  {/* Stats grid — labels left, values right; values share a single column */}
+                  {/* Player Stats Grid — MY RECORD */}
                   <div
                     style={{
                       display: "grid",
@@ -391,17 +662,17 @@ export default function Home() {
                         textTransform: "uppercase",
                       }}
                     >
-                      High Score
+                      BEST SCORE
                     </span>
                     <span
                       style={{
                         color: C.gold,
-                        fontWeight: 700,
+                        fontWeight: 800,
                         fontVariantNumeric: "tabular-nums",
-                        justifySelf: "end",
+                        fontSize: "0.95rem",
                       }}
                     >
-                      {stats.highScore.toLocaleString()}
+                      {stats.best_score.toLocaleString()}
                     </span>
 
                     <span
@@ -412,38 +683,76 @@ export default function Home() {
                         textTransform: "uppercase",
                       }}
                     >
-                      Total Kills
-                    </span>
-                    <span
-                      style={{
-                        color: C.red,
-                        fontWeight: 700,
-                        fontVariantNumeric: "tabular-nums",
-                        justifySelf: "end",
-                      }}
-                    >
-                      {stats.totalKills.toLocaleString()}
-                    </span>
-
-                    <span
-                      style={{
-                        color: C.dim,
-                        letterSpacing: 1.5,
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Level
+                      BEST WAVE
                     </span>
                     <span
                       style={{
                         color: C.cyan,
-                        fontWeight: 700,
+                        fontWeight: 800,
                         fontVariantNumeric: "tabular-nums",
-                        justifySelf: "end",
                       }}
                     >
-                      {stats.level}
+                      Wave {stats.best_wave}
+                    </span>
+
+                    <span
+                      style={{
+                        color: C.dim,
+                        letterSpacing: 1.5,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      ZOMBIES KILLED
+                    </span>
+                    <span
+                      style={{
+                        color: C.red,
+                        fontWeight: 800,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {stats.total_zombies_killed.toLocaleString()}
+                    </span>
+
+                    <span
+                      style={{
+                        color: C.dim,
+                        letterSpacing: 1.5,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      BEST SURVIVAL TIME
+                    </span>
+                    <span
+                      style={{
+                        color: C.text,
+                        fontWeight: 800,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {formatTime(stats.best_survival_time)}
+                    </span>
+
+                    <span
+                      style={{
+                        color: C.dim,
+                        letterSpacing: 1.5,
+                        fontSize: 11,
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      TOTAL GAMES
+                    </span>
+                    <span
+                      style={{
+                        color: C.textSoft,
+                        fontWeight: 700,
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {stats.total_games}
                     </span>
                   </div>
                 </div>
@@ -453,7 +762,6 @@ export default function Home() {
             {/* How To Play */}
             <div style={{ ...cardBase, padding: 22 }}>
               <h2 style={sectionHeading}>How To Play</h2>
-
               <ul
                 style={{
                   listStyle: "none",
@@ -488,8 +796,10 @@ export default function Home() {
                   <span style={controlDesc}>Đổi vũ khí</span>
                 </li>
                 <li style={controlRow}>
-                  <span style={{ ...keyBadge, color: C.cyan, borderColor: C.cyan }}>
-                    E&nbsp;(Hold)
+                  <span
+                    style={{ ...keyBadge, color: C.cyan, borderColor: C.cyan }}
+                  >
+                    E (Hold)
                   </span>
                   <span style={controlDesc}>Hút nhanh Loot quanh người</span>
                 </li>
@@ -498,42 +808,6 @@ export default function Home() {
                   <span style={controlDesc}>Tạm dừng</span>
                 </li>
               </ul>
-
-              {/* Objective */}
-              <div
-                style={{
-                  marginTop: 16,
-                  paddingTop: 14,
-                  borderTop: `1px solid ${C.borderSoft}`,
-                }}
-              >
-                <h3
-                  style={{
-                    margin: 0,
-                    fontSize: 11,
-                    color: C.dim,
-                    letterSpacing: 1.5,
-                    textTransform: "uppercase",
-                    fontWeight: 700,
-                  }}
-                >
-                  Objective
-                </h3>
-                <ul
-                  style={{
-                    listStyle: "none",
-                    padding: 0,
-                    margin: "8px 0 0 0",
-                    fontSize: "0.8rem",
-                    lineHeight: 1.7,
-                    color: C.textSoft,
-                  }}
-                >
-                  <li>— Survive the waves.</li>
-                  <li>— Collect loot.</li>
-                  <li>— Upgrade your survivor.</li>
-                </ul>
-              </div>
             </div>
           </section>
 
@@ -558,12 +832,12 @@ export default function Home() {
               role="tablist"
             >
               <TabButton
-                label="Game Lobby"
+                label="GAME LOBBY"
                 active={activeTab === "play"}
                 onClick={() => setActiveTab("play")}
               />
               <TabButton
-                label="Leaderboard"
+                label="LEADERBOARD"
                 active={activeTab === "leaderboard"}
                 onClick={() => {
                   setActiveTab("leaderboard");
@@ -588,19 +862,27 @@ export default function Home() {
                       gap: 16,
                     }}
                   >
-                    <div style={{ fontSize: "2rem" }}>🔒</div>
+                    <div style={{ fontSize: "2.5rem" }}>🔒</div>
                     <div
                       style={{
                         fontSize: "0.95rem",
                         color: C.textSoft,
                         fontWeight: 700,
-                        letterSpacing: 0.5,
+                        letterSpacing: 1,
                       }}
                     >
                       VUI LÒNG ĐĂNG NHẬP ĐỂ CHƠI
                     </div>
-                    <p style={{ margin: 0, fontSize: "0.8rem", color: C.dim, lineHeight: 1.5 }}>
-                      Hãy nhập mật danh (Codename) của bạn ở ô bên trái và nhấn **SIGN IN** để mở khóa tất cả các chế độ chơi đơn và chơi mạng.
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: "0.8rem",
+                        color: C.dim,
+                        lineHeight: 1.5,
+                        maxWidth: 340,
+                      }}
+                    >
+                      Hãy **ĐĂNG NHẬP** hoặc **ĐĂNG KÝ** tài khoản ở khung bên trái để lưu thành tích vào Cloudflare D1 và tham gia bảng xếp hạng.
                     </p>
                   </div>
                 ) : (
@@ -611,18 +893,83 @@ export default function Home() {
                       gap: 20,
                     }}
                   >
-                  {/* Single Player — primary CTA, but compact */}
-                  {hasSave ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {/* Single Player Buttons */}
+                    {hasSave ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 12,
+                        }}
+                      >
+                        <button
+                          onClick={continueSinglePlayer}
+                          onMouseEnter={() => setHovered("continue")}
+                          onMouseLeave={() => setHovered(null)}
+                          style={{
+                            width: "100%",
+                            padding: "12px 16px",
+                            backgroundColor:
+                              hovered === "continue" ? "#FFD700" : "#FFC850",
+                            color: C.bgDeep,
+                            fontSize: "1.05rem",
+                            fontWeight: 800,
+                            border: "none",
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            letterSpacing: 2,
+                            boxShadow:
+                              hovered === "continue"
+                                ? "0 4px 18px rgba(255, 200, 80, 0.45)"
+                                : "0 2px 12px rgba(255, 200, 80, 0.25)",
+                            transition:
+                              "background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease",
+                            transform:
+                              hovered === "continue"
+                                ? "translateY(-1px)"
+                                : "none",
+                          }}
+                        >
+                          ▶ TIẾP TỤC CHƠI (CONTINUE)
+                        </button>
+                        <button
+                          onClick={startNewSinglePlayer}
+                          onMouseEnter={() => setHovered("new_game")}
+                          onMouseLeave={() => setHovered(null)}
+                          style={{
+                            width: "100%",
+                            padding: "10px 16px",
+                            color: C.textSoft,
+                            fontSize: "0.95rem",
+                            fontWeight: 700,
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 6,
+                            cursor: "pointer",
+                            letterSpacing: 2,
+                            transition: "all 0.15s ease",
+                            transform:
+                              hovered === "new_game"
+                                ? "translateY(-1px)"
+                                : "none",
+                            backgroundColor:
+                              hovered === "new_game"
+                                ? "rgba(255,255,255,0.05)"
+                                : "transparent",
+                          }}
+                        >
+                          🎮 CHƠI MỚI (NEW GAME)
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        onClick={continueSinglePlayer}
-                        onMouseEnter={() => setHovered("continue")}
+                        onClick={startSinglePlayer}
+                        onMouseEnter={() => setHovered("single")}
                         onMouseLeave={() => setHovered(null)}
                         style={{
                           width: "100%",
                           padding: "12px 16px",
                           backgroundColor:
-                            hovered === "continue" ? "#FFD700" : "#FFC850",
+                            hovered === "single" ? C.redHover : C.red,
                           color: C.bgDeep,
                           fontSize: "1.05rem",
                           fontWeight: 800,
@@ -631,281 +978,226 @@ export default function Home() {
                           cursor: "pointer",
                           letterSpacing: 2,
                           boxShadow:
-                            hovered === "continue"
-                              ? "0 4px 18px rgba(255, 200, 80, 0.45)"
-                              : "0 2px 12px rgba(255, 200, 80, 0.25)",
+                            hovered === "single"
+                              ? "0 4px 18px rgba(255, 90, 99, 0.45)"
+                              : "0 2px 12px rgba(255, 60, 70, 0.25)",
                           transition:
                             "background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease",
                           transform:
-                            hovered === "continue" ? "translateY(-1px)" : "none",
+                            hovered === "single" ? "translateY(-1px)" : "none",
                         }}
                       >
-                        ▶ TIẾP TỤC CHƠI (CONTINUE)
+                        ▶ CHƠI ĐƠN (SINGLE PLAYER)
                       </button>
-                      <button
-                        onClick={startNewSinglePlayer}
-                        onMouseEnter={() => setHovered("new_game")}
-                        onMouseLeave={() => setHovered(null)}
+                    )}
+
+                    {/* Co-op divider */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                      }}
+                    >
+                      <div
                         style={{
-                          width: "100%",
-                          padding: "10px 16px",
-                          color: C.textSoft || "#EBEBE1",
-                          fontSize: "0.95rem",
-                          fontWeight: 700,
+                          flex: 1,
+                          height: 1,
+                          backgroundColor: C.border,
+                        }}
+                      />
+                      <span
+                        style={{
+                          color: C.dim,
+                          fontSize: 11,
+                          letterSpacing: 1.5,
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Hoặc chơi mạng (Co-op)
+                      </span>
+                      <div
+                        style={{
+                          flex: 1,
+                          height: 1,
+                          backgroundColor: C.border,
+                        }}
+                      />
+                    </div>
+
+                    {/* Co-op cards */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 16,
+                      }}
+                      className="zs-coop-grid"
+                    >
+                      {/* Host */}
+                      <div
+                        style={{
+                          backgroundColor: C.panelDeep,
                           border: `1px solid ${C.border}`,
                           borderRadius: 6,
-                          cursor: "pointer",
-                          letterSpacing: 2,
-                          transition: "all 0.15s ease",
-                          transform:
-                            hovered === "new_game" ? "translateY(-1px)" : "none",
-                          backgroundColor: hovered === "new_game" ? "rgba(255,255,255,0.05)" : "transparent",
-                        }}
-                      >
-                        🎮 CHƠI MỚI (NEW GAME)
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={startSinglePlayer}
-                      onMouseEnter={() => setHovered("single")}
-                      onMouseLeave={() => setHovered(null)}
-                      style={{
-                        width: "100%",
-                        padding: "12px 16px",
-                        backgroundColor:
-                          hovered === "single" ? C.redHover : C.red,
-                        color: C.bgDeep,
-                        fontSize: "1.05rem",
-                        fontWeight: 800,
-                        border: "none",
-                        borderRadius: 6,
-                        cursor: "pointer",
-                        letterSpacing: 2,
-                        boxShadow:
-                          hovered === "single"
-                            ? "0 4px 18px rgba(255, 90, 99, 0.45)"
-                            : "0 2px 12px rgba(255, 60, 70, 0.25)",
-                        transition:
-                          "background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease",
-                        transform:
-                          hovered === "single" ? "translateY(-1px)" : "none",
-                      }}
-                    >
-                      ▶ CHƠI ĐƠN
-                    </button>
-                  )}
-
-                  {/* Co-op divider */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 12,
-                    }}
-                  >
-                    <div
-                      style={{
-                        flex: 1,
-                        height: 1,
-                        backgroundColor: C.border,
-                      }}
-                    />
-                    <span
-                      style={{
-                        color: C.dim,
-                        fontSize: 11,
-                        letterSpacing: 1.5,
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      Hoặc chơi mạng (Co-op)
-                    </span>
-                    <div
-                      style={{
-                        flex: 1,
-                        height: 1,
-                        backgroundColor: C.border,
-                      }}
-                    />
-                  </div>
-
-                  {/* Co-op cards — equal height, aligned */}
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: 16,
-                    }}
-                    className="zs-coop-grid"
-                  >
-                    {/* Host */}
-                    <div
-                      style={{
-                        backgroundColor: C.panelDeep,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: 6,
-                        padding: 18,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 14,
-                      }}
-                    >
-                      <h3
-                        style={{
-                          margin: 0,
-                          color: C.gold,
-                          fontSize: 11,
-                          letterSpacing: 1.5,
-                          textTransform: "uppercase",
-                          fontWeight: 700,
-                          textAlign: "center",
-                        }}
-                      >
-                        Tạo phòng mới
-                      </h3>
-                      <button
-                        onClick={hostRoom}
-                        onMouseEnter={() => setHovered("host")}
-                        onMouseLeave={() => setHovered(null)}
-                        style={{
-                          padding: "10px 12px",
-                          backgroundColor:
-                            hovered === "host" ? C.cyan : C.cyan,
-                          color: C.bgDeep,
-                          border: "none",
-                          borderRadius: 4,
-                          fontWeight: 800,
-                          cursor: "pointer",
-                          width: "100%",
-                          fontSize: "0.85rem",
-                          letterSpacing: 1.5,
-                          opacity: hovered === "host" ? 0.9 : 1,
-                          transition: "opacity 0.15s ease",
-                        }}
-                      >
-                        HOST ROOM
-                      </button>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: "0.72rem",
-                          color: C.dim,
-                          textAlign: "center",
-                          letterSpacing: 0.5,
-                          minHeight: 16,
-                        }}
-                      >
-                        Tạo mã phòng 4 ký tự
-                      </p>
-                    </div>
-
-                    {/* Join */}
-                    <div
-                      style={{
-                        backgroundColor: C.panelDeep,
-                        border: `1px solid ${C.border}`,
-                        borderRadius: 6,
-                        padding: 18,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 14,
-                      }}
-                    >
-                      <h3
-                        style={{
-                          margin: 0,
-                          color: C.gold,
-                          fontSize: 11,
-                          letterSpacing: 1.5,
-                          textTransform: "uppercase",
-                          fontWeight: 700,
-                          textAlign: "center",
-                        }}
-                      >
-                        Vào phòng có sẵn
-                      </h3>
-                      <form
-                        onSubmit={joinRoom}
-                        style={{
+                          padding: 18,
                           display: "flex",
-                          gap: 8,
-                          width: "100%",
+                          flexDirection: "column",
+                          gap: 14,
                         }}
                       >
-                        <input
-                          type="text"
-                          maxLength={4}
-                          value={roomCodeInput}
-                          onChange={(e) =>
-                            setRoomCodeInput(e.target.value.toUpperCase())
-                          }
-                          placeholder="MÃ PHÒNG"
-                          aria-label="Room code"
+                        <h3
                           style={{
-                            flex: 1,
-                            minWidth: 0,
-                            padding: "10px 8px",
-                            backgroundColor: C.bgDeep,
-                            border: `1px solid ${
-                              roomCodeInput.length === 4 ? C.cyan : C.border
-                            }`,
-                            color: C.text,
-                            fontFamily: "inherit",
+                            margin: 0,
+                            color: C.gold,
+                            fontSize: 11,
+                            letterSpacing: 1.5,
+                            textTransform: "uppercase",
+                            fontWeight: 700,
                             textAlign: "center",
-                            fontSize: "0.95rem",
-                            letterSpacing: 3,
-                            borderRadius: 4,
-                            outline: "none",
-                            transition: "border-color 0.15s ease",
                           }}
-                        />
+                        >
+                          Tạo phòng mới
+                        </h3>
                         <button
-                          type="submit"
-                          disabled={roomCodeInput.length !== 4}
+                          onClick={hostRoom}
+                          onMouseEnter={() => setHovered("host")}
+                          onMouseLeave={() => setHovered(null)}
                           style={{
-                            flex: "0 0 auto",
-                            padding: "10px 14px",
-                            backgroundColor:
-                              roomCodeInput.length === 4
-                                ? C.cyan
-                                : C.cyanDim,
+                            padding: "10px 12px",
+                            backgroundColor: C.cyan,
                             color: C.bgDeep,
                             border: "none",
                             borderRadius: 4,
                             fontWeight: 800,
-                            cursor:
-                              roomCodeInput.length === 4
-                                ? "pointer"
-                                : "not-allowed",
-                            letterSpacing: 1.5,
+                            cursor: "pointer",
+                            width: "100%",
                             fontSize: "0.85rem",
-                            transition: "background-color 0.15s ease",
+                            letterSpacing: 1.5,
+                            opacity: hovered === "host" ? 0.9 : 1,
+                            transition: "opacity 0.15s ease",
                           }}
                         >
-                          JOIN
+                          HOST ROOM
                         </button>
-                      </form>
-                      <p
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: "0.72rem",
+                            color: C.dim,
+                            textAlign: "center",
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          Tạo mã phòng 4 ký tự
+                        </p>
+                      </div>
+
+                      {/* Join */}
+                      <div
                         style={{
-                          margin: 0,
-                          fontSize: "0.72rem",
-                          color: C.dim,
-                          textAlign: "center",
-                          letterSpacing: 0.5,
-                          minHeight: 16,
+                          backgroundColor: C.panelDeep,
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 6,
+                          padding: 18,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 14,
                         }}
                       >
-                        Nhập mã 4 ký tự để vào
-                      </p>
+                        <h3
+                          style={{
+                            margin: 0,
+                            color: C.gold,
+                            fontSize: 11,
+                            letterSpacing: 1.5,
+                            textTransform: "uppercase",
+                            fontWeight: 700,
+                            textAlign: "center",
+                          }}
+                        >
+                          Vào phòng có sẵn
+                        </h3>
+                        <form
+                          onSubmit={joinRoom}
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            width: "100%",
+                          }}
+                        >
+                          <input
+                            type="text"
+                            maxLength={4}
+                            value={roomCodeInput}
+                            onChange={(e) =>
+                              setRoomCodeInput(e.target.value.toUpperCase())
+                            }
+                            placeholder="MÃ"
+                            aria-label="Room code"
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              padding: "10px 8px",
+                              backgroundColor: C.bgDeep,
+                              border: `1px solid ${
+                                roomCodeInput.length === 4 ? C.cyan : C.border
+                              }`,
+                              color: C.text,
+                              fontFamily: "inherit",
+                              textAlign: "center",
+                              fontSize: "0.95rem",
+                              letterSpacing: 3,
+                              borderRadius: 4,
+                              outline: "none",
+                              transition: "border-color 0.15s ease",
+                            }}
+                          />
+                          <button
+                            type="submit"
+                            disabled={roomCodeInput.length !== 4}
+                            style={{
+                              flex: "0 0 auto",
+                              padding: "10px 14px",
+                              backgroundColor:
+                                roomCodeInput.length === 4
+                                  ? C.cyan
+                                  : C.cyanDim,
+                              color: C.bgDeep,
+                              border: "none",
+                              borderRadius: 4,
+                              fontWeight: 800,
+                              cursor:
+                                roomCodeInput.length === 4
+                                  ? "pointer"
+                                  : "not-allowed",
+                              letterSpacing: 1.5,
+                              fontSize: "0.85rem",
+                              transition: "background-color 0.15s ease",
+                            }}
+                          >
+                            JOIN
+                          </button>
+                        </form>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: "0.72rem",
+                            color: C.dim,
+                            textAlign: "center",
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          Nhập mã 4 ký tự để vào
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )
-            ) : (
-                /* Leaderboard */
+                )
+              ) : (
+                /* Leaderboard View */
                 <div style={{ display: "flex", flexDirection: "column" }}>
-                  {/* Leaderboard Header Actions */}
+                  {/* Leaderboard Header Actions & Refresh Button */}
                   <div
                     style={{
                       display: "flex",
@@ -916,17 +1208,35 @@ export default function Home() {
                       borderBottom: `1px solid ${C.borderSoft}`,
                     }}
                   >
-                    <div style={{ fontSize: "0.75rem", color: C.dim, letterSpacing: 0.5 }}>
-                      {lastUpdated ? `Cập nhật lúc: ${lastUpdated}` : "Bảng xếp hạng trực tuyến"}
+                    <div
+                      style={{
+                        fontSize: "0.75rem",
+                        color: leaderboardError ? C.red : C.dim,
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      {leaderboardError
+                        ? leaderboardError
+                        : lastUpdated
+                        ? `Cập nhật lúc: ${lastUpdated}`
+                        : "Bảng xếp hạng trực tuyến"}
                     </div>
                     <button
                       onClick={fetchLeaderboard}
                       disabled={isRefreshing}
                       style={{
-                        padding: "6px 12px",
-                        backgroundColor: isRefreshing ? "rgba(255,255,255,0.05)" : "transparent",
-                        border: `1px solid ${C.border}`,
-                        color: isRefreshing ? C.dim : C.red,
+                        padding: "6px 14px",
+                        backgroundColor: isRefreshing
+                          ? "rgba(255,255,255,0.05)"
+                          : "transparent",
+                        border: `1px solid ${
+                          leaderboardError ? C.red : C.border
+                        }`,
+                        color: isRefreshing
+                          ? C.dim
+                          : leaderboardError
+                          ? C.red
+                          : C.red,
                         borderRadius: 4,
                         fontSize: "0.75rem",
                         fontWeight: 700,
@@ -942,12 +1252,18 @@ export default function Home() {
                       <span
                         style={{
                           display: "inline-block",
-                          animation: isRefreshing ? "spin 1s linear infinite" : "none",
+                          animation: isRefreshing
+                            ? "spin 1s linear infinite"
+                            : "none",
                         }}
                       >
                         🔄
                       </span>
-                      {isRefreshing ? "Đang tải..." : "Cập nhật"}
+                      {isRefreshing
+                        ? "ĐANG CẬP NHẬT..."
+                        : leaderboardError
+                        ? "THỬ LẠI"
+                        : "🔄 CẬP NHẬT"}
                     </button>
                   </div>
 
@@ -959,16 +1275,17 @@ export default function Home() {
                         color: C.dim,
                         fontSize: "0.85rem",
                         letterSpacing: 0.5,
+                        lineHeight: 1.6,
                       }}
                     >
                       CHƯA CÓ DỮ LIỆU ĐIỂM CAO.
                       <br />
-                      HÃY CHƠI VÀ LƯU THÀNH TÍCH!
+                      HÃY CHƠI VÀ LƯU THÀNH TÍCH VÀO CLOUDFLARE D1!
                     </div>
                   ) : (
                     <div
                       style={{
-                        maxHeight: 420,
+                        maxHeight: 460,
                         overflowY: "auto",
                         border: `1px solid ${C.border}`,
                         borderRadius: 6,
@@ -979,7 +1296,7 @@ export default function Home() {
                           width: "100%",
                           borderCollapse: "collapse",
                           textAlign: "left",
-                          fontSize: "0.85rem",
+                          fontSize: "0.82rem",
                         }}
                       >
                         <thead>
@@ -989,6 +1306,7 @@ export default function Home() {
                               color: C.gold,
                               position: "sticky",
                               top: 0,
+                              zIndex: 10,
                             }}
                           >
                             <th
@@ -1000,7 +1318,7 @@ export default function Home() {
                                 fontWeight: 700,
                               }}
                             >
-                              Hạng
+                              RANK
                             </th>
                             <th
                               style={{
@@ -1011,19 +1329,7 @@ export default function Home() {
                                 fontWeight: 700,
                               }}
                             >
-                              Survivor
-                            </th>
-                            <th
-                              style={{
-                                padding: "10px 12px",
-                                fontSize: 11,
-                                letterSpacing: 1.5,
-                                textTransform: "uppercase",
-                                fontWeight: 700,
-                                textAlign: "right",
-                              }}
-                            >
-                              Score
+                              PLAYER
                             </th>
                             <th
                               style={{
@@ -1035,7 +1341,7 @@ export default function Home() {
                                 textAlign: "right",
                               }}
                             >
-                              Kills
+                              SCORE
                             </th>
                             <th
                               style={{
@@ -1047,40 +1353,83 @@ export default function Home() {
                                 textAlign: "right",
                               }}
                             >
-                              Wave
+                              WAVE
+                            </th>
+                            <th
+                              style={{
+                                padding: "10px 12px",
+                                fontSize: 11,
+                                letterSpacing: 1.5,
+                                textTransform: "uppercase",
+                                fontWeight: 700,
+                                textAlign: "right",
+                              }}
+                            >
+                              ZOMBIES
+                            </th>
+                            <th
+                              style={{
+                                padding: "10px 12px",
+                                fontSize: 11,
+                                letterSpacing: 1.5,
+                                textTransform: "uppercase",
+                                fontWeight: 700,
+                                textAlign: "right",
+                              }}
+                            >
+                              TIME
                             </th>
                           </tr>
                         </thead>
                         <tbody>
                           {leaderboard.map((entry, index) => {
-                            const rankColor =
-                              index === 0
-                                ? C.gold
-                                : index === 1
-                                ? C.silver
-                                : index === 2
-                                ? C.bronze
-                                : C.text;
+                            const isTop1 = index === 0;
+                            const isTop2 = index === 1;
+                            const isTop3 = index === 2;
+
+                            const rankColor = isTop1
+                              ? C.gold
+                              : isTop2
+                              ? C.silver
+                              : isTop3
+                              ? C.bronze
+                              : C.text;
+
+                            const bgStyle = isTop1
+                              ? "rgba(255, 200, 80, 0.08)"
+                              : isTop2
+                              ? "rgba(200, 200, 194, 0.05)"
+                              : isTop3
+                              ? "rgba(200, 140, 80, 0.05)"
+                              : index % 2 === 0
+                              ? "transparent"
+                              : "rgba(255,255,255,0.015)";
+
                             return (
                               <tr
                                 key={index}
                                 style={{
                                   borderBottom: `1px solid ${C.borderSoft}`,
                                   color: rankColor,
-                                  backgroundColor:
-                                    index % 2 === 0
-                                      ? "transparent"
-                                      : "rgba(255,255,255,0.015)",
+                                  backgroundColor: bgStyle,
                                 }}
                               >
                                 <td
                                   style={{
                                     padding: "10px 12px",
-                                    fontWeight: 700,
+                                    fontWeight: 800,
                                     width: 60,
                                   }}
                                 >
-                                  #{index + 1}
+                                  {isTop1 ? (
+                                    <span style={{ color: C.gold }}>👑 #1</span>
+                                  ) : isTop2 ? (
+                                    <span style={{ color: C.silver }}>🥈 #2</span>
+                                  ) : isTop3 ? (
+                                    <span style={{ color: C.bronze }}>🥉 #3</span>
+                                  ) : (
+                                    `#${index + 1}`
+                                  )}
                                 </td>
                                 <td
                                   style={{
@@ -1089,7 +1438,7 @@ export default function Home() {
                                     overflow: "hidden",
                                     textOverflow: "ellipsis",
                                     whiteSpace: "nowrap",
-                                    maxWidth: 180,
+                                    maxWidth: 160,
                                   }}
                                   title={entry.username}
                                 >
@@ -1100,10 +1449,22 @@ export default function Home() {
                                     padding: "10px 12px",
                                     color: C.gold,
                                     textAlign: "right",
+                                    fontWeight: 800,
                                     fontVariantNumeric: "tabular-nums",
                                   }}
                                 >
                                   {entry.score.toLocaleString()}
+                                </td>
+                                <td
+                                  style={{
+                                    padding: "10px 12px",
+                                    color: C.cyan,
+                                    textAlign: "right",
+                                    fontWeight: 700,
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}
+                                >
+                                  Wave {entry.wave}
                                 </td>
                                 <td
                                   style={{
@@ -1113,17 +1474,17 @@ export default function Home() {
                                     fontVariantNumeric: "tabular-nums",
                                   }}
                                 >
-                                  {entry.kills.toLocaleString()}
+                                  {entry.zombies_killed.toLocaleString()}
                                 </td>
                                 <td
                                   style={{
                                     padding: "10px 12px",
-                                    color: C.cyan,
+                                    color: C.textSoft,
                                     textAlign: "right",
                                     fontVariantNumeric: "tabular-nums",
                                   }}
                                 >
-                                  {entry.wave}
+                                  {formatTime(entry.survival_time)}
                                 </td>
                               </tr>
                             );
@@ -1139,7 +1500,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Responsive: tablet 2-col when wide, mobile 1-col */}
+      {/* Responsive styles */}
       <style>{`
         .zs-lobby-grid {
           grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -1160,7 +1521,7 @@ export default function Home() {
   );
 }
 
-// ---- subcomponents ---------------------------------------------------------
+// ---- Subcomponents ---------------------------------------------------------
 
 function TabButton({
   label,
@@ -1206,7 +1567,7 @@ function TabButton({
   );
 }
 
-// ---- shared style snippets ------------------------------------------------
+// ---- Shared Style Snippets ------------------------------------------------
 
 const controlRow: React.CSSProperties = {
   display: "flex",

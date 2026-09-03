@@ -86,6 +86,7 @@ export class Bullet {
           if (dx * dx + dy * dy <= r * r) {
             z.takeDamage(this.damage, this.crit, game);
             this.dead = true;
+            game.stats.shots_hit = (game.stats.shots_hit ?? 0) + 1;
             return;
           }
         }

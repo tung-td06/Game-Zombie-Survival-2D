@@ -114,6 +114,8 @@ export class Game {
     boss_kills: 0,
     survival_time: 0,
     shots_by_weapon: {},
+    shots_fired: 0,
+    shots_hit: 0,
   };
   toasts: ToastEntry[] = [];
   waveBanner: WaveBanner | null = null;
@@ -371,6 +373,7 @@ export class Game {
 
   private updatePlaying(dt: number) {
     if (!this.player) return;
+    this.stats.survival_time = (this.stats.survival_time ?? 0) + dt;
 
     // Handle WebSocket network events if active
     if (this.netClient) {
@@ -558,6 +561,7 @@ export class Game {
     this.timeOfDay += dt;
     this.stats.survival_time = this.elapsed;
 
+    this.zombies = this.zombies.filter((z) => z.hp > 0);
     this.waveManager.update(dt, this);
 
     this.zgrid = {};
@@ -1211,6 +1215,8 @@ export class Game {
       boss_kills: 0,
       survival_time: 0,
       shots_by_weapon: {},
+      shots_fired: 0,
+      shots_hit: 0,
     };
     this.toasts = [];
     this.waveBanner = null;
@@ -1340,6 +1346,8 @@ export class Game {
       boss_kills: 0,
       survival_time: 0,
       shots_by_weapon: {},
+      shots_fired: 0,
+      shots_hit: 0,
     };
 
     this.toasts = [];
@@ -1462,8 +1470,8 @@ export class Game {
     this.menus.setProfile(this.save.high_score, this.save.total_kills);
 
     // Delete save game on death
-    if (this.username) {
-      fetch(`/api/game/save?username=${encodeURIComponent(this.username)}`, {
+    if (typeof window !== "undefined") {
+      fetch("/api/game/save", {
         method: "DELETE"
       }).catch(err => console.error("Failed to delete save game on death:", err));
     }
@@ -1480,29 +1488,19 @@ export class Game {
       this.player.xp,
     );
 
-    if (this.username && typeof window !== "undefined") {
-      fetch("/api/profile", {
+    if (typeof window !== "undefined" && this.state === GAME_OVER) {
+      fetch("/api/game/submit-score", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: this.username,
-          profileData: this.save.data,
+          score: Math.max(0, Math.floor(this.score)),
+          wave: Math.max(0, Math.floor(this.waveManager.wave)),
+          zombies_killed: Math.max(0, Math.floor(this.stats.kills)),
+          survival_time: Math.max(0, Math.floor(this.stats.survival_time || 0)),
+          shots_fired: Math.max(0, Math.floor(this.stats.shots_fired || 0)),
+          shots_hit: Math.max(0, Math.floor(this.stats.shots_hit || 0)),
         }),
-      }).catch((err) => console.error("Failed to sync save profile to server:", err));
-
-      if (this.state === GAME_OVER) {
-        fetch("/api/leaderboard", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: this.username,
-            score: this.score,
-            kills: this.stats.kills,
-            wave: this.waveManager.wave,
-            level: this.player.level,
-          }),
-        }).catch((err) => console.error("Failed to submit score to leaderboard:", err));
-      }
+      }).catch((err) => console.error("Failed to submit score to Cloudflare D1:", err));
     }
 
     return isNewHigh;
@@ -1515,7 +1513,7 @@ export class Game {
 
   onZombieKilled(z: import("./zombie").Zombie): void {
     const kind = z.KIND;
-    if (kind === "boss") {
+    if (kind === "boss" || kind === "necromancer_boss") {
       this.stats.boss_kills = (this.stats.boss_kills ?? 0) + 1;
       this.waveManager.bossAlive = false;
     }

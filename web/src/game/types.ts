@@ -23,6 +23,8 @@ export interface Stats {
   boss_kills: number;
   survival_time: number;
   shots_by_weapon: Record<string, number>;
+  shots_fired: number;
+  shots_hit: number;
 }
 
 export interface ToastEntry {

@@ -5,6 +5,6 @@ pages_build_output_dir = ".vercel/output/static"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "game-db"
+database_name = "zombie-survival-db"
 database_id = "864965e6-6b07-410f-a709-6c15f2898f13"
 migrations_dir = "migrations"

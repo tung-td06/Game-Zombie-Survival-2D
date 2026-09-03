@@ -193,6 +193,7 @@ export class Player {
     game.camera.shake(w.pellets === 1 ? 1.5 : 4);
     const sbw = game.stats.shots_by_weapon;
     sbw[w.id] = (sbw[w.id] ?? 0) + 1;
+    game.stats.shots_fired = (game.stats.shots_fired ?? 0) + shots.length;
     game.audio.playSFX(`weapon.${w.id}.shoot`, this.pos);
   }
 

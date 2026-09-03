@@ -58,4 +58,25 @@ describe("WaveManager", () => {
     expect(w.state).toBe("intermission");
     expect((g.player!.coins as number) >= 50).toBe(true);
   });
+
+  test("wave 5 boss wave (31 zombies) transitions correctly to wave 6", () => {
+    const w = new WaveManager();
+    w.wave = 5;
+    w.state = "active";
+    w.to_spawn = 0;
+    w.bossAlive = true;
+    w.bossSpawnedThisWave = true;
+    const g = makeGame();
+
+    // All 31 zombies cleared
+    w.update(0.1, g);
+    expect(w.state).toBe("intermission");
+    expect(w.bossAlive).toBe(false);
+
+    // Intermission completes -> Wave 6
+    w.update(5.1, g);
+    expect(w.state).toBe("active");
+    expect(w.wave).toBe(6);
+    expect(w.bossSpawnedThisWave).toBe(false);
+  });
 });

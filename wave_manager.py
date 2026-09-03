@@ -32,6 +32,7 @@ class WaveManager:
         self.speed_mult = 1.0
         self.dmg_mult = 1.0
         self.boss_alive = False
+        self.boss_spawned_this_wave = False
         self.modifier = "none"
         self.biome = "city"
         # External listeners (set by Game if it cares about wave events).
@@ -89,6 +90,7 @@ class WaveManager:
         self.spawned_this_wave = 0
         self.spawn_timer = 0.5
         self.boss_alive = False
+        self.boss_spawned_this_wave = False
         boss = self.is_boss_wave
         text = f"WAVE {self.wave}"
         if self.modifier != "none":
@@ -129,7 +131,7 @@ class WaveManager:
             else:
                 self.spawn_timer += 0.4
 
-        if self.is_boss_wave and not self.boss_alive and \
+        if self.is_boss_wave and not self.boss_spawned_this_wave and \
                 len(game.zombies) < S.MAX_ALIVE_ZOMBIES:
             boss_kind = "boss"
             if self.wave >= 15:
@@ -141,6 +143,7 @@ class WaveManager:
                 game.zombies.append(create_zombie(
                     boss_kind, pos, self.hp_mult, self.speed_mult, self.dmg_mult))
                 self.boss_alive = True
+                self.boss_spawned_this_wave = True
                 game.audio.play("boss_roar")
                 if boss_kind == "boss":
                     game.toast("!! THE ABOMINATION HAS AWAKENED !!")
