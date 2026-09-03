@@ -2,6 +2,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import GameCanvas from "@/components/GameCanvas";
 
+export const runtime = "edge";
+
+
 interface PlayPageProps {
   searchParams: Promise<{
     mode?: string;
