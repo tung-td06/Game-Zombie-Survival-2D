@@ -1,5 +1,5 @@
-// Persistent JSON Storage Fallback
-// --------------------------------
+// Persistent JSON Storage Fallback (Node.js only)
+// -----------------------------------------------
 // This module provides a lightweight file-based JSON store that acts as
 // a persistent replacement for the in-memory Maps in `db.ts` whenever
 // the Cloudflare D1 binding is not available (e.g. `npm run dev` on a
@@ -9,6 +9,14 @@
 // In production on Cloudflare Pages, D1 is used and this module is
 // simply never invoked (each method safely no-ops if `node:fs` is not
 // available, which is the case on the Workers/Edge runtime).
+//
+// IMPORTANT — Edge bundle isolation:
+//   This file lives in `src/server/` and uses Node.js-only modules
+//   (`node:fs`, `node:path`). It is **NEVER imported by any file in
+//   `src/app/`** (which is bundled for the Cloudflare Edge runtime).
+//   The `db.ts` shim loads it lazily via dynamic `import()` only on the
+//   Node.js dev server, after the Edge bundler has already been
+//   satisfied with the `db-core.ts` code path.
 //
 // File layout (all under web/data/persistent/):
 //   players.json   - Map<cleanUsername, PlayerRecord>
@@ -21,11 +29,44 @@
 
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import type {
-  PlayerRecord,
-  PlayerStats,
-  GameSaveRecord,
-} from "./db";
+
+// Local type duplicates — kept inline (and exported) to avoid pulling
+// the Edge-bundled `db-core.ts` into this Node-only file. The shapes
+// intentionally mirror those in `db-core.ts`.
+export interface PlayerRecord {
+  id: string;
+  username: string;
+  display_name: string | null;
+  password_hash: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PlayerStats {
+  player_id: string;
+  total_games: number;
+  best_score: number;
+  best_wave: number;
+  total_zombies_killed: number;
+  best_survival_time: number;
+  updated_at: number;
+}
+
+export interface GameSaveRecord {
+  player_id: string;
+  save_version: number;
+  level: number;
+  wave: number;
+  score: number;
+  money: number;
+  player_data: any;
+  weapon_data: any;
+  inventory_data: any;
+  progression_data: any;
+  world_data: any;
+  created_at: number;
+  updated_at: number;
+}
 
 const DATA_DIR = path.join(process.cwd(), "data", "persistent");
 
@@ -55,14 +96,13 @@ const EMPTY: FileShape = {
 // In-memory cache that mirrors the on-disk JSON file.
 let cache: FileShape | null = null;
 let loaded = false;
-let writeTimer: NodeJS.Timeout | null = null;
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingWrite = false;
 
 function isNodeRuntime(): boolean {
   // fs/promises are only available in Node, not in Edge/Workers.
   // We do a soft check to avoid hard failures on Edge.
   try {
-    // require would throw in Edge; use a guarded dynamic check.
     return typeof process !== "undefined" && !!(process as any).versions?.node;
   } catch {
     return false;
