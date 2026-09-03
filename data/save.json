@@ -25,7 +25,8 @@
     "resolution_index": 2,
     "screen_shake": true,
     "damage_numbers": true,
-    "hit_effects": true
+    "hit_effects": true,
+    "footstep_dust": false
   },
   "permanent_max_hp": 20,
   "permanent_armor": 10

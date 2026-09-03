@@ -31,6 +31,7 @@
         "screen_shake": true,
         "damage_numbers": true,
         "hit_effects": true,
+        "footstep_dust": false,
         "brightness": 1,
         "bindings": {
           "up": "KeyW",
@@ -82,6 +83,7 @@
         "screen_shake": true,
         "damage_numbers": true,
         "hit_effects": true,
+        "footstep_dust": false,
         "brightness": 1,
         "bindings": {
           "up": "KeyW",
@@ -127,6 +129,7 @@
         "screen_shake": true,
         "damage_numbers": true,
         "hit_effects": true,
+        "footstep_dust": false,
         "brightness": 1,
         "bindings": {
           "up": "KeyW",
@@ -187,6 +190,7 @@
         "screen_shake": true,
         "damage_numbers": true,
         "hit_effects": true,
+        "footstep_dust": false,
         "brightness": 1,
         "bindings": {
           "up": "KeyW",
