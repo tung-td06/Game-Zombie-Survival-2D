@@ -110,11 +110,12 @@ export class MenuSystem {
 
   drawMainMenu(
     ctx: CanvasRenderingContext2D,
-    dt: number,
+    game: IGame,
     t: number,
   ): { action: string | null; buttons: Button[] } {
     const width = ctx.canvas.width / (window.devicePixelRatio || 1);
     const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const dt = game.dt;
 
     this.drawBackground(ctx, dt);
     this.drawTitle(ctx, t);
@@ -124,8 +125,12 @@ export class MenuSystem {
       new Button("SHOP", cx - 150, 388, 300, 54, "shop"),
       new Button("UPGRADES", cx - 150, 450, 300, 54, "upgrades_info"),
       new Button("SETTINGS", cx - 150, 512, 300, 54, "settings"),
-      new Button("EXIT", cx - 150, 574, 300, 54, "quit", "#787882"),
+      new Button("↩ LOBBY", cx - 150, 574, 300, 54, "leave_to_lobby", "#787882"),
     ];
+    for (const b of buttons) {
+      b.update(dt, game.input.mouseX, game.input.mouseY, false);
+      b.draw(ctx);
+    }
     drawText(
       ctx,
       `HIGH SCORE: ${MenuSystem._highScore}    TOTAL KILLS: ${MenuSystem._kills}`,
@@ -1200,6 +1205,7 @@ export class MenuSystem {
 
   drawGameOver(
     ctx: CanvasRenderingContext2D,
+    game: IGame,
     stats: { score?: number; kills?: number; wave?: number; level?: number; survival_time?: number; coins?: number },
     newHigh: boolean,
   ): { action: string | null; buttons: Button[] } {
@@ -1239,7 +1245,14 @@ export class MenuSystem {
       new Button("RESTART", cx - 320, 560, 200, 54, "restart", "#50A0FF"),
       new Button("SHOP", cx - 100, 560, 200, 54, "shop_from_over"),
       new Button("MAIN MENU", cx + 120, 560, 200, 54, "menu"),
+      // Back to the main website (lobby) so players can start a fresh run
+      // without reloading the page.
+      new Button("↩ RETURN TO LOBBY", cx - 150, 646, 300, 52, "leave_to_lobby", "#787882"),
     ];
+    for (const b of buttons) {
+      b.update(game.dt, game.input.mouseX, game.input.mouseY, false);
+      b.draw(ctx);
+    }
     return { action: null, buttons };
   }
 

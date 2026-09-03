@@ -761,7 +761,7 @@ export class Game {
     } else if (this.state === PAUSE_SHOP) {
       this.currentButtons = this.menus.drawPauseShop(ctx, this).buttons;
     } else if (this.state === MENU) {
-      this.currentButtons = this.menus.drawMainMenu(ctx, this.dt, this.elapsed).buttons;
+      this.currentButtons = this.menus.drawMainMenu(ctx, this, this.elapsed).buttons;
     } else if (this.state === SHOP) {
       this.currentButtons = this.menus.drawShop(ctx, this, this.shopEntries()).buttons;
     } else if (this.state === UPGRADE) {
@@ -771,7 +771,7 @@ export class Game {
     } else if (this.state === SETTINGS) {
       this.currentButtons = this.menus.drawSettings(ctx, this).buttons;
     } else if (this.state === GAME_OVER) {
-      this.currentButtons = this.menus.drawGameOver(ctx, this.runStats(), this.newHigh).buttons;
+      this.currentButtons = this.menus.drawGameOver(ctx, this, this.runStats(), this.newHigh).buttons;
     }
 
     if (this.showFps) {
