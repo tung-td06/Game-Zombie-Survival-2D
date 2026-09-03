@@ -14,3 +14,4 @@ web/test-results/
 web/*.tsbuildinfo
 web/.env*.local
 web/.wrangler/
+.wrangler/
