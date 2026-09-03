@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestContext } from "@cloudflare/next-on-pages";
-import { getGameSave, saveGameSave, deleteGameSave } from "@/lib/db";
+import { getGameSave, saveGameSave, deleteGameSave, getD1Database } from "@/lib/db";
 
 export const runtime = "edge";
 
@@ -23,10 +22,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { env } = getRequestContext();
-  const db = env.DB;
+  const db = getD1Database();
 
-  const save = await getGameSave(db, username);
+  const save = db ? await getGameSave(db, username) : null;
   return NextResponse.json({ save });
 }
 
@@ -85,13 +83,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { env } = getRequestContext();
-    const db = env.DB;
+    const db = getD1Database();
 
     const now = new Date().toISOString();
 
     // Check if save already exists to preserve created_at
-    const existingSave = await getGameSave(db, username);
+    const existingSave = db ? await getGameSave(db, username) : null;
 
     const dbSave = {
       username,
@@ -109,7 +106,7 @@ export async function POST(req: NextRequest) {
       updated_at: now,
     };
 
-    await saveGameSave(db, username, dbSave);
+    if (db) await saveGameSave(db, username, dbSave);
     return NextResponse.json({ success: true });
   } catch (_err) {
     return NextResponse.json(
@@ -139,10 +136,9 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { env } = getRequestContext();
-    const db = env.DB;
+    const db = getD1Database();
 
-    await deleteGameSave(db, username);
+    if (db) await deleteGameSave(db, username);
     return NextResponse.json({ success: true });
   } catch (_err) {
     return NextResponse.json(

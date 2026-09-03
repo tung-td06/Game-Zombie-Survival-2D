@@ -15,7 +15,10 @@ export default defineConfig({
     command: "npm run start",
     url: "http://localhost:3000",
     timeout: 120_000,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
+    env: {
+      NODE_ENV: "production",
+    },
   },
   projects: [
     {

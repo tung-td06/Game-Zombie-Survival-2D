@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 test("landing page loads with Play button", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("zs.username", "SurvivorTest");
+  });
   await page.goto("/");
   await expect(page.getByRole("link", { name: /play/i })).toBeVisible();
   await expect(page.getByRole("heading", { name: /ZOMBIE SURVIVAL/i })).toBeVisible();
@@ -15,6 +18,7 @@ test("play page mounts canvas and starts a run", async ({ page }) => {
 
   // Pre-seed a save so we land in MENU with the persistent profile.
   await page.addInitScript(() => {
+    localStorage.setItem("zs.username", "SurvivorTest");
     localStorage.setItem(
       "zs.save.v1",
       JSON.stringify({

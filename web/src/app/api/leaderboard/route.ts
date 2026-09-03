@@ -1,24 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRequestContext } from "@cloudflare/next-on-pages";
 import {
   getLeaderboard,
   addLeaderboardEntry,
   LeaderboardEntry,
+  getD1Database,
 } from "@/lib/db";
 
 export const runtime = "edge";
 
 export async function GET() {
-  const { env } = getRequestContext();
-  const db = env.DB;
-  const leaderboard = await getLeaderboard(db);
+  const db = getD1Database();
+  const leaderboard = db ? await getLeaderboard(db) : [];
   return NextResponse.json({ leaderboard });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const { env } = getRequestContext();
-    const db = env.DB;
+    const db = getD1Database();
 
     const body = await req.json() as { username?: string; score?: number; kills?: number; wave?: number; level?: number };
     const { username, score, kills, wave, level } = body;
@@ -45,8 +43,8 @@ export async function POST(req: NextRequest) {
       date: new Date().toISOString(),
     };
 
-    await addLeaderboardEntry(db, entry);
-    const leaderboard = await getLeaderboard(db);
+    if (db) await addLeaderboardEntry(db, entry);
+    const leaderboard = db ? await getLeaderboard(db) : [];
     return NextResponse.json({ success: true, leaderboard });
   } catch (_err) {
     return NextResponse.json(

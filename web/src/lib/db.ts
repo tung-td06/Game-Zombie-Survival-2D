@@ -1,5 +1,13 @@
-// src/lib/db.ts
-// Cloudflare D1 database layer — replaces the old fs-based JSON db
+import { getRequestContext } from "@cloudflare/next-on-pages";
+
+export function getD1Database(): D1Database | null {
+  try {
+    const ctx = getRequestContext();
+    return ctx?.env?.DB ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export interface LeaderboardEntry {
   username: string;

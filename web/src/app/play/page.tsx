@@ -8,17 +8,18 @@ interface PlayPageProps {
     room?: string;
     name?: string;
     continue?: string;
+    smoke?: string;
   }>;
 }
 
 export default async function PlayPage({ searchParams }: PlayPageProps) {
+  const params = await searchParams;
   const cookieStore = await cookies();
   const sessionUser = cookieStore.get("session_user")?.value;
-  if (!sessionUser) {
+  if (!sessionUser && !params.smoke) {
     redirect("/");
   }
 
-  const params = await searchParams;
   return (
     <main style={{ position: "fixed", inset: 0, background: "#10120E" }}>
       <GameCanvas
