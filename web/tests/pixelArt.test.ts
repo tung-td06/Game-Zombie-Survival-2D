@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { pixelVariant } from "@/game/pixelArt";
+import { ParticleSystem } from "@/game/particle";
 
 describe("pixel art variation", () => {
   test("is stable and atlas-safe for a map cell", () => {
@@ -11,5 +12,11 @@ describe("pixel art variation", () => {
 
   test("keeps a stable terrain variation when revisiting a cell", () => {
     expect(pixelVariant(33, 128, 256, 6)).toBe(pixelVariant(33, 128, 256, 6));
+  });
+
+  test("caps retained ground decals", () => {
+    const particles = new ParticleSystem();
+    for (let i = 0; i < 250; i++) particles.addDecal({ x: i, y: i }, "blood");
+    expect(particles.decalCount).toBeLessThanOrEqual(120);
   });
 });

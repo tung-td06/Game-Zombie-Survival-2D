@@ -44,6 +44,7 @@ import type { GameState, ToastEntry, WaveBanner, Stats } from "./types";
 import { Button, drawCrosshair, drawHud, drawMinimap, drawToasts } from "./ui";
 import { hitTest } from "./menu";
 import type { Vec } from "./vec";
+import { drawPixelLight, type PixelLight } from "./pixelArt";
 
 export const MENU = "MENU";
 export const PLAYING = "PLAYING";
@@ -731,6 +732,7 @@ export class Game {
       for (const l of this.loots) l.draw(ctx, this.camera);
       for (const c of this.supplyCrates) c.draw(ctx, this.camera, this);
       this.particles.draw(ctx, this.camera);
+      drawPixelLight(ctx, this.collectLights(), this.viewW, this.viewH, this.nightFactor() * 0.42);
       drawHud(ctx, this, this.viewW, this.viewH);
       drawMinimap(ctx, this, this.viewW, 1);
       drawCrosshair(ctx, this.input.mouseX, this.input.mouseY, 0);
@@ -812,7 +814,29 @@ export class Game {
   private drawWorld() {
     if (!this.map) return;
     this.map.drawGround(this.ctx, this.camera, this.viewW, this.viewH);
+    this.particles.drawDecals(this.ctx, this.camera);
     this.map.drawObstacles(this.ctx, this.camera);
+  }
+
+  private collectLights(): PixelLight[] {
+    const lights: PixelLight[] = [];
+    if (this.player) {
+      lights.push({ pos: this.camera.apply(this.player.pos), radius: 150, color: "#8DDDF1", intensity: 1 });
+      if (this.player.recoilTimer > 0) {
+        lights.push({ pos: this.camera.apply(this.player.pos), radius: 78, color: "#FFD15C", intensity: 1.3 });
+      }
+    }
+    if (this.map) {
+      for (const lamp of this.map.streetLamps) {
+        const p = this.camera.apply(lamp);
+        if (p.x > -90 && p.x < this.viewW + 90 && p.y > -90 && p.y < this.viewH + 90) {
+          lights.push({ pos: p, radius: 76, color: "#F4C663", intensity: 0.8 });
+        }
+      }
+    }
+    for (const loot of this.loots.slice(0, 20)) lights.push({ pos: this.camera.apply(loot.pos), radius: 38, color: "#67D9F5", intensity: 0.5 });
+    for (const bullet of this.enemyBullets.slice(0, 28)) lights.push({ pos: this.camera.apply(bullet.pos), radius: 28, color: "#FF655A", intensity: 0.75 });
+    return lights;
   }
 
   private runStats() {
@@ -1201,7 +1225,7 @@ export class Game {
   async loadSaveAndStart() {
     try {
       const res = await fetch(`/api/game/save?username=${encodeURIComponent(this.username)}`);
-      const data = await res.json();
+      const data = await res.json() as any;
       if (data.save) {
         this.restoreGameFromSave(data.save);
       } else {

@@ -214,6 +214,13 @@ export function drawPropSprite(
   strokeRect(ctx, x, y, w, h, "#17181C", 2);
 }
 
+export function drawStreetLamp(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  rect(ctx, x + 2, y + 6, 5, 26, "#1A2024");
+  rect(ctx, x, y + 2, 9, 7, "#4A5658");
+  rect(ctx, x + 2, y + 4, 5, 3, "#F3CA61");
+  rect(ctx, x, y + 31, 9, 3, "#101518");
+}
+
 export function drawPlayerSprite(
   ctx: CanvasRenderingContext2D,
   pos: Vec,

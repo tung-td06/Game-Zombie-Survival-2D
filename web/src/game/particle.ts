@@ -24,6 +24,16 @@ interface DamageNumber {
   color: string;
 }
 
+interface GroundDecal {
+  pos: Vec;
+  kind: "blood" | "scorch";
+  life: number;
+  maxLife: number;
+  size: number;
+}
+
+const MAX_DECALS = 120;
+
 const BLOOD = "#96141A";
 const YELLOW = "#FFD25A";
 const ORANGE = "#FF5A1E";
@@ -48,6 +58,7 @@ function newParticle(p: Omit<Particle, "maxLife">): Particle {
 export class ParticleSystem {
   particles: Particle[] = [];
   numbers: DamageNumber[] = [];
+  private decals: GroundDecal[] = [];
 
   private push(p: Particle): void {
     if (this.particles.length >= MAX_PARTICLES) this.particles.shift();
@@ -121,6 +132,7 @@ export class ParticleSystem {
   }
 
   explosion(pos: Vec, big = false): void {
+    this.addDecal(pos, "scorch");
     const n = big ? 40 : 26;
     const colors = ["#FFA028", ORANGE, GRAY];
     for (let i = 0; i < n; i++) {
@@ -171,6 +183,7 @@ export class ParticleSystem {
   }
 
   deathBurst(pos: Vec, color: string): void {
+    this.addDecal(pos, "blood");
     for (let i = 0; i < 18; i++) {
       const ang = rand(0, Math.PI * 2);
       const spd = rand(60, 260);
@@ -186,6 +199,17 @@ export class ParticleSystem {
         }),
       );
     }
+  }
+
+  addDecal(pos: Vec, kind: "blood" | "scorch"): void {
+    if (this.decals.length >= MAX_DECALS) this.decals.shift();
+    this.decals.push({
+      pos: { ...pos },
+      kind,
+      life: kind === "blood" ? 12 : 6,
+      maxLife: kind === "blood" ? 12 : 6,
+      size: kind === "blood" ? 14 + Math.random() * 12 : 18 + Math.random() * 14,
+    });
   }
 
   damageNumber(pos: Vec, amount: number, crit: boolean, enabled = true): void {
@@ -229,6 +253,24 @@ export class ParticleSystem {
       n.pos.y += n.vel.y * dt;
       return n.life > 0;
     });
+    this.decals = this.decals.filter((decal) => {
+      decal.life -= dt;
+      return decal.life > 0;
+    });
+  }
+
+  drawDecals(ctx: CanvasRenderingContext2D, cam: Camera): void {
+    ctx.save();
+    for (const decal of this.decals) {
+      const sp = cam.apply(decal.pos);
+      ctx.globalAlpha = Math.min(0.58, decal.life / decal.maxLife);
+      ctx.fillStyle = decal.kind === "blood" ? "#5C1518" : "#24211D";
+      const s = Math.round(decal.size);
+      ctx.fillRect(Math.round(sp.x - s / 2), Math.round(sp.y - s / 2), s, Math.max(3, Math.round(s * 0.45)));
+      ctx.fillStyle = decal.kind === "blood" ? "#8A2224" : "#3D3830";
+      ctx.fillRect(Math.round(sp.x - s * 0.2), Math.round(sp.y - s * 0.1), Math.max(2, Math.round(s * 0.35)), 2);
+    }
+    ctx.restore();
   }
 
   draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
@@ -239,9 +281,7 @@ export class ParticleSystem {
       const sp = cam.apply(p.pos);
       ctx.globalAlpha = t;
       ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(sp.x, sp.y, size, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillRect(Math.round(sp.x - size / 2), Math.round(sp.y - size / 2), size, size);
     }
     ctx.globalAlpha = 1;
     for (const n of this.numbers) {
@@ -261,8 +301,13 @@ export class ParticleSystem {
     return this.particles.length + this.numbers.length;
   }
 
+  get decalCount(): number {
+    return this.decals.length;
+  }
+
   clear(): void {
     this.particles.length = 0;
     this.numbers.length = 0;
+    this.decals.length = 0;
   }
 }

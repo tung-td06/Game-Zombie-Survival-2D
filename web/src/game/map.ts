@@ -7,7 +7,7 @@ import { circleRectCollide, type Rect } from "./collision";
 import { mulberry32, type Rng } from "../lib/rng";
 import type { Vec } from "./vec";
 import type { Camera } from "./camera";
-import { TILE_SIZE, drawGroundTile, drawPropSprite, drawRoadDetails, pixelVariant } from "./pixelArt";
+import { TILE_SIZE, drawGroundTile, drawPropSprite, drawRoadDetails, drawStreetLamp, pixelVariant } from "./pixelArt";
 
 export const CELL = 400;
 
@@ -32,6 +32,7 @@ export class GameMap {
   seed: number;
   rng: Rng;
   roads: Rect[] = [];
+  streetLamps: Vec[] = [];
   obstacles: Obstacle[] = [];
   minimap: HTMLCanvasElement | null = null;
   private grid: Map<string, Obstacle[]> = new Map();
@@ -111,6 +112,16 @@ export class GameMap {
     const rw = 140;
     for (const x of xs) this.roads.push({ x: x - rw / 2, y: 0, w: rw, h });
     for (const y of ys) this.roads.push({ x: 0, y: y - rw / 2, w, h: rw });
+    for (const road of this.roads) {
+      const vertical = road.w < road.h;
+      const start = vertical ? road.y + 130 : road.x + 130;
+      const end = vertical ? road.y + road.h - 100 : road.x + road.w - 100;
+      for (let along = start; along < end; along += 260) {
+        this.streetLamps.push(vertical
+          ? { x: road.x + road.w - 18, y: along }
+          : { x: along, y: road.y + road.h - 18 });
+      }
+    }
 
     // Buildings.
     let placed = 0;
@@ -332,6 +343,11 @@ export class GameMap {
           this.drawObstacle(ctx, cam, o.rect, o.kind);
         }
       }
+    }
+    for (const lamp of this.streetLamps) {
+      if (lamp.x < view.x - 24 || lamp.x > view.x + view.w + 24 || lamp.y < view.y - 24 || lamp.y > view.y + view.h + 24) continue;
+      const sp = cam.apply(lamp);
+      drawStreetLamp(ctx, sp.x, sp.y);
     }
   }
 
