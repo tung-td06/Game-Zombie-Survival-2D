@@ -27,6 +27,8 @@ export interface SaveData {
     screen_shake: boolean;
     damage_numbers: boolean;
     hit_effects: boolean;
+    footstep_dust: boolean;
+    window_lights: boolean;
     brightness: number;
     bindings: Record<string, string>;
   };
@@ -54,6 +56,8 @@ export const DEFAULT_SAVE: SaveData = {
     screen_shake: true,
     damage_numbers: true,
     hit_effects: true,
+    footstep_dust: false,
+    window_lights: false,
     brightness: 1,
     bindings: {
       up: "KeyW",

@@ -819,7 +819,9 @@ export class Game {
     if (!this.map) return;
     this.map.drawGround(this.ctx, this.camera, this.viewW, this.viewH);
     this.particles.drawDecals(this.ctx, this.camera);
-    this.map.drawObstacles(this.ctx, this.camera);
+    // Read live from settings so toggling WINDOW LIGHTS in either settings
+    // screen re-renders windows (dark or lit) on the very next frame.
+    this.map.drawObstacles(this.ctx, this.camera, this.save.settings.window_lights);
   }
 
   private collectLights(): PixelLight[] {
@@ -1104,6 +1106,15 @@ export class Game {
       this.save.save();
     } else if (action === "toggle_hit_effects") {
       this.save.settings.hit_effects = !this.save.settings.hit_effects;
+      this.save.save();
+    } else if (action === "toggle_footstep_dust") {
+      this.save.settings.footstep_dust = !this.save.settings.footstep_dust;
+      this.save.save();
+    } else if (action === "toggle_window_lights") {
+      // Flipping this immediately darkens every window (OFF) or restores the
+      // deterministic per-building pattern (ON) on the next rendered frame;
+      // no map regeneration is involved.
+      this.save.settings.window_lights = !this.save.settings.window_lights;
       this.save.save();
     }
   }

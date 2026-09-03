@@ -64,6 +64,7 @@ export class Player {
   invuln = 0;
   walkCycle = 0;
   moving = false;
+  dustCd = 0;
   dead = false;
   previewOnly = false;
 
@@ -120,6 +121,18 @@ export class Player {
       if (Math.floor(lastCycle / stepFreq) !== Math.floor(this.walkCycle / stepFreq)) {
         const stepSound = Math.random() < 0.5 ? "player.footstep1" : "player.footstep2";
         game.audio.playSFX(stepSound, this.pos);
+      }
+      // FOOTSTEP DUST (optional, OFF by default): subtle puffs trailing the
+      // feet every 0.18s while moving — only when the setting is enabled.
+      if (game.save.settings.footstep_dust) {
+        this.dustCd -= dt;
+        if (this.dustCd <= 0) {
+          this.dustCd = 0.18;
+          game.particles.dust({
+            x: this.pos.x + Math.cos(this.walkCycle + Math.PI) * 8,
+            y: this.pos.y + Math.sin(this.walkCycle + Math.PI) * 8,
+          });
+        }
       }
     }
 

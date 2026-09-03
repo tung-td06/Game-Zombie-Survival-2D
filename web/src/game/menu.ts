@@ -286,12 +286,15 @@ export class MenuSystem {
     // ── Panel container ────────────────────────────────────────────────────
     const PANEL_W = Math.min(580, width - 40);
     const PANEL_X = (width - PANEL_W) / 2;
-    const ROW_H = 42;
+    // Six Gameplay toggles now (SCREEN SHAKE, DAMAGE NUMBERS, HIT EFFECTS,
+    // FOOTSTEP DUST, WINDOW LIGHTS, SHOW FPS), so rows are compacted and the
+    // panel grows to fit them inside the viewport.
+    const ROW_H = 34;
     const AUDIO_ROWS = 4;
-    const GAMEPLAY_ROWS = 4;
+    const GAMEPLAY_ROWS = 6;
     const DISPLAY_ROWS = 3; // fullscreen + fps + brightness
     const estimatedContentH = 40 + (AUDIO_ROWS * (ROW_H + 6)) + 36 + (GAMEPLAY_ROWS * (ROW_H + 4)) + 22 + 36 + (DISPLAY_ROWS * (ROW_H + 4)) + 22 + 60;
-    const panelH = Math.min(estimatedContentH, height - 60);
+    const panelH = Math.min(estimatedContentH, height - 30);
     const panelY = cy - panelH / 2;
 
     ctx.save();
@@ -421,6 +424,8 @@ export class MenuSystem {
     toggleRow("SCREEN SHAKE",   st.screen_shake,    "toggle_screen_shake");
     toggleRow("DAMAGE NUMBERS", st.damage_numbers,  "toggle_damage_numbers");
     toggleRow("HIT EFFECTS",    st.hit_effects,     "toggle_hit_effects");
+    toggleRow("FOOTSTEP DUST",  st.footstep_dust,   "toggle_footstep_dust");
+    toggleRow("WINDOW LIGHTS",  st.window_lights,   "toggle_window_lights");
     toggleRow("SHOW FPS",       st.show_fps,        "toggle_fps");
     y += 8;
 
@@ -929,32 +934,81 @@ export class MenuSystem {
     drawText(ctx, "SETTINGS", width / 2, 90, 46, undefined, "center");
     const cx = width / 2;
     const st = game.save.settings;
+    const dt = game.dt;
+    const mx = game.input.mouseX;
+    const my = game.input.mouseY;
+    const buttons: Button[] = [];
+    let y = 146;
+
+    // ── AUDIO ──────────────────────────────────────────────────────────────
+    drawText(ctx, "AUDIO", cx - 260, y, 12, color("ui_gold"), "left", "middle");
+    y += 22;
     const rows: [string, string, number][] = [
       ["master_volume", "MASTER VOLUME", st.master_volume],
       ["music_volume", "MUSIC VOLUME", st.music_volume],
       ["sfx_volume", "SFX VOLUME", st.sfx_volume],
     ];
-    const buttons: Button[] = [];
-    let y = 170;
     for (const [key, label, val] of rows) {
-      drawText(ctx, label, cx - 260, y + 14, 20, undefined, "left", "middle");
+      drawText(ctx, label, cx - 260, y + 12, 17, undefined, "left", "middle");
       ctx.fillStyle = "#28282E";
-      ctx.fillRect(cx - 40, y + 8, 240, 18);
+      ctx.fillRect(cx - 40, y + 7, 240, 14);
       ctx.fillStyle = color("ui_accent");
-      ctx.fillRect(cx - 40, y + 8, 240 * val, 18);
-      drawText(ctx, `${Math.floor(val * 100)}%`, cx + 250, y + 17, 18, undefined, "center", "middle");
-      buttons.push(new Button("-", cx - 82, y, 44, 36, `dec:${key}`));
-      buttons.push(new Button("+", cx + 288, y, 44, 36, `inc:${key}`));
-      y += 70;
+      ctx.fillRect(cx - 40, y + 7, 240 * val, 14);
+      drawText(ctx, `${Math.floor(val * 100)}%`, cx + 250, y + 14, 15, undefined, "center", "middle");
+      buttons.push(new Button("-", cx - 82, y + 2, 38, 28, `dec:${key}`));
+      buttons.push(new Button("+", cx + 292, y + 2, 38, 28, `inc:${key}`));
+      y += 60;
     }
+
+    // ── GAMEPLAY toggles ──────────────────────────────────────────────────
+    // Same canonical list and order as the Pause settings panel; every toggle
+    // shares the same backing settings values, so they stay in sync.
+    drawText(ctx, "GAMEPLAY", cx - 300, y + 2, 12, color("ui_gold"), "left", "middle");
+    y += 20;
+    const toggles: Array<{
+      key: "screen_shake" | "damage_numbers" | "hit_effects" | "footstep_dust" | "window_lights" | "show_fps";
+      label: string;
+      action: string;
+    }> = [
+      { key: "screen_shake", label: "SCREEN SHAKE", action: "toggle_screen_shake" },
+      { key: "damage_numbers", label: "DAMAGE NUMBERS", action: "toggle_damage_numbers" },
+      { key: "hit_effects", label: "HIT EFFECTS", action: "toggle_hit_effects" },
+      { key: "footstep_dust", label: "FOOTSTEP DUST", action: "toggle_footstep_dust" },
+      { key: "window_lights", label: "WINDOW LIGHTS", action: "toggle_window_lights" },
+      { key: "show_fps", label: "SHOW FPS", action: "toggle_fps" },
+    ];
+    for (const t of toggles) {
+      const on = !!st[t.key];
+      drawText(ctx, t.label, cx - 300, y + 13, 13, undefined, "left", "middle");
+      ctx.fillStyle = on ? color("ui_green") : "#4A4A52";
+      ctx.beginPath();
+      ctx.arc(cx + 190, y + 13, 4, 0, Math.PI * 2);
+      ctx.fill();
+      const toggleBtn = new Button(
+        on ? "ON" : "OFF",
+        cx + 205,
+        y + 2,
+        96,
+        24,
+        t.action,
+        on ? color("ui_green") : "#4A4A52",
+      );
+      toggleBtn.update(dt, mx, my, false);
+      toggleBtn.draw(ctx);
+      buttons.push(toggleBtn);
+      y += 34;
+    }
+
+    // ── DISPLAY ───────────────────────────────────────────────────────────
+    drawText(ctx, "DISPLAY", cx - 300, y + 6, 12, color("ui_gold"), "left", "middle");
+    y += 24;
     const fs = st.fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF";
-    buttons.push(new Button(fs, cx - 280, y + 12, 360, 36, "toggle_fullscreen"));
+    buttons.push(new Button(fs, cx - 300, y + 2, 296, 30, "toggle_fullscreen"));
     const idx = st.resolution_index;
     const res = RESOLUTIONS[idx] ?? RESOLUTIONS[0]!;
-    buttons.push(new Button(`RES: ${res[0]}x${res[1]}`, cx + 110, y + 12, 280, 36, "cycle_resolution"));
-    const fps = st.show_fps ? "SHOW FPS: ON" : "SHOW FPS: OFF";
-    buttons.push(new Button(fps, cx - 280, y + 80, 280, 36, "toggle_fps"));
-    buttons.push(new Button("BACK", cx + 110, y + 80, 280, 36, "back"));
+    buttons.push(new Button(`RES: ${res[0]}x${res[1]}`, cx + 20, y + 2, 280, 30, "cycle_resolution"));
+    y += 40;
+    buttons.push(new Button("BACK", cx - 110, y + 6, 220, 44, "back"));
     return { action: null, buttons };
   }
 

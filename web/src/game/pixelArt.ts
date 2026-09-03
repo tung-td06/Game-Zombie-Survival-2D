@@ -54,10 +54,20 @@ function worldHash(seed: number, x: number, y: number): number {
   return pixelVariant(seed + 71, Math.floor(x / 8), Math.floor(y / 8), 997);
 }
 
+/**
+ * Draw one world-ground tile. `worldX`/`worldY` are the tile's world-space
+ * origin (stable multiples of TILE_SIZE); `sx`/`sy` are its current screen
+ * position. Every decorative fleck is hashed from WORLD coordinates so each
+ * speck is glued to a fixed world cell — moving the camera can never
+ * regenerate, relocate, or recolour the pattern (the old code hashed the
+ * screen position, so specks popped in and out while walking).
+ */
 export function drawGroundTile(
   ctx: CanvasRenderingContext2D,
   sx: number,
   sy: number,
+  worldX: number,
+  worldY: number,
   variant: number,
   seed: number,
   road = false,
@@ -67,9 +77,11 @@ export function drawGroundTile(
     : ["#252B20", "#292E22", "#22291E", "#2C3024", "#20271C", "#303425"][variant % 6]!;
   rect(ctx, sx, sy, TILE_SIZE, TILE_SIZE, base);
 
-  const fleck = road ? ["#3A3A3D", "#17191A", "#4B4841"] : ["#3D482E", "#182016", "#4A4731", "#303720"];
+  const fleck = road
+    ? ["#3A3A3D", "#17191A", "#4B4841"]
+    : ["#2E3826", "#141D10", "#33311F", "#242C1A"];
   for (let i = 0; i < 11; i++) {
-    const h = worldHash(seed + i * 19, sx + i * 13, sy - i * 7);
+    const h = worldHash(seed + i * 19, worldX + i * 13, worldY - i * 7);
     const x = sx + (h % 58) + 2;
     const y = sy + (Math.floor(h / 17) % 58) + 2;
     const size = h % 4 === 0 ? 4 : 2;
@@ -77,9 +89,9 @@ export function drawGroundTile(
   }
 
   if (!road && variant % 4 === 0) {
-    rect(ctx, sx + 34, sy + 10, 14, 2, "#55613B");
-    rect(ctx, sx + 42, sy + 8, 2, 7, "#55613B");
-    rect(ctx, sx + 21, sy + 46, 9, 2, "#59603A");
+    rect(ctx, sx + 34, sy + 10, 14, 2, "#46502E");
+    rect(ctx, sx + 42, sy + 8, 2, 7, "#46502E");
+    rect(ctx, sx + 21, sy + 46, 9, 2, "#4A5430");
   }
   if (!road && variant === 3) {
     rect(ctx, sx + 8, sy + 39, 16, 6, "#1C302A");
@@ -116,6 +128,11 @@ export function drawRoadDetails(
   }
 }
 
+/**
+ * Draw a prop. `litWindows` is the deterministic per-building window-light
+ * decision made by the map from the building's world position (never from
+ * screen/camera state): when false every window is drawn dark.
+ */
 export function drawPropSprite(
   ctx: CanvasRenderingContext2D,
   kind: string,
@@ -123,6 +140,7 @@ export function drawPropSprite(
   y: number,
   w: number,
   h: number,
+  litWindows = false,
 ): void {
   getPixelArtAtlas(ctx);
   const shadowX = x + 5;
@@ -134,12 +152,19 @@ export function drawPropSprite(
     rect(ctx, x + 4, y + 4, w - 8, h - 8, "#474754");
     rect(ctx, x + 8, y + 8, w - 16, h - 16, "#3A3A46");
     strokeRect(ctx, x, y, w, h, "#17191E", 3);
+    // Each window's lit/dark state is derived only from its local column/row
+    // index inside the building (plus the building's world-anchored
+    // litWindows flag), so no window ever changes while the camera moves.
+    let rowIdx = 0;
     for (let wy = y + 18; wy < y + h - 20; wy += 32) {
+      let colIdx = 0;
       for (let wx = x + 16; wx < x + w - 18; wx += 28) {
-        const lit = ((Math.floor(wx / 28) + Math.floor(wy / 32)) % 3) !== 0;
-        rect(ctx, wx, wy, 12, 14, lit ? "#D1AC58" : "#20242D");
-        rect(ctx, wx + 2, wy + 2, 8, 2, lit ? "#F1D882" : "#303541");
+        const windowLit = litWindows && (colIdx + rowIdx) % 3 !== 0;
+        rect(ctx, wx, wy, 12, 14, windowLit ? "#C9A34E" : "#1D222B");
+        if (windowLit) rect(ctx, wx + 2, wy + 2, 8, 2, "#E8CE80");
+        colIdx++;
       }
+      rowIdx++;
     }
     rect(ctx, x + w * 0.42, y + h - 17, 18, 13, "#211D22");
     return;
@@ -156,8 +181,14 @@ export function drawPropSprite(
     ctx.fill();
     for (let sx = x + 12; sx < x + w - 12; sx += 9) rect(ctx, sx, y + 14 - Math.abs(sx - (x + w / 2)) * 0.22, 7, 2, "#81594A");
     rect(ctx, x + w * 0.45, y + h - 22, 16, 18, "#39251E");
-    rect(ctx, x + 12, y + h * 0.48, 13, 12, "#D4AF58");
-    rect(ctx, x + w - 25, y + h * 0.48, 13, 12, "#D4AF58");
+    // House windows obey the same deterministic per-building light decision:
+    // lit only when litWindows, otherwise uniform dark panes.
+    rect(ctx, x + 12, y + h * 0.48, 13, 12, litWindows ? "#C2A055" : "#171C24");
+    rect(ctx, x + w - 25, y + h * 0.48, 13, 12, litWindows ? "#C2A055" : "#171C24");
+    if (litWindows) {
+      rect(ctx, x + 14, y + h * 0.48 + 2, 4, 2, "#E2C97C");
+      rect(ctx, x + w - 23, y + h * 0.48 + 2, 4, 2, "#E2C97C");
+    }
     strokeRect(ctx, x, y, w, h, "#241914", 3);
     return;
   }

@@ -182,6 +182,24 @@ export class ParticleSystem {
     }
   }
 
+  /** Subtle footstep dust puffs (FOOTSTEP DUST setting). Kept few and dim. */
+  dust(pos: Vec, count = 3): void {
+    const colors = ["#3E3A2C", "#332F24", "#4A4434"];
+    for (let i = 0; i < count; i++) {
+      this.push(
+        newParticle({
+          pos: { x: pos.x + rand(-4, 4), y: pos.y + rand(-2, 2) },
+          vel: { x: rand(-14, 14), y: rand(-22, -6) },
+          life: rand(0.35, 0.6),
+          size: 2 + Math.floor(rand(0, 2)),
+          color: colors[i % colors.length]!,
+          gravity: 0,
+          shrink: true,
+        }),
+      );
+    }
+  }
+
   deathBurst(pos: Vec, color: string): void {
     this.addDecal(pos, "blood");
     for (let i = 0; i < 18; i++) {

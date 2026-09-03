@@ -59,14 +59,21 @@ describe("SaveManager", () => {
     expect(s.settings.screen_shake).toBe(true);
     expect(s.settings.damage_numbers).toBe(true);
     expect(s.settings.hit_effects).toBe(true);
+    expect(s.settings.footstep_dust).toBe(false);
+    expect(s.settings.window_lights).toBe(false);
     expect(s.settings.brightness).toBe(1);
     s.settings.screen_shake = false;
     s.settings.brightness = 1;
+    // Both new toggles persist like every other setting.
+    s.settings.footstep_dust = true;
+    s.settings.window_lights = true;
     s.save();
     const s2 = new SaveManager();
     expect(s2.settings.screen_shake).toBe(false);
     expect(s2.settings.damage_numbers).toBe(true);
     expect(s2.settings.brightness).toBe(1);
+    expect(s2.settings.footstep_dust).toBe(true);
+    expect(s2.settings.window_lights).toBe(true);
   });
 
   test("legacy localStorage without new keys falls back to defaults", () => {
@@ -84,5 +91,8 @@ describe("SaveManager", () => {
     expect(s.settings.master_volume).toBe(0.5);
     expect(s.settings.screen_shake).toBe(true);
     expect(s.settings.brightness).toBe(1);
+    // WINDOW LIGHTS and FOOTSTEP DUST default to OFF for old saves.
+    expect(s.settings.footstep_dust).toBe(false);
+    expect(s.settings.window_lights).toBe(false);
   });
 });

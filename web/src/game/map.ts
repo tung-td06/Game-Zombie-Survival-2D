@@ -11,6 +11,16 @@ import { TILE_SIZE, drawGroundTile, drawPropSprite, drawRoadDetails, drawStreetL
 
 export const CELL = 400;
 
+/**
+ * Deterministic window-light seed for the obstacle whose world-space origin
+ * is at (worldX, worldY). Depends ONLY on world coordinates — never on the
+ * camera or time — so the same building always keeps the same window state.
+ * Values in [0, 100): seeds >= 30 represent the ~70% "lit" group.
+ */
+export function windowLightSeed(worldX: number, worldY: number): number {
+  return ((Math.round(worldX) * 13 + Math.round(worldY) * 7) % 100 + 100) % 100;
+}
+
 export type ObstacleKind =
   | "border"
   | "building"
@@ -308,10 +318,14 @@ export class GameMap {
     const yStart = Math.floor(view.y / TILE_SIZE) * TILE_SIZE;
     for (let y = yStart; y < view.y + view.h + TILE_SIZE; y += TILE_SIZE) {
       for (let x = xStart; x < view.x + view.w + TILE_SIZE; x += TILE_SIZE) {
+        // Pass the tile's world origin as well as its screen position so the
+        // ground's decorative flecks stay glued to fixed world cells.
         drawGroundTile(
           ctx,
           x - cam.offset.x + cam.jitter.x,
           y - cam.offset.y + cam.jitter.y,
+          x,
+          y,
           pixelVariant(this.seed, x, y, 6),
           this.seed,
         );
@@ -325,7 +339,16 @@ export class GameMap {
     }
   }
 
-  drawObstacles(ctx: CanvasRenderingContext2D, cam: Camera): void {
+  /**
+   * @param windowLights When true, buildings whose deterministic world seed
+   *   puts them in the ~70% lit group render illuminated windows; when false
+   *   every window renders dark (WINDOW LIGHTS setting = OFF).
+   */
+  drawObstacles(
+    ctx: CanvasRenderingContext2D,
+    cam: Camera,
+    windowLights = false,
+  ): void {
     const view = cam.viewRect();
     const x0 = Math.floor(view.x / CELL);
     const x1 = Math.floor((view.x + view.w) / CELL);
@@ -340,7 +363,7 @@ export class GameMap {
           if (drawn.has(o)) continue;
           drawn.add(o);
           if (!rectsIntersect(view, o.rect)) continue;
-          this.drawObstacle(ctx, cam, o.rect, o.kind);
+          this.drawObstacle(ctx, cam, o.rect, o.kind, windowLights);
         }
       }
     }
@@ -356,10 +379,16 @@ export class GameMap {
     cam: Camera,
     rect: Rect,
     kind: ObstacleKind,
+    windowLights: boolean,
   ): void {
     const sr = applyRect(cam, rect);
     if (String(kind) !== "border") {
-      drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h);
+      // Deterministic lit/dark choice locked to the obstacle's WORLD position:
+      // (x*13 + y*7) % 100 >= 30 gives ~70% lit buildings, ~30% permanently
+      // dark. Never derived from camera/screen state, so the exact same
+      // buildings stay lit (or dark) no matter how the player moves.
+      const litWindows = windowLights && windowLightSeed(rect.x, rect.y) >= 30;
+      drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h, litWindows);
       return;
     }
     switch (kind) {
