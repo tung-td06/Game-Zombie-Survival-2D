@@ -339,9 +339,16 @@ class GameMap:
     def _draw_obstacle(self, surface: pygame.Surface, cam,
                        rect: pygame.Rect, kind: str) -> None:
         sr = cam.apply_rect(rect)
+        # Deterministic lit/dark pattern locked to the obstacle's
+        # world position. The old implementation mixed in
+        # `pygame.time.get_ticks() // 100` so the same building's
+        # windows would visibly blink on and off every few frames
+        # while you walked past — that was both distracting and a
+        # real source of eye strain. Now each building is either
+        # "lit" (some windows on) or "dark" (all windows off) for
+        # the entire run, with no time-based component.
         flicker_seed = (rect.x * 13 + rect.y * 7) % 100
-        tick = pygame.time.get_ticks() // 100
-        flicker = (tick + flicker_seed) % 47 != 0  # ~2% windows go dark
+        flicker = flicker_seed >= 30  # ~70% lit, 30% dark
 
         if kind == "building":
             sh = sr.move(3, 4)
