@@ -32,6 +32,8 @@ import { drawPropSprite, type PropKind } from "./propArt";
 export const CELL = 400;
 export const ROAD_WIDTH = 140;
 export const SIDEWALK = 26;
+/** Radius (world px) of the paved town-square landmark at the map centre. */
+export const PLAZA_RADIUS = 260;
 
 /**
  * Deterministic window-light seed for the obstacle whose world-space origin
@@ -238,6 +240,14 @@ export class GameMap {
           if (len < 200) continue;
           // ~55% of streetfronts are built up; the rest stay open (yards,
           // parking or empty lots), which keeps alleys and escape routes.
+          // This (and the house/building mix below) is intentionally NOT
+          // district-biased: strips are processed road-by-road in a fixed
+          // order sharing one seeded RNG, so varying either roll here would
+          // reshuffle every later draw — including the strips right at the
+          // spawn crossroads that boss-nav regression tests pin down.
+          // District flavour instead lives in the systems that run strictly
+          // after buildings/vehicles are fully committed — see the
+          // tree/bush/dead-tree loops and buildPlaza below.
           if (rng.next() > 0.55) continue;
           const inset = randInt(rng, 46, 92);
           let cur = segA + 26;
@@ -289,11 +299,20 @@ export class GameMap {
         const [segA, segB] = strips[s]!;
         const len = segB - segA;
         if (len < 240) continue;
+        // Kept a flat 55% (not district-biased): it decides whether the
+        // whole per-strip block below runs, so varying it per district
+        // would desync the shared seeded RNG for everything generated
+        // afterward (see the building loop above for the same reasoning).
         if (rng.next() > 0.55) continue; // not every curb is a parking row
         const side = rng.next() < 0.5 ? -1 : 1;
         const count = 1 + (rng.next() < 0.4 ? 1 : 0) + (len > 700 && rng.next() < 0.5 ? 1 : 0);
         let along = segA + 60;
         for (let ci = 0; ci < count && along < segB - 60; ci++) {
+          // Kind thresholds stay district-independent for the same RNG-sync
+          // reason: the "colors" branch below draws one extra random number
+          // that the other branches don't, so shifting how often each
+          // branch is hit would (like the gates above) desync everything
+          // generated later from this seed.
           const kindRoll = rng.next();
           let kind: ObstacleKind = "car_red";
           const colors: ObstacleKind[] = ["car_red", "car_blue", "car_yellow"];
@@ -507,6 +526,15 @@ export class GameMap {
       const radius = randInt(rng, 17, 26);
       const cx = randInt(rng, t + radius + 20, w - t - radius - 20);
       const cy = randInt(rng, t + radius + 20, h - t - radius - 20);
+      // Greenery density (this loop and the two below) is district-biased —
+      // safe here because trees are placed strictly after every building,
+      // house and vehicle is already committed, so this can only change
+      // where trees land, never desync the building/vehicle layout that
+      // boss-nav regression tests pin down.
+      const treeDistrict = districtAt(this.seed, cx, cy, xs, ys);
+      const treeChance =
+        treeDistrict === "park" ? 1 : treeDistrict === "residential" ? 0.8 : treeDistrict === "downtown" ? 0.3 : 0.55;
+      if (rng.next() > treeChance) continue;
       const box: Rect = { x: cx - radius, y: cy - radius, w: radius * 2, h: radius * 2 };
       if (this.overlaps(box, 8) || this.touchesRoad(box, 12)) continue;
       this.add("tree", box);
@@ -533,6 +561,10 @@ export class GameMap {
       const radius = randInt(rng, 11, 17);
       const cx = randInt(rng, t + radius, w - t - radius);
       const cy = randInt(rng, t + radius, h - t - radius);
+      const bushDistrict = districtAt(this.seed, cx, cy, xs, ys);
+      const bushChance =
+        bushDistrict === "park" ? 1 : bushDistrict === "residential" ? 0.85 : bushDistrict === "downtown" ? 0.35 : 0.5;
+      if (rng.next() > bushChance) continue;
       const box: Rect = { x: cx - radius, y: cy - radius, w: radius * 2, h: radius * 2 };
       if (this.overlaps(box, 6) || this.touchesRoad(box, 10)) continue;
       this.add("bush", box);
@@ -567,11 +599,18 @@ export class GameMap {
       const radius = randInt(rng, 16, 24);
       const cx = randInt(rng, t + radius, w - t - radius);
       const cy = randInt(rng, t + radius, h - t - radius);
+      const deadDistrict = districtAt(this.seed, cx, cy, xs, ys);
+      const deadChance = deadDistrict === "park" ? 0.3 : deadDistrict === "residential" ? 0.6 : 1;
+      if (rng.next() > deadChance) continue;
       const box: Rect = { x: cx - radius, y: cy - radius, w: radius * 2, h: radius * 2 };
       if (this.overlaps(box, 6) || this.touchesRoad(box, 14)) continue;
       this.add("tree", box); // drawn as a dead tree via style variant later
       dead++;
     }
+
+    // A paved town square replaces whatever generic block ended up at the
+    // spawn crossroads — the map's one deliberate, always-present landmark.
+    this.buildPlaza();
 
     // ── Safety net ──────────────────────────────────────────────────────
     // Guarantee nothing except vehicles, roadblocks and the border ever sits
@@ -609,6 +648,53 @@ export class GameMap {
     }
     this.obstacles = kept;
     this.rebuildGrid();
+  }
+
+  /**
+   * The exact spawn crossroads becomes a paved town-square landmark instead
+   * of just another random block: clear everything (but the border) within
+   * PLAZA_RADIUS of the map centre, then dress the cleared square with a
+   * monument, a ring of benches and a few ornamental trees. Every addition
+   * goes through the same overlap/road-safety checks as the rest of the
+   * generator, so the plaza can never wedge navigation.
+   */
+  private buildPlaza(): void {
+    const rng = this.rng;
+    const cx = WORLD_WIDTH / 2;
+    const cy = WORLD_HEIGHT / 2;
+    this.obstacles = this.obstacles.filter((o) => {
+      if (o.kind === "border") return true;
+      const ocx = o.rect.x + o.rect.w / 2;
+      const ocy = o.rect.y + o.rect.h / 2;
+      return Math.hypot(ocx - cx, ocy - cy) > PLAZA_RADIUS;
+    });
+
+    const tryPlace = (kind: ObstacleKind, pw: number, ph: number, minR: number, maxR: number): boolean => {
+      for (let i = 0; i < 24; i++) {
+        const ang = rng.next() * Math.PI * 2;
+        const r = minR + rng.next() * (maxR - minR);
+        const box: Rect = {
+          x: cx + Math.cos(ang) * r - pw / 2,
+          y: cy + Math.sin(ang) * r - ph / 2,
+          w: pw,
+          h: ph,
+        };
+        if (this.overlaps(box, 10) || this.touchesRoad(box, 14)) continue;
+        this.add(kind, box);
+        return true;
+      }
+      return false;
+    };
+
+    tryPlace("monument", 34, 34, 120, 175);
+    let benches = 0;
+    for (let i = 0; i < 8 && benches < 6; i++) {
+      if (tryPlace("bench", 46, 16, 150, 220)) benches++;
+    }
+    let rimTrees = 0;
+    for (let i = 0; i < 10 && rimTrees < 6; i++) {
+      if (tryPlace("tree", 40, 40, 190, 250)) rimTrees++;
+    }
   }
 
   // ------------------------------------------------------------ queries --
@@ -886,10 +972,14 @@ export class GameMap {
     for (let gx = x0; gx <= x1; gx++) {
       for (let gy = y0; gy <= y1; gy++) {
         const h = worldHash(this.seed + 173, gx, gy);
-        const kind = h % 14;
-        if (kind > 3) continue;
         const cxw = gx * cell;
         const cyw = gy * cell;
+        // Cells around the town-square landmark always read as paved plaza,
+        // regardless of what the hash would otherwise have picked.
+        const nearPlaza =
+          Math.hypot(cxw + cell / 2 - WORLD_WIDTH / 2, cyw + cell / 2 - WORLD_HEIGHT / 2) < PLAZA_RADIUS + 220;
+        const kind = nearPlaza ? 0 : h % 14;
+        if (!nearPlaza && kind > 3) continue;
         const rx = cxw + 24 + ((h >> 4) % (cell - 130));
         const ry = cyw + 24 + ((h >> 8) % (cell - 130));
         const rw2 = 90 + ((h >> 5) % 130);
@@ -1109,6 +1199,8 @@ export class GameMap {
           return "#6E6254";
         case "border":
           return "#3C3C40";
+        case "monument":
+          return "#E8C468";
         default:
           return "#383840";
       }
@@ -1151,6 +1243,34 @@ function sideBands(road: Rect, vertical: boolean): SideBand[] {
 
 function randInt(rng: Rng, a: number, b: number): number {
   return a + Math.floor(rng.next() * (b - a + 1));
+}
+
+// ------------------------------------------------------------ districts --
+// The town is zoned rather than uniformly random: a downtown core sits
+// around the spawn crossroads, and the outer blocks are assigned one of a
+// few themed districts from a hash of their position in the road grid — so
+// a whole neighbourhood reads as residential, industrial or parkland
+// instead of every block rolling its own independent look.
+type District = "downtown" | "residential" | "industrial" | "park";
+
+/** Which of the 4 bands (split by the axis's 3 road centre-lines) `coord` falls in. */
+function macroIndex(coord: number, centers: number[]): number {
+  if (coord < centers[0]!) return 0;
+  if (coord < centers[1]!) return 1;
+  if (coord < centers[2]!) return 2;
+  return 3;
+}
+
+/** District for a world point, given the map's road centre-line arrays. */
+function districtAt(seed: number, x: number, y: number, xs: number[], ys: number[]): District {
+  const col = macroIndex(x, xs);
+  const row = macroIndex(y, ys);
+  // The 2x2 band of macro-cells surrounding the centre crossroads is always
+  // downtown — a coherent commercial core around the plaza and spawn point.
+  if (col >= 1 && col <= 2 && row >= 1 && row <= 2) return "downtown";
+  const h = worldHash(seed + 911, col * 97 + 13, row * 131 + 7);
+  const m = h % 10;
+  return m < 5 ? "residential" : m < 8 ? "industrial" : "park";
 }
 
 /**

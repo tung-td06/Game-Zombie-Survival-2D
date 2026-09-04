@@ -33,7 +33,8 @@ export type PropKind =
   | "rubble"
   | "mailbox"
   | "bench"
-  | "cart";
+  | "cart"
+  | "monument";
 
 // ---------------------------------------------------------------------
 // Façade palettes. styleVariant selects a district-consistent palette; the
@@ -118,6 +119,7 @@ export function drawPropSprite(
   if (kind === "mailbox") return drawMailbox(ctx, x, y, w, h, dx, dy);
   if (kind === "bench") return drawBench(ctx, x, y, w, h);
   if (kind === "cart") return drawCart(ctx, x, y, w, h);
+  if (kind === "monument") return drawMonument(ctx, x, y, w, h);
   if (
     kind === "car_red" ||
     kind === "car_blue" ||
@@ -1238,6 +1240,47 @@ function drawCart(ctx: CanvasRenderingContext2D, x: number, y: number, w: number
   px(ctx, x + w - 7, y + h - 6, "#0B0B0E", 5);
   px(ctx, x + 2, y + 2, "#0B0B0E", 4);
   px(ctx, x + w - 6, y + 2, "#0B0B0E", 4);
+}
+
+/** Town-square centrepiece: a small stone fountain with a statue pedestal. */
+function drawMonument(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  const r = Math.min(w, h) / 2;
+  ctx.fillStyle = "rgba(4,6,5,0.32)";
+  ctx.beginPath();
+  ctx.arc(cx + 3, cy + 4, r + 3, 0, Math.PI * 2);
+  ctx.fill();
+  // Stone rim.
+  ctx.fillStyle = "#6E6A5E";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#4A4638";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 3, 0, Math.PI * 2);
+  ctx.fill();
+  // Still water pool + a soft highlight.
+  ctx.fillStyle = "rgba(70,120,140,0.55)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r - 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(190,224,232,0.25)";
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.25, cy - r * 0.25, r * 0.35, 0, Math.PI * 2);
+  ctx.fill();
+  // Pedestal + statue silhouette.
+  rect(ctx, cx - 4, cy - r * 0.55, 8, r * 0.95, "#8A8674");
+  rect(ctx, cx - 7, cy - r * 0.6, 14, 6, "#9A9684");
+  ctx.fillStyle = "#565244";
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.78, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#332F26";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 // -------------------------------------------------------------- vehicles --
