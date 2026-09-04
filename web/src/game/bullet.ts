@@ -28,6 +28,7 @@ export class Bullet {
     owner: "player" | "enemy" = "player",
     crit = false,
     radius = 4,
+    lifetime = BULLET_LIFETIME,
   ) {
     this.pos = { ...pos };
     this.vel = {
@@ -38,7 +39,9 @@ export class Bullet {
     this.owner = owner;
     this.crit = crit;
     this.radius = radius;
-    this.lifetime = BULLET_LIFETIME;
+    // Weapons can cap their reach per shot (range / speed); enemies and
+    // the drone keep the shared default lifetime.
+    this.lifetime = lifetime;
     this.trailA = { ...pos };
     this.trailB = { ...pos };
   }

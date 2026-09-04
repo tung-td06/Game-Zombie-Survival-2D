@@ -426,7 +426,16 @@ export class Game {
             rp.weapons.current.cooldown = rp.weapons.current.fireRate / Math.max(0.01, rp.fireRateMult);
             for (const s of shots) {
               this.bullets.push(
-                new Bullet(muzzle, s.angle, s.speed, s.damage, "player", s.crit),
+                new Bullet(
+                  muzzle,
+                  s.angle,
+                  s.speed,
+                  s.damage,
+                  "player",
+                  s.crit,
+                  4,
+                  s.lifetime,
+                ),
               );
             }
             this.particles.muzzleFlash(muzzle, rp.angle);

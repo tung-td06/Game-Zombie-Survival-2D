@@ -97,6 +97,23 @@ describe("Weapon", () => {
     expect(shots.length).toBe(8);
     expect(w.ammo).toBe(5);
   });
+
+  test("fire caps lifetime by explicit range", () => {
+    const w = new Weapon("pistol", {
+      ...FIX,
+      pistol: { ...FIX.pistol!, bullet_speed: 1000, range: 700 },
+    });
+    const shots = w.fire(0);
+    expect(shots[0]!.lifetime).toBeCloseTo(0.7);
+  });
+
+  test("range falls back to legacy speed * lifetime", () => {
+    // Fixtures carry no `range` -> legacy reach = speed * BULLET_LIFETIME
+    // (1.6 s), i.e. lifetime stays at BULLET_LIFETIME.
+    const w = new Weapon("pistol", FIX);
+    const shots = w.fire(0);
+    expect(shots[0]!.lifetime).toBeCloseTo(1.6);
+  });
 });
 
 describe("WeaponManager", () => {

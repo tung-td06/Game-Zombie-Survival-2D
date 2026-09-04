@@ -3,8 +3,8 @@
 
 import {
   BASE_WAVE_SIZE,
-  BOSS_EVERY_N_WAVES,
   DAMAGE_GROWTH_PER_WAVE,
+  FIRST_BOSS_WAVE,
   HP_GROWTH_PER_WAVE,
   MAX_ALIVE_ZOMBIES,
   NIGHT_SPAWN_MULT,
@@ -42,8 +42,9 @@ export class WaveManager {
     this.spawnInterval = Math.max(0.25, 1.5 - this.wave * 0.08);
   }
 
+  // From FIRST_BOSS_WAVE onward EVERY wave includes a boss.
   get isBossWave(): boolean {
-    return this.wave > 0 && this.wave % BOSS_EVERY_N_WAVES === 0;
+    return this.wave >= FIRST_BOSS_WAVE;
   }
 
   update(dt: number, game: IGame): void {
@@ -123,8 +124,13 @@ export class WaveManager {
     }
     if (this.to_spawn === 0 && game.zombies.length === 0) {
       this.bossAlive = false;
-      const rewardCoins = 50 + this.wave * 15;
-      const rewardXp = 40 + this.wave * 20;
+      let rewardCoins = 50 + this.wave * 15;
+      let rewardXp = 40 + this.wave * 20;
+      if (this.isBossWave) {
+        // Boss-clear bonus (parity with the desktop build).
+        rewardCoins += 300;
+        rewardXp += 200;
+      }
       game.player!.coins += rewardCoins;
       game.player!.addXp(rewardXp, game);
       game.toast(`WAVE ${this.wave} COMPLETE!  +$${rewardCoins}`);

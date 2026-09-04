@@ -10,6 +10,8 @@ export interface WeaponData {
   fire_rate: number;
   reload_time: number;
   bullet_speed: number;
+  /** Max reach in px before the projectile expires; falls back to speed * BULLET_LIFETIME. */
+  range?: number;
   spread_deg: number;
   pellets: number;
   critical_chance: number;

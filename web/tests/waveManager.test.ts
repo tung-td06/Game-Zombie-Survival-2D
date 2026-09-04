@@ -1,7 +1,7 @@
 // tests/waveManager.test.ts
 import { describe, test, expect, vi } from "vitest";
 import { WaveManager } from "@/game/waveManager";
-import { BOSS_EVERY_N_WAVES, BASE_WAVE_SIZE, WAVE_SIZE_GROWTH } from "@/game/settings";
+import { FIRST_BOSS_WAVE, BASE_WAVE_SIZE, WAVE_SIZE_GROWTH } from "@/game/settings";
 
 function makeGame(night = 0) {
   return {
@@ -31,12 +31,18 @@ describe("WaveManager", () => {
     expect(w.waveSize).toBe(BASE_WAVE_SIZE + 5 * WAVE_SIZE_GROWTH);
   });
 
-  test("isBossWave true every Nth", () => {
+  test("isBossWave true from FIRST_BOSS_WAVE on every wave", () => {
     const w = new WaveManager();
-    w.wave = BOSS_EVERY_N_WAVES;
-    expect(w.isBossWave).toBe(true);
-    w.wave = BOSS_EVERY_N_WAVES + 1;
+    w.wave = 1;
     expect(w.isBossWave).toBe(false);
+    w.wave = FIRST_BOSS_WAVE - 1;
+    expect(w.isBossWave).toBe(false);
+    w.wave = FIRST_BOSS_WAVE;
+    expect(w.isBossWave).toBe(true);
+    w.wave = FIRST_BOSS_WAVE + 1;
+    expect(w.isBossWave).toBe(true);
+    w.wave = 30;
+    expect(w.isBossWave).toBe(true);
   });
 
   test("starts in intermission then moves to active", () => {

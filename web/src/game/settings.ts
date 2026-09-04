@@ -36,7 +36,7 @@ export const SPEED_GROWTH_PER_WAVE = 0.02;
 export const DAMAGE_GROWTH_PER_WAVE = 0.04;
 export const SPAWN_MIN_DIST = 500.0;
 export const SPAWN_MAX_DIST = 950.0;
-export const BOSS_EVERY_N_WAVES = 5;
+export const FIRST_BOSS_WAVE = 5; // from this wave on, EVERY wave includes a boss
 
 // Day/night
 export const DAY_LENGTH = 120.0;

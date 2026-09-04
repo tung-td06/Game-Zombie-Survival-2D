@@ -1,6 +1,7 @@
 // src/game/weapon.ts
 // Data-driven weapons + WeaponManager. Mirrors weapon.py.
 
+import { BULLET_LIFETIME } from "./settings";
 import type { WeaponData } from "./data";
 
 export const WEAPON_ORDER: readonly string[] = [
@@ -16,6 +17,8 @@ export interface FireResult {
   damage: number;
   crit: boolean;
   speed: number;
+  /** Seconds this shot may fly = range / speed. */
+  lifetime: number;
 }
 
 export class Weapon {
@@ -26,6 +29,8 @@ export class Weapon {
   fireRate: number;
   reloadTime: number;
   bulletSpeed: number;
+  /** Max reach in px before the projectile expires. */
+  range: number;
   spreadDeg: number;
   pellets: number;
   criticalChance: number;
@@ -49,6 +54,8 @@ export class Weapon {
     this.fireRate = d.fire_rate;
     this.reloadTime = d.reload_time;
     this.bulletSpeed = d.bullet_speed;
+    this.range =
+      d.range ?? this.bulletSpeed * BULLET_LIFETIME; // legacy fallback
     this.spreadDeg = d.spread_deg;
     this.pellets = d.pellets;
     this.criticalChance = d.critical_chance;
@@ -84,6 +91,7 @@ export class Weapon {
         damage: this.damage * damageMult * mult,
         crit,
         speed: this.bulletSpeed,
+        lifetime: this.range / Math.max(1, this.bulletSpeed),
       });
     }
     return shots;

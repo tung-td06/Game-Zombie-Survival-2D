@@ -198,7 +198,16 @@ export class Player {
     w.cooldown = w.fireRate / Math.max(0.01, this.fireRateMult);
     for (const s of shots) {
       game.bullets.push(
-        new Bullet(muzzle, s.angle, s.speed, s.damage, "player", s.crit),
+        new Bullet(
+          muzzle,
+          s.angle,
+          s.speed,
+          s.damage,
+          "player",
+          s.crit,
+          4,
+          s.lifetime,
+        ),
       );
     }
     game.particles.muzzleFlash(muzzle, this.angle);
