@@ -320,17 +320,22 @@ export function drawRoadDetails(
   w: number,
   h: number,
   vertical: boolean,
+  worldX: number,
+  worldY: number,
 ): void {
   rect(ctx, x, y, w, h, "#1C1D1F");
   rect(ctx, x + 3, y + 3, w - 6, h - 6, "#2B2C30");
   rect(ctx, x + 6, y + 6, w - 12, h - 12, "#26272B");
 
-  // Faded patchwork tone (low alpha blocks, deterministic from origin).
+  // Faded patchwork tone — hashed on WORLD slab coordinates so the patches
+  // stay glued to the asphalt instead of shifting with the camera.
   const step = 96;
   const along0 = vertical ? y : x;
   const span = vertical ? h : w;
+  const worldAlong0 = vertical ? worldY : worldX;
   for (let s = along0; s < along0 + span; s += step) {
-    const hh = worldHash(9011, Math.floor((vertical ? x : s) / step), Math.floor((vertical ? s : y) / step));
+    const ws = worldAlong0 + (s - along0);
+    const hh = worldHash(9011, Math.floor((vertical ? worldX : ws) / step), Math.floor((vertical ? ws : worldY) / step));
     if (hh % 4 === 0) {
       const seg = Math.min(step, along0 + span - s);
       if (vertical) rect(ctx, x + 8, s, w - 16, seg, "rgba(20,20,22,0.35)");
@@ -344,10 +349,12 @@ export function drawRoadDetails(
   rect(ctx, x + 2, y + 2, 3, h - 4, "rgba(10,10,12,0.55)");
   rect(ctx, x + w - 5, y + 2, 3, h - 4, "rgba(10,10,12,0.55)");
 
-  // Manhole covers + oil stains along the road, sparse and deterministic.
+  // Manhole covers + oil stains along the road — hashed on WORLD slab
+  // coordinates so they never crawl while the camera moves.
   if (vertical) {
-    for (let py = y + 180; py < y + h - 60; py += 640) {
-      const mh = worldHash(9023, x, py);
+    for (let wy = worldY + 180; wy < worldY + h - 60; wy += 640) {
+      const mh = worldHash(9023, worldX, wy);
+      const py = y + (wy - worldY);
       if (mh % 5 === 0) {
         const mx = x + 14 + (Math.floor(mh / 7) % (w - 40));
         px(ctx, mx, py, "#191A1C", 10);
@@ -359,8 +366,9 @@ export function drawRoadDetails(
       }
     }
   } else {
-    for (let px0 = x + 180; px0 < x + w - 60; px0 += 640) {
-      const mh = worldHash(9023, px0, y);
+    for (let wx = worldX + 180; wx < worldX + w - 60; wx += 640) {
+      const mh = worldHash(9023, wx, worldY);
+      const px0 = x + (wx - worldX);
       if (mh % 5 === 0) {
         const my = y + 14 + (Math.floor(mh / 7) % (h - 40));
         px(ctx, px0, my, "#191A1C", 10);
@@ -391,251 +399,6 @@ export function drawRoadDetails(
       rect(ctx, px0 + 2, y + h / 2 - 2, 30, 2, "#E1C86D");
     }
   }
-}
-
-/**
- * Draw a prop. `litWindows` is the deterministic per-building window-light
- * decision made by the map from the building's world position (never from
- * screen/camera state): when false every window is drawn dark.
- */
-// Building façades share the same footprint but get 4 palette variants keyed
-// to a stable per-building seed passed by the map (never camera state).
-const FACADE = [
-  { wall: "#4A4A58", dark: "#3A3A46", light: "#5A5A68", frame: "#1B1D23", trim: "#60606E" },
-  { wall: "#6B5A45", dark: "#564838", light: "#7C6A52", frame: "#241C12", trim: "#87735A" },
-  { wall: "#5C4A4E", dark: "#4A3A3E", light: "#6E5A5E", frame: "#1E1416", trim: "#7A666A" },
-  { wall: "#46545E", dark: "#38444C", light: "#57656F", frame: "#141C22", trim: "#66747E" },
-];
-
-export function drawPropSprite(
-  ctx: CanvasRenderingContext2D,
-  kind: string,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  litWindows = false,
-  styleVariant = 0,
-): void {
-  getPixelArtAtlas(ctx);
-  const shadowX = x + 5;
-  const shadowY = y + 6;
-  rect(ctx, shadowX, shadowY, w, h, "rgba(6,8,7,0.52)");
-
-  if (kind === "building") {
-    const p = FACADE[((styleVariant % 4) + 4) % 4]!;
-    // Plinth / base.
-    rect(ctx, x, y + h - 22, w, 22, p.dark);
-    rect(ctx, x + 4, y + 4, w - 8, h - 8, p.wall);
-    // Roof parapet: darker cap with a lit lip so the top edge reads.
-    rect(ctx, x, y, w, 10, p.dark);
-    rect(ctx, x, y + 8, w, 2, p.light);
-    // Roof equipment (AC units / vents), deterministic spacing from origin.
-    const roofStep = 92;
-    for (let rx = x + 26; rx < x + w - 26; rx += roofStep) {
-      const rv = worldHash(3037, rx, y);
-      if (rv % 2 === 0) {
-        const ux = rx + (rv % 16);
-        const uh = 10 + (Math.floor(rv / 9) % 4);
-        rect(ctx, ux, y - uh + 4, 18, uh, "#9A9AA6");
-        rect(ctx, ux + 2, y - uh + 6, 14, 3, "#B9B9C4");
-      }
-    }
-    strokeRect(ctx, x, y, w, h, p.frame, 3);
-    // Windows with frames + sills. Lit/dark derived only from the local
-    // column/row index and the building's world-anchored litWindows flag, so
-    // no window changes while the camera moves.
-    let rowIdx = 0;
-    for (let wy = y + 22; wy < y + h - 34; wy += 34) {
-      let colIdx = 0;
-      const cols = Math.max(2, Math.floor((w - 34) / 30));
-      const startX = x + (w - (cols * 30 - 2)) / 2;
-      for (let c = 0; c < cols; c++) {
-        const wx = startX + c * 30;
-        const windowLit = litWindows && (colIdx + rowIdx) % 3 !== 0;
-        rect(ctx, wx, wy, 16, 18, p.frame);
-        rect(ctx, wx + 2, wy + 2, 12, 14, windowLit ? "#C9A34E" : "#161A22");
-        rect(ctx, wx + 2, wy + 2, 12, 3, windowLit ? "#E8CE80" : "#22262E");
-        rect(ctx, wx + 7, wy + 2, 2, 14, windowLit ? "#B98F3E" : "#1B1F28");
-        rect(ctx, wx - 1, wy + 17, 18, 2, p.light);
-        colIdx++;
-      }
-      rowIdx++;
-    }
-    // Door with steps at the base.
-    const dW = Math.max(14, Math.min(22, w * 0.16));
-    const dX = x + (w - dW) / 2;
-    rect(ctx, dX, y + h - 24, dW, 24, p.frame);
-    rect(ctx, dX + 2, y + h - 22, dW - 4, 20, "#14161B");
-    rect(ctx, dX + dW - 7, y + h - 14, 2, 6, "#C9A34E");
-    rect(ctx, dX - 2, y + h - 3, dW + 4, 3, p.light);
-    return;
-  }
-  if (kind === "house") {
-    const roof = ["#4C302C", "#3F3A3C", "#3E3A50"][((styleVariant % 3) + 3) % 3]!;
-    const wall = ["#72503C", "#8A7A68", "#7C6B62"][((styleVariant % 3) + 3) % 3]!;
-    rect(ctx, x, y, w, h, "#241A14");
-    rect(ctx, x + 4, y + 12, w - 8, h - 16, wall);
-    ctx.fillStyle = roof;
-    ctx.beginPath();
-    ctx.moveTo(x + 2, y + 20);
-    ctx.lineTo(x + w / 2, y + 2);
-    ctx.lineTo(x + w - 2, y + 20);
-    ctx.closePath();
-    ctx.fill();
-    // Roof tiles.
-    ctx.fillStyle = "rgba(0,0,0,0.18)";
-    for (let sx = x + 14; sx < x + w - 8; sx += 9) {
-      const sy2 = y + 16 - Math.abs(sx - (x + w / 2)) * 0.24;
-      ctx.fillRect(sx, sy2, 6, 2);
-    }
-    // Chimney with cap + a roof overhang shadow under the eaves.
-    const chX = x + w * (0.62 + ((styleVariant % 3) * 0.1));
-    rect(ctx, chX, y + 6, 12, 14, "#6E4A3A");
-    rect(ctx, chX - 1, y + 4, 14, 4, "#8A5E48");
-    rect(ctx, x + 2, y + h * 0.62, w - 4, 2, "rgba(0,0,0,0.25)");
-    // Windows with dark frames + sills (lit only via litWindows).
-    for (const wx of [x + 14, x + w - 27]) {
-      rect(ctx, wx, y + h * 0.44, 13, 13, "#14181E");
-      rect(ctx, wx + 1, y + h * 0.44 + 1, 11, 11, litWindows ? "#C2A055" : "#11151C");
-      if (litWindows) rect(ctx, wx + 3, y + h * 0.44 + 3, 3, 2, "#E2C97C");
-      rect(ctx, wx - 1, y + h * 0.44 + 12, 15, 2, "rgba(255,255,255,0.08)");
-    }
-    // Door + step.
-    const dW = Math.max(13, Math.min(18, w * 0.14));
-    const dX = x + (w - dW) / 2;
-    rect(ctx, dX, y + h - 24, dW, 24, "#241A16");
-    rect(ctx, dX + 2, y + h - 22, dW - 4, 18, "#3A2418");
-    rect(ctx, dX + dW - 6, y + h - 14, 2, 5, "#C9A34E");
-    rect(ctx, dX - 3, y + h - 4, dW + 6, 4, "#5A5648");
-    strokeRect(ctx, x, y, w, h, "#1B130E", 3);
-    return;
-  }
-  if (kind === "tree") {
-    const r = w * 0.36;
-    const trunk = "#4C321D";
-    rect(ctx, x + w * 0.45, y + h * 0.42, Math.max(5, w * 0.14), h * 0.5, "#241610");
-    rect(ctx, x + w * 0.48, y + h * 0.44, 4, h * 0.42, trunk);
-    rect(ctx, x + w * 0.44, y + h - 10, w * 0.2, 4, "#241610");
-    // Three-canopy shadow blobs then layered greens with a highlight rim.
-    ctx.fillStyle = "#0F1F14";
-    ctx.beginPath(); ctx.arc(x + w / 2 + 4, y + h * 0.42 + 5, r + 3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#17301F";
-    ctx.beginPath(); ctx.arc(x + w / 2 + 2, y + h * 0.36 + 2, r + 2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#275A35";
-    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.34, r, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#3C7545";
-    ctx.beginPath(); ctx.arc(x + w * 0.38, y + h * 0.24, r * 0.55, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.10)";
-    ctx.beginPath(); ctx.arc(x + w * 0.36, y + h * 0.22, r * 0.28, 0, Math.PI * 2); ctx.fill();
-    return;
-  }
-  if (kind === "bush") {
-    rect(ctx, x + 4, y + h * 0.8, w - 8, h * 0.2, "#241610");
-    ctx.fillStyle = "#12291A";
-    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.55, w * 0.42, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#1E4528";
-    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.5, w * 0.36, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#2F6336";
-    ctx.beginPath(); ctx.arc(x + w * 0.36, y + h * 0.42, w * 0.2, 0, Math.PI * 2); ctx.fill();
-    return;
-  }
-  if (kind.startsWith("car_")) {
-    const body = kind === "car_red" ? "#A93B36" : kind === "car_blue" ? "#355A9C" : "#B49234";
-    const dark = kind === "car_red" ? "#7E2A26" : kind === "car_blue" ? "#274273" : "#8A6E24";
-    rect(ctx, x, y + 8, w, h - 10, "#101116");
-    // Tyres.
-    px(ctx, x + 8, y + h - 9, "#0B0B0E", 8);
-    px(ctx, x + w - 16, y + h - 9, "#0B0B0E", 8);
-    px(ctx, x + 8, y + 4, "#0B0B0E", 8);
-    px(ctx, x + w - 16, y + 4, "#0B0B0E", 8);
-    // Body with roof shade.
-    rect(ctx, x + 4, y + 6, w - 8, h - 16, body);
-    rect(ctx, x + 4, y + 6, w - 8, 4, dark);
-    // Cabin glass (windscreen + side + rear).
-    rect(ctx, x + 9, y + 10, w * 0.22, h * 0.22, "#2C4A56");
-    rect(ctx, x + 12, y + 12, w * 0.22 - 6, 3, "#8FB3BF");
-    rect(ctx, x + w * 0.34, y + 10, w * 0.42, h * 0.22, "#344E58");
-    rect(ctx, x + w * 0.37, y + 12, w * 0.36, 3, "#9DBFC8");
-    rect(ctx, x + w * 0.78, y + 10, w * 0.14, h * 0.2, "#2C4A56");
-    // Hood/trunk seams + door line.
-    rect(ctx, x + 6, y + h * 0.34, 3, 2, dark);
-    rect(ctx, x + w - 9, y + h * 0.34, 3, 2, dark);
-    rect(ctx, x + w * 0.55, y + 6, 2, h * 0.3, "rgba(0,0,0,0.25)");
-    // Lights.
-    rect(ctx, x + 4, y + h - 12, 6, 3, "#E5D071");
-    rect(ctx, x + w - 10, y + h - 12, 6, 3, "#C84643");
-    rect(ctx, x + 4, y + 8, 5, 2, "#E5D071");
-    rect(ctx, x + w - 9, y + 8, 5, 2, "#8A2626");
-    strokeRect(ctx, x + 4, y + 6, w - 8, h - 16, "#131318", 2);
-    return;
-  }
-  if (kind === "container") {
-    rect(ctx, x, y, w, h, "#0E2A2C");
-    rect(ctx, x + 3, y + 3, w - 6, h - 6, "#356B6C");
-    rect(ctx, x + 3, y + 3, w - 6, 4, "#4B8280");
-    for (let sx = x + 10; sx < x + w - 6; sx += 13) rect(ctx, sx, y + 6, 3, h - 12, "#245456");
-    // Corner casting blocks + rust streaks.
-    px(ctx, x + 2, y + 2, "#9A552D", 5);
-    px(ctx, x + w - 7, y + 2, "#9A552D", 5);
-    rect(ctx, x + 4, y + h - 14, 8, 6, "rgba(90,50,20,0.5)");
-    rect(ctx, x + w - 12, y + 10, 2, 18, "rgba(90,50,20,0.35)");
-    strokeRect(ctx, x, y, w, h, "#0C1F21", 3);
-    return;
-  }
-  if (kind === "crate" || kind === "barricade") {
-    const c = kind === "crate" ? "#8A6237" : "#74777A";
-    rect(ctx, x, y, w, h, c);
-    strokeRect(ctx, x, y, w, h, "#29251F", 3);
-    if (kind === "crate") {
-      // Wooden planks + nail heads.
-      rect(ctx, x, y + h * 0.5, w, 2, "rgba(0,0,0,0.25)");
-      ctx.strokeStyle = "#4F341F"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(x + 4, y + 4); ctx.lineTo(x + w - 4, y + h - 4);
-      ctx.moveTo(x + w - 4, y + 4); ctx.lineTo(x + 4, y + h - 4); ctx.stroke();
-      px(ctx, x + 4, y + 4, "#3C2816", 2);
-      px(ctx, x + w - 6, y + h - 6, "#3C2816", 2);
-    } else {
-      for (let i = -h; i < w; i += 24) {
-        ctx.fillStyle = "#D5AA31";
-        ctx.beginPath(); ctx.moveTo(x + i, y + h); ctx.lineTo(x + i + 12, y + h);
-        ctx.lineTo(x + i + h + 12, y); ctx.lineTo(x + i + h, y); ctx.closePath(); ctx.fill();
-      }
-    }
-    return;
-  }
-  if (kind === "barrel") {
-    const c = ((styleVariant % 3) + 3) % 3;
-    const body = c === 0 ? "#A63B32" : c === 1 ? "#3F6B3C" : "#8A8A8E";
-    rect(ctx, x, y, w, h, "#1A1410");
-    rect(ctx, x + 2, y + 2, w - 4, h - 4, body);
-    rect(ctx, x + 2, y + h * 0.3, w - 4, 4, "rgba(0,0,0,0.35)");
-    rect(ctx, x + 2, y + h * 0.62, w - 4, 4, "rgba(255,255,255,0.16)");
-    rect(ctx, x + w * 0.18, y + 3, 3, h - 6, "rgba(0,0,0,0.18)");
-    rect(ctx, x + w * 0.7, y + 3, 3, h - 6, "rgba(0,0,0,0.18)");
-    rect(ctx, x + 4, y + 2, w - 8, 5, "rgba(255,255,255,0.10)");
-    return;
-  }
-  if (kind === "hydrant") {
-    rect(ctx, x, y, w, h, "#101014");
-    rect(ctx, x + 2, y + h - 6, w - 4, 6, "#8E3A2E");
-    rect(ctx, x + 5, y + 8, w - 10, h - 12, "#C04736");
-    rect(ctx, x + 2, y + 10, w - 4, 6, "#8E3A2E");
-    px(ctx, x + w / 2 - 2, y + h - 9, "#E8CE80", 4);
-    rect(ctx, x + 5, y + 2, 2, 6, "#E8CE80");
-    return;
-  }
-  if (kind === "dumpster") {
-    rect(ctx, x, y, w, h, "#10151B");
-    rect(ctx, x + 2, y + 3, w - 4, h - 8, "#2E4A38");
-    rect(ctx, x + 2, y + 3, w - 4, 5, "#3F644A");
-    for (let sx = x + 8; sx < x + w - 8; sx += 14) rect(ctx, sx, y + 8, 2, h - 14, "rgba(0,0,0,0.25)");
-    rect(ctx, x + 3, y + h - 12, w - 6, 4, "#1C2E22");
-    strokeRect(ctx, x, y, w, h, "#0A0D0F", 3);
-    return;
-  }
-  rect(ctx, x, y, w, h, "#303137");
-  strokeRect(ctx, x, y, w, h, "#17181C", 2);
 }
 
 export function drawStreetLamp(ctx: CanvasRenderingContext2D, x: number, y: number): void {

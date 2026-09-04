@@ -724,8 +724,8 @@ export class GameMap {
     const yStart = Math.floor(view.y / TILE_SIZE) * TILE_SIZE;
     for (let y = yStart; y < view.y + view.h + TILE_SIZE; y += TILE_SIZE) {
       for (let x = xStart; x < view.x + view.w + TILE_SIZE; x += TILE_SIZE) {
-        const sx = x - cam.offset.x + cam.jitter.x;
-        const sy = y - cam.offset.y + cam.jitter.y;
+        const sx = x - cam.renderOffset.x;
+        const sy = y - cam.renderOffset.y;
         drawGroundTile(
           ctx,
           sx,
@@ -748,7 +748,7 @@ export class GameMap {
     for (const road of this.roads) {
       const sr = applyRect(cam, road);
       if (!intersectsRect(sr, vw, vh)) continue;
-      drawRoadDetails(ctx, sr.x, sr.y, sr.w, sr.h, road.w < road.h);
+      drawRoadDetails(ctx, sr.x, sr.y, sr.w, sr.h, road.w < road.h, road.x, road.y);
     }
 
     // Zebra crosswalks at only some crossings (real towns don't stripe every
@@ -816,11 +816,17 @@ export class GameMap {
         ctx.fillRect(s.x + (isV ? 5 : 0), s.y + (isV ? 0 : 5), bandW - 5, bandH - 5);
         const along0 = isV ? s.y : s.x;
         const along = isV ? bandH : bandW;
-        // Expansion joints + per-segment grime.
+        // Expansion joints + per-segment grime. Segment tones are hashed on
+        // WORLD positions (band origin + p) so the pattern stays glued to the
+        // road surface instead of shifting with the camera.
         for (let p = 0; p < along; p += 200) {
           const sx0 = isV ? s.x : along0 + p;
           const sy0 = isV ? along0 + p : s.y;
-          const hh = worldHash(this.seed + 31, Math.floor(sx0), Math.floor(sy0));
+          const hh = worldHash(
+            this.seed + 31,
+            Math.floor(isV ? band.x : band.x + p),
+            Math.floor(isV ? band.y + p : band.y),
+          );
           const segTone = hh % 4;
           if (segTone === 1) {
             ctx.fillStyle = "rgba(56,54,48,0.8)";
@@ -843,9 +849,14 @@ export class GameMap {
         ctx.fillStyle = "#22231F";
         if (isV) ctx.fillRect(s.x + bandW - 3, s.y, 3, s.h);
         else ctx.fillRect(s.x, s.y + bandH - 3, s.w, 3);
-        // Broken / dropped kerb gaps (driveways) + stains.
+        // Broken / dropped kerb gaps (driveways) + stains. World-anchored so
+        // gaps never crawl along the kerb while the camera moves.
         for (let p = 140; p < along - 60; p += 400) {
-          const hh = worldHash(this.seed + 61, Math.floor(isV ? roadX : p), Math.floor(isV ? p : roadY));
+          const hh = worldHash(
+            this.seed + 61,
+            Math.floor(isV ? roadX : band.x + p),
+            Math.floor(isV ? band.y + p : roadY),
+          );
           if (hh % 2 === 0) continue;
           ctx.fillStyle = "#393A34";
           if (isV) ctx.fillRect(s.x + 5, s.y + p - 10, bandW - 8, 20);
@@ -1055,7 +1066,7 @@ export class GameMap {
     const structureLike = kind === "building" || kind === "house";
     const styleVariant = (structureLike ? district : (district + perProp) % 8);
     const litWindows = windowLights && windowLightSeed(rect.x, rect.y) >= 30;
-    drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h, litWindows, styleVariant);
+    drawPropSprite(ctx, kind, sr.x, sr.y, sr.w, sr.h, litWindows, styleVariant, rect.x, rect.y);
   }
 
   // ------------------------------------------------------------- minimap --
@@ -1174,8 +1185,8 @@ function openSegments(centers: number[], length: number, clear = 170): Array<[nu
 
 function applyRect(cam: Camera, r: Rect): Rect {
   return {
-    x: r.x - cam.offset.x + cam.jitter.x,
-    y: r.y - cam.offset.y + cam.jitter.y,
+    x: r.x - cam.renderOffset.x,
+    y: r.y - cam.renderOffset.y,
     w: r.w,
     h: r.h,
   };

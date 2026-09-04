@@ -9,7 +9,15 @@ import type { Vec } from "./vec";
 export class Camera {
   viewW: number;
   viewH: number;
+  /** Logical (smooth, fractional) camera offset — used for culling, aiming. */
   offset: Vec = { x: 0, y: 0 };
+  /**
+   * Render offset: the logical offset (plus shake jitter) rounded to whole
+   * pixels. All world→screen conversions for DRAWING must use this so every
+   * world-aligned surface lands on exact pixels and never shimmers while the
+   * camera glides between them. Gameplay keeps `offset` for smooth motion.
+   */
+  renderOffset: Vec = { x: 0, y: 0 };
   shakeMag = 0;
   jitter: Vec = { x: 0, y: 0 };
 
@@ -35,23 +43,28 @@ export class Camera {
     } else {
       this.jitter = { x: 0, y: 0 };
     }
+    this.renderOffset = {
+      x: Math.round(this.offset.x + this.jitter.x),
+      y: Math.round(this.offset.y + this.jitter.y),
+    };
   }
 
   shake(magnitude: number): void {
     this.shakeMag = Math.min(24, Math.max(this.shakeMag, magnitude));
   }
 
+  /** World → screen for rendering (pixel-snapped, stable). */
   apply(worldPos: Vec): Vec {
     return {
-      x: worldPos.x - this.offset.x + this.jitter.x,
-      y: worldPos.y - this.offset.y + this.jitter.y,
+      x: worldPos.x - this.renderOffset.x,
+      y: worldPos.y - this.renderOffset.y,
     };
   }
 
   screenToWorld(screenPos: { x: number; y: number }): Vec {
     return {
-      x: screenPos.x + this.offset.x - this.jitter.x,
-      y: screenPos.y + this.offset.y - this.jitter.y,
+      x: screenPos.x + this.renderOffset.x,
+      y: screenPos.y + this.renderOffset.y,
     };
   }
 

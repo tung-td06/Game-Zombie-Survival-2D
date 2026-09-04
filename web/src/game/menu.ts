@@ -6,7 +6,7 @@ import { AchievementSystem } from "./achievement";
 import { formatTime } from "./utils";
 import { drawText, Button, roundRect, drawShopIcon } from "./ui";
 import { color } from "./colors";
-import { RESOLUTIONS, SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
+import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
 import { SKILL_BRANCHES } from "./upgrade";
 import type { IGame } from "./types";
 
@@ -300,7 +300,7 @@ export class MenuSystem {
     const ROW_H = 34;
     const AUDIO_ROWS = 4;
     const GAMEPLAY_ROWS = 6;
-    const DISPLAY_ROWS = 3; // fullscreen + fps + brightness
+    const DISPLAY_ROWS = 2; // fullscreen + brightness (locked 100%)
     const estimatedContentH = 40 + (AUDIO_ROWS * (ROW_H + 6)) + 36 + (GAMEPLAY_ROWS * (ROW_H + 4)) + 22 + 36 + (DISPLAY_ROWS * (ROW_H + 4)) + 22 + 60;
     const panelH = Math.min(estimatedContentH, height - 30);
     const panelY = cy - panelH / 2;
@@ -1030,9 +1030,6 @@ export class MenuSystem {
     y += 24;
     const fs = st.fullscreen ? "FULLSCREEN: ON" : "FULLSCREEN: OFF";
     buttons.push(new Button(fs, cx - 300, y + 2, 296, 30, "toggle_fullscreen"));
-    const idx = st.resolution_index;
-    const res = RESOLUTIONS[idx] ?? RESOLUTIONS[0]!;
-    buttons.push(new Button(`RES: ${res[0]}x${res[1]}`, cx + 20, y + 2, 280, 30, "cycle_resolution"));
     y += 40;
     buttons.push(new Button("BACK", cx - 110, y + 6, 220, 44, "back"));
     return { action: null, buttons };

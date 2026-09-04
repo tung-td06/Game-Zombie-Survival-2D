@@ -1144,7 +1144,6 @@ export class Game {
       }
       this.save.save();
     } else if (action === "toggle_fullscreen") this.toggleFullscreen();
-    else if (action === "cycle_resolution") this.cycleResolution();
     else if (action === "toggle_fps") {
       const st = this.save.settings;
       st.show_fps = !st.show_fps;
@@ -1214,6 +1213,9 @@ export class Game {
   }
 
   cycleResolution(): void {
+    // Resolution is a desktop-only concept; on the web the canvas always
+    // fills the browser window, so this setting is intentionally inert.
+    // (Kept for save-data compatibility; no UI exposes it anymore.)
     const st = this.save.settings;
     st.resolution_index = (st.resolution_index + 1) % RESOLUTIONS.length;
     const r = RESOLUTIONS[st.resolution_index]!;
@@ -1655,7 +1657,9 @@ export class Game {
     return 0;
   }
   toScreen(p: Vec): Vec {
-    return { x: p.x - this.camera.offset.x, y: p.y - this.camera.offset.y };
+    // Use the pixel-snapped render offset so UI/world overlays stay aligned
+    // with the rendered world (no sub-pixel drift between layers).
+    return { x: p.x - this.camera.renderOffset.x, y: p.y - this.camera.renderOffset.y };
   }
   wave_announce(text: string, boss: boolean): void {
     this.waveBanner = { text, timer: 2.5, boss };
