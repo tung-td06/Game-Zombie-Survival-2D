@@ -9,12 +9,14 @@
     "name": "Runner",
     "hp": 60, "speed": 180, "damage": 8, "radius": 13,
     "attack_range": 36, "attack_cooldown": 0.8, "detection_range": 520,
+    "lunge_range": 90, "lunge_speed_mult": 2.6, "lunge_windup": 0.3, "lunge_cooldown": 3.5,
     "score": 150, "coins": 15, "xp": 25
   },
   "tank": {
     "name": "Brute",
     "hp": 600, "speed": 45, "damage": 30, "radius": 25,
     "attack_range": 52, "attack_cooldown": 1.6, "detection_range": 420,
+    "charge_trigger_range": 220, "charge_speed_mult": 3.2, "charge_cooldown": 6, "charge_stun_duration": 1.1,
     "score": 500, "coins": 50, "xp": 80
   },
   "exploder": {
@@ -58,5 +60,12 @@
     "barrage_interval": 5.0, "barrage_bullets": 10,
     "projectile_speed": 380,
     "score": 8000, "coins": 800, "xp": 1000
+  },
+  "elite": {
+    "name": "Mutant",
+    "hp": 260, "speed": 95, "damage": 22, "radius": 19,
+    "attack_range": 42, "attack_cooldown": 1.0, "detection_range": 480,
+    "resist_mult": 0.35,
+    "score": 350, "coins": 60, "xp": 90
   }
 }

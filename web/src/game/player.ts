@@ -25,6 +25,7 @@ export interface PlayerOpts {
   level?: number;
   xp?: number;
   weaponData: Record<string, WeaponData>;
+  weaponMods?: Record<string, string[]>;
   previewOnly?: boolean;
   username?: string;
 }
@@ -60,6 +61,8 @@ export class Player {
   lifeSteal = 0;
   pierceBonus = 0;
   skillPoints = 0;
+  /** Set by a tank's charge attack: blocks movement/firing while > 0. */
+  stunTimer = 0;
 
   // Drone companion ("UFO") — unlocked by buying it in the shop.
   hasDrone = false;
@@ -84,7 +87,7 @@ export class Player {
     this.coins = Math.max(0, Math.floor(opts.coins ?? 0));
     this.level = Math.max(1, Math.floor(opts.level ?? 1));
     this.xp = Math.max(0, Math.floor(opts.xp ?? 0));
-    this.weapons = new WeaponManager(opts.unlocked ?? ["pistol"], opts.weaponData);
+    this.weapons = new WeaponManager(opts.unlocked ?? ["pistol"], opts.weaponData, opts.weaponMods ?? {});
     this.previewOnly = !!opts.previewOnly;
     this.username = opts.username;
   }
@@ -105,13 +108,28 @@ export class Player {
     this.armor = Math.min(100, this.armor + amount);
   }
 
+  /** Push the player away from `source`, sliding along walls like a zombie's knockback. */
+  knockbackFrom(source: Vec, force: number, game: IGame): void {
+    const dx = this.pos.x - source.x;
+    const dy = this.pos.y - source.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const rects = game.map!.getNear(this.pos, this.radius + 4);
+    moveCircle(this.pos, { x: (dx / d) * force, y: (dy / d) * force }, this.radius, rects);
+    this.pos.x = clamp(this.pos.x, this.radius, WORLD_WIDTH - this.radius);
+    this.pos.y = clamp(this.pos.y, this.radius, WORLD_HEIGHT - this.radius);
+  }
+
   update(dt: number, game: IGame): void {
     const inp = game.input;
-    const move: Vec = {
-      x: (inp.isDown("right") ? 1 : 0) - (inp.isDown("left") ? 1 : 0),
-      y: (inp.isDown("down") ? 1 : 0) - (inp.isDown("up") ? 1 : 0),
-    };
-    this.moving = move.x !== 0 || move.y !== 0;
+    this.stunTimer = Math.max(0, this.stunTimer - dt);
+    const stunned = this.stunTimer > 0;
+    const move: Vec = stunned
+      ? { x: 0, y: 0 }
+      : {
+          x: (inp.isDown("right") ? 1 : 0) - (inp.isDown("left") ? 1 : 0),
+          y: (inp.isDown("down") ? 1 : 0) - (inp.isDown("up") ? 1 : 0),
+        };
+    this.moving = !stunned && (move.x !== 0 || move.y !== 0);
     if (this.moving) {
       const len = Math.hypot(move.x, move.y) || 1;
       move.x /= len;
@@ -184,9 +202,9 @@ export class Player {
         game.audio.playSFX(`weapon.${w.id}.reload`, this.pos);
       }
     }
-    if (wantFire && w.canFire(wantFire || w.auto)) {
+    if (!stunned && wantFire && w.canFire(wantFire || w.auto)) {
       this.fire(game);
-    } else if (wantFire && !w.reloading && w.ammo === 0 && w.cooldown <= 0 && this.emptyClickTimer <= 0) {
+    } else if (!stunned && wantFire && !w.reloading && w.ammo === 0 && w.cooldown <= 0 && this.emptyClickTimer <= 0) {
       game.audio.playSFX(`weapon.${w.id}.empty`, this.pos);
       this.emptyClickTimer = 0.18;
     }

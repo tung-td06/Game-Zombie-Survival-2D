@@ -30,6 +30,7 @@ export interface Stats {
 export interface ToastEntry {
   text: string;
   remaining: number;
+  variant?: "rare";
 }
 
 export interface WaveBanner {
@@ -78,7 +79,7 @@ export interface IGame {
   weaponData: Record<string, import("./data").WeaponData>;
   spawner: import("./spawner").ZombieSpawner;
   zgrid: Record<string, unknown[]>;
-  toast(text: string): void;
+  toast(text: string, variant?: "rare"): void;
   onLevelUp(): void;
   onZombieKilled(z: import("./zombie").Zombie): void;
   comboMultiplier(): number;

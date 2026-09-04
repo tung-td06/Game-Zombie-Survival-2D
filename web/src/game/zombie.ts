@@ -28,6 +28,7 @@ export const ZOMBIE_COLORS: Record<string, string> = {
   crawler: "#B58A3C",
   necromancer: "#7A4FBF",
   necromancer_boss: "#4A2A8F",
+  elite: "#3C7A8C",
 };
 
 interface ConstructorOpts {
@@ -100,6 +101,8 @@ export class Zombie {
   private winStartY = 0;
   growlCd = 0;
   dying = false;
+  /** Set only by EliteZombie; partial resistance to a matching bullet elem. */
+  resistElem?: "fire" | "plasma" | "pierce";
 
   constructor(pos: Vec, opts: ConstructorOpts) {
     const d = opts.data[(this.constructor as typeof Zombie).KIND] ?? opts.data["normal"]!;
@@ -209,7 +212,7 @@ export class Zombie {
       }
     }
 
-    this.extraBehaviour(dt, game, dist, damage);
+    this.extraBehaviour(dt, game, dist, damage, move);
 
     // separation
     const sep = this.separation(game);
@@ -563,6 +566,7 @@ export class Zombie {
     _game: IGame,
     _dist: number,
     _damage: number,
+    _move: Vec,
   ): void {}
 
   /** Summon `count` crawler minions near this summoner. */
@@ -590,12 +594,21 @@ export class Zombie {
     }
   }
 
-  takeDamage(amount: number, crit: boolean, game: IGame): void {
-    this.hp -= amount;
+  takeDamage(
+    amount: number,
+    crit: boolean,
+    game: IGame,
+    elem?: "fire" | "plasma" | "pierce",
+  ): void {
+    const dealt =
+      elem && this.resistElem === elem && this.data.resist_mult != null
+        ? amount * this.data.resist_mult
+        : amount;
+    this.hp -= dealt;
     this.flash = game.save.settings.hit_effects ? 0.12 : 0;
     this.state = "chase";
     game.particles.blood(this.pos, 6, undefined, game.save.settings.hit_effects);
-    game.particles.damageNumber(this.pos, amount, crit, game.save.settings.damage_numbers);
+    game.particles.damageNumber(this.pos, dealt, crit, game.save.settings.damage_numbers);
     game.audio.playSFX(crit ? "impact.crit" : "impact.enemy", this.pos);
     if (this.hp <= 0) this.die(game);
   }
@@ -635,9 +648,129 @@ export class NormalZombie extends Zombie {
 }
 export class FastZombie extends Zombie {
   static override KIND = "fast";
+  private lungeCd = 0;
+  private lungeWindup = 0;
+  private lunging = false;
+  private lungeTimer = 0;
+  protected override extraBehaviour(
+    dt: number,
+    game: IGame,
+    dist: number,
+    _damage: number,
+    move: Vec,
+  ): void {
+    this.lungeCd -= dt;
+    const player = game.player!;
+    const dx = player.pos.x - this.pos.x;
+    const dy = player.pos.y - this.pos.y;
+    const d = Math.hypot(dx, dy) || 1;
+    if (this.lungeWindup > 0) {
+      this.lungeWindup -= dt;
+      move.x = 0;
+      move.y = 0;
+      if (this.lungeWindup <= 0) {
+        this.lunging = true;
+        this.lungeTimer = 0.35;
+      }
+      return;
+    }
+    if (this.lunging) {
+      this.lungeTimer -= dt;
+      const mult = (this.data.lunge_speed_mult ?? 2.6) - 1;
+      move.x += (dx / d) * this.speed * mult;
+      move.y += (dy / d) * this.speed * mult;
+      if (this.lungeTimer <= 0) this.lunging = false;
+      return;
+    }
+    const range = this.data.lunge_range ?? 90;
+    if (
+      this.state === "chase" &&
+      dist <= range &&
+      dist > this.attackRange &&
+      this.lungeCd <= 0
+    ) {
+      this.lungeCd = this.data.lunge_cooldown ?? 3.5;
+      this.lungeWindup = this.data.lunge_windup ?? 0.3;
+      game.audio.playSFX("enemy.alert", this.pos);
+    }
+  }
+  override draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
+    super.draw(ctx, cam);
+    if (this.lungeWindup > 0) {
+      const sp = cam.apply(this.pos);
+      ctx.strokeStyle = "#FF5A3C";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, this.radius + 5, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
 }
 export class TankZombie extends Zombie {
   static override KIND = "tank";
+  private chargeCd = 0;
+  private charging = false;
+  private chargeTimer = 0;
+  protected override extraBehaviour(
+    dt: number,
+    game: IGame,
+    dist: number,
+    damage: number,
+    move: Vec,
+  ): void {
+    this.chargeCd -= dt;
+    if (this.charging) {
+      this.chargeTimer -= dt;
+      const player = game.player!;
+      const dx = player.pos.x - this.pos.x;
+      const dy = player.pos.y - this.pos.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const mult = (this.data.charge_speed_mult ?? 3.2) - 1;
+      move.x += (dx / d) * this.speed * mult;
+      move.y += (dy / d) * this.speed * mult;
+      // The dash lands its own hit the instant it connects — independent of
+      // the normal melee attackTimer, so a charge can never "whiff" just
+      // because that cooldown hasn't ticked down yet.
+      const reach = this.attackRange + this.radius + player.radius * 0.5;
+      if (d <= reach) {
+        this.charging = false;
+        player.takeDamage(damage * 1.5, game);
+        player.stunTimer = Math.max(
+          player.stunTimer,
+          this.data.charge_stun_duration ?? 1.1,
+        );
+        player.knockbackFrom(this.pos, 50, game);
+        game.camera.shake(10);
+        game.toast("STUNNED!");
+      } else if (this.chargeTimer <= 0) {
+        this.charging = false;
+      }
+      return;
+    }
+    const triggerRange = this.data.charge_trigger_range ?? 220;
+    if (
+      this.state === "chase" &&
+      dist <= triggerRange &&
+      dist > this.attackRange &&
+      this.chargeCd <= 0
+    ) {
+      this.charging = true;
+      this.chargeTimer = 0.6;
+      this.chargeCd = this.data.charge_cooldown ?? 6;
+      game.audio.playSFX("enemy.alert", this.pos);
+    }
+  }
+  override draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
+    super.draw(ctx, cam);
+    if (this.charging) {
+      const sp = cam.apply(this.pos);
+      ctx.strokeStyle = "#FFD24A";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, this.radius + 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
 }
 export class ExploderZombie extends Zombie {
   static override KIND = "exploder";
@@ -676,6 +809,7 @@ export class RangedZombie extends Zombie {
     game: IGame,
     dist: number,
     damage: number,
+    _move: Vec,
   ): void {
     if (
       dist > RangedZombie.PREFERRED_DIST * 0.7 &&
@@ -719,6 +853,7 @@ export class BossZombie extends Zombie {
     game: IGame,
     _dist: number,
     _damage: number,
+    _move: Vec,
   ): void {
     const np = this.currentPhase();
     if (np !== this.phase) {
@@ -783,6 +918,7 @@ export class NecromancerZombie extends Zombie {
     game: IGame,
     _dist: number,
     _damage: number,
+    _move: Vec,
   ): void {
     this.summonCd -= dt;
     if (this.summonCd <= 0 && game.zombies.length < MAX_ALIVE_ZOMBIES) {
@@ -806,8 +942,9 @@ export class NecromancerBossZombie extends BossZombie {
     game: IGame,
     dist: number,
     damage: number,
+    move: Vec,
   ): void {
-    super.extraBehaviour(dt, game, dist, damage);
+    super.extraBehaviour(dt, game, dist, damage, move);
     this.summonCd -= dt;
     if (this.summonCd <= 0 && game.zombies.length < MAX_ALIVE_ZOMBIES) {
       this.summonCd = 5.5;
@@ -847,6 +984,27 @@ export class NecromancerBossZombie extends BossZombie {
   }
 }
 
+const ELITE_ELEMS: Array<"fire" | "plasma" | "pierce"> = ["fire", "plasma", "pierce"];
+
+export class EliteZombie extends Zombie {
+  static override KIND = "elite";
+  constructor(pos: Vec, opts: ConstructorOpts) {
+    super(pos, opts);
+    this.resistElem = ELITE_ELEMS[Math.floor(Math.random() * ELITE_ELEMS.length)];
+  }
+  override draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
+    super.draw(ctx, cam);
+    const sp = cam.apply(this.pos);
+    const color =
+      this.resistElem === "fire" ? "#FF6A2E" : this.resistElem === "plasma" ? "#3CD6FF" : "#D8D8D8";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, this.radius + 5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
 export const ZOMBIE_CLASSES: Record<string, new (pos: Vec, opts: ConstructorOpts) => Zombie> = {
   normal: NormalZombie,
   fast: FastZombie,
@@ -857,6 +1015,7 @@ export const ZOMBIE_CLASSES: Record<string, new (pos: Vec, opts: ConstructorOpts
   crawler: CrawlerZombie,
   necromancer: NecromancerZombie,
   necromancer_boss: NecromancerBossZombie,
+  elite: EliteZombie,
 };
 
 export function createZombie(

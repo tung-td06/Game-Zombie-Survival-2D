@@ -95,7 +95,7 @@ export class Bullet {
           const dy = this.pos.y - z.pos.y;
           const r = (z.radius as number) + this.radius;
           if (dx * dx + dy * dy <= r * r) {
-            z.takeDamage(this.damage, this.crit, game);
+            z.takeDamage(this.damage, this.crit, game, this.elem);
             game.stats.shots_hit = (game.stats.shots_hit ?? 0) + 1;
             if (this.elem === "pierce") {
               // Crossbow bolt: punch through, hit each zombie once.
@@ -122,6 +122,7 @@ export class Bullet {
                     Math.max(1, Math.round(this.damage * SPLASH_FRACTION)),
                     false,
                     game,
+                    this.elem,
                   );
                 }
               }

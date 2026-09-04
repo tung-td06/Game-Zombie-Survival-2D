@@ -43,6 +43,18 @@ export interface ZombieData {
   projectile_speed?: number;
   barrage_interval?: number;
   barrage_bullets?: number;
+  /** Fast: dash attack after a short telegraphed windup. */
+  lunge_range?: number;
+  lunge_speed_mult?: number;
+  lunge_windup?: number;
+  lunge_cooldown?: number;
+  /** Tank: charging dash that stuns + knocks back the player on hit. */
+  charge_trigger_range?: number;
+  charge_speed_mult?: number;
+  charge_cooldown?: number;
+  charge_stun_duration?: number;
+  /** Elite: resists a fraction of damage from one bullet element. */
+  resist_mult?: number;
 }
 
 export interface UpgradeDef {

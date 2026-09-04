@@ -23,6 +23,7 @@ import { SupplyCrate, spawnSupplyCrates, CRATE_SPAWN_INTERVAL } from "./supplyCr
 import { mulberry32, type Rng } from "../lib/rng";
 import { Client } from "./network";
 import { WEAPON_ORDER } from "./weapon";
+import { modDef } from "./mods";
 import { createZombie } from "./zombie";
 import {
   BIOME_TINT,
@@ -1031,6 +1032,25 @@ export class Game {
         } else {
           this.toast("NOT ENOUGH CASH");
         }
+      } else if (payload.startsWith("mod:")) {
+        const [, wid, modId] = payload.split(":");
+        const def = wid && modId ? modDef(modId) : undefined;
+        const w = wid ? p.weapons.weapons[wid] : undefined;
+        if (!w || !def) {
+          this.toast("INVALID MOD");
+        } else if (w.mods.includes(modId!)) {
+          this.toast("ALREADY EQUIPPED");
+        } else if (p.coins >= def.price) {
+          p.coins -= def.price;
+          p.weapons.applyMod(wid!, modId!);
+          this.save.coins = p.coins;
+          this.save.data.weapon_upgrades[wid!] = [...w.mods];
+          this.save.save();
+          this.audio.play("buy");
+          this.toast(`EQUIPPED: ${def.name.toUpperCase()}`);
+        } else {
+          this.toast("NOT ENOUGH CASH");
+        }
       } else if (payload.startsWith("upgrade:")) {
         const id = payload.slice("upgrade:".length);
         const prices: Record<string, number> = {
@@ -1233,6 +1253,7 @@ export class Game {
         level: this.save.data["player_level"] ?? 1,
         xp: this.save.data["xp"] ?? 0,
         weaponData: this.weaponData,
+        weaponMods: this.save.data.weapon_upgrades,
         previewOnly: true,
       },
     );
@@ -1256,6 +1277,7 @@ export class Game {
       level: this.save.data["player_level"] ?? 1,
       xp: this.save.data["xp"] ?? 0,
       weaponData: this.weaponData,
+      weaponMods: this.save.data.weapon_upgrades,
       username: this.username,
     });
     this.player.hasDrone = !!this.save.data["has_drone"];
@@ -1603,7 +1625,7 @@ export class Game {
       this.player!.heal(Math.max(1, Math.round(z.maxHp * lifeSteal)));
     }
     const rng: Rng = mulberry32(Math.floor(Math.random() * 2 ** 31));
-    this.loots.push(...dropsFor(z, rng));
+    this.loots.push(...dropsFor(z, rng, Object.keys(this.player!.weapons.weapons)));
     if (isBoss) {
       this.spawnBossLoot(z.pos, rng);
       this.camera.shake(10);
@@ -1635,8 +1657,8 @@ export class Game {
     return Math.min(COMBO_MAX_MULT, 1 + Math.floor(this.combo / COMBO_KILLS_PER_STEP));
   }
 
-  toast(text: string): void {
-    this.toasts.push({ text, remaining: 3 });
+  toast(text: string, variant?: "rare"): void {
+    this.toasts.push({ text, remaining: 3, variant });
   }
 
   private tickToasts(dt: number) {

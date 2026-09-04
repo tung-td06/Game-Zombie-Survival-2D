@@ -8,6 +8,7 @@ import { drawText, Button, roundRect, drawShopIcon } from "./ui";
 import { color } from "./colors";
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
 import { SKILL_BRANCHES } from "./upgrade";
+import { MOD_CATALOG } from "./mods";
 import type { IGame } from "./types";
 
 interface Ember {
@@ -41,7 +42,7 @@ export class MenuSystem {
   private embers: Embers = makeEmbers();
   static _highScore = 0;
   static _kills = 0;
-  activeShopTab: "weapons" | "supplies" | "upgrades" = "weapons";
+  activeShopTab: "weapons" | "supplies" | "upgrades" | "mods" = "weapons";
 
   setProfile(highScore: number, totalKills: number): void {
     MenuSystem._highScore = highScore;
@@ -647,15 +648,19 @@ export class MenuSystem {
     const buttons: Button[] = [];
     const p = game.player!;
 
-    // Category Tabs: WEAPONS, SUPPLIES, UPGRADES
-    const tabW = 150;
+    // Category Tabs: WEAPONS, SUPPLIES, UPGRADES, MODS
+    const tabW = 130;
     const tabH = 34;
-    const tabGap = 16;
-    const totalTabW = 3 * tabW + 2 * tabGap;
+    const tabGap = 12;
+    const categories: Array<"weapons" | "supplies" | "upgrades" | "mods"> = [
+      "weapons",
+      "supplies",
+      "upgrades",
+      "mods",
+    ];
+    const totalTabW = categories.length * tabW + (categories.length - 1) * tabGap;
     const tabStartX = cx - totalTabW / 2;
     const tabY = PANEL_Y + 76;
-
-    const categories: Array<"weapons" | "supplies" | "upgrades"> = ["weapons", "supplies", "upgrades"];
     categories.forEach((cat, idx) => {
       const active = this.activeShopTab === cat;
       const tX = tabStartX + idx * (tabW + tabGap);
@@ -937,6 +942,66 @@ export class MenuSystem {
           24,
           available ? `ps_buy:upgrade:${item.id}` : "",
           btnAccent
+        );
+        buyBtn.update(dt, mx, my, false);
+        buyBtn.draw(ctx);
+        if (available) buttons.push(buyBtn);
+      });
+    } else if (this.activeShopTab === "mods") {
+      const wid = p.weapons.currentId;
+      const w = p.weapons.current;
+      drawText(
+        ctx,
+        `MODDING: ${w.name.toUpperCase()} (switch weapon to mod another)`,
+        cx,
+        gridY - 20,
+        12,
+        color("ui_dim"),
+        "center",
+        "top",
+      );
+
+      MOD_CATALOG.forEach((mod, idx) => {
+        const col = idx % 2;
+        const row = Math.floor(idx / 2);
+        const cX = gridX + col * (cardW + cardGapX);
+        const cY = gridY + row * (cardH + cardGapY);
+
+        const equipped = w.mods.includes(mod.id);
+
+        ctx.fillStyle = "#1E1E24";
+        roundRect(ctx, cX, cY, cardW, cardH, 8);
+        ctx.fill();
+
+        let available = !equipped;
+        let btnText = `$${mod.price} [EQUIP]`;
+        let btnAccent = color("ui_gold");
+
+        if (equipped) {
+          btnText = "EQUIPPED";
+          btnAccent = color("ui_green");
+        } else if (p.coins < mod.price) {
+          available = false;
+          btnText = "NOT ENOUGH CASH";
+          btnAccent = "#787882";
+        }
+
+        ctx.strokeStyle = equipped ? color("ui_green") : available ? color("ui_gold") : "#3C3C46";
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, cX, cY, cardW, cardH, 8);
+        ctx.stroke();
+
+        drawText(ctx, mod.name.toUpperCase(), cX + 12, cY + 14, 15, equipped ? color("ui_green") : "#FFFFFF", "left", "top");
+        drawText(ctx, mod.desc, cX + 12, cY + 40, 11, color("ui_dim"), "left", "top");
+
+        const buyBtn = new Button(
+          btnText,
+          cX + 12,
+          cY + cardH - 34,
+          cardW - 24,
+          24,
+          available ? `ps_buy:mod:${wid}:${mod.id}` : "",
+          btnAccent,
         );
         buyBtn.update(dt, mx, my, false);
         buyBtn.draw(ctx);

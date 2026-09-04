@@ -502,6 +502,7 @@ const zombiePalette: Record<string, readonly [string, string, string]> = {
   crawler: ["#4E3A1E", "#7C5A2E", "#B58A3C"],
   necromancer: ["#2E2152", "#55408C", "#9A6FD0"],
   necromancer_boss: ["#1A1030", "#3E2568", "#8A5AD0"],
+  elite: ["#204048", "#3C7A8C", "#7EC9D6"],
 };
 
 export function drawZombieSprite(

@@ -306,13 +306,14 @@ export function drawCrosshair(
 
 export function drawToasts(
   ctx: CanvasRenderingContext2D,
-  toasts: { text: string; remaining: number }[],
+  toasts: { text: string; remaining: number; variant?: "rare" }[],
   screenH: number,
   screenW: number,
 ): void {
   let y = screenH - 110;
   const last5 = toasts.slice(-5).reverse();
   for (const t of last5) {
+    const rare = t.variant === "rare";
     const alpha = Math.min(1, t.remaining / 0.5);
     const tw = ctx.measureText(t.text).width;
     const padX = 9;
@@ -321,11 +322,18 @@ export function drawToasts(
     const boxH = 22 + padY * 2;
     const boxX = screenW - boxW - 24;
     ctx.globalAlpha = alpha * 0.85;
-    ctx.fillStyle = "#14141A";
+    ctx.fillStyle = rare ? "#3A2C10" : "#14141A";
     roundRect(ctx, boxX, y, boxW, boxH, 5);
     ctx.fill();
+    if (rare) {
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = "#FFD24A";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, boxX, y, boxW, boxH, 5);
+      ctx.stroke();
+    }
     ctx.globalAlpha = 1;
-    ctx.fillStyle = "#FFEBAA";
+    ctx.fillStyle = rare ? "#FFD24A" : "#FFEBAA";
     ctx.font = FONT;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";

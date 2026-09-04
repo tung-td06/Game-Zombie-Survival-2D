@@ -13,7 +13,8 @@ export interface SaveData {
   xp: number;
   unlocked_weapons: string[];
   has_drone: boolean;
-  weapon_upgrades: Record<string, unknown>;
+  /** Weapon id -> mod ids attached to it (see src/game/mods.ts). */
+  weapon_upgrades: Record<string, string[]>;
   player_upgrades: Record<string, number>;
   achievements: string[];
   quests_claimed: string[];

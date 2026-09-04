@@ -24,6 +24,7 @@ export class ZombieSpawner {
     if (modifier === "blood_moon") {
       for (const k of Object.keys(weights)) weights[k] *= 1.25;
       weights.tank = (weights.tank ?? 0) * 1.5;
+      weights.elite = 1.5 + wave * 0.05;
     } else if (modifier === "swarm") {
       weights.crawler = (weights.crawler ?? 0) * 2;
       weights.fast = (weights.fast ?? 0) * 1.4;
