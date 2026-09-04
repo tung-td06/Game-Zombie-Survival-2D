@@ -33,5 +33,29 @@
     "bullet_speed": 1800, "range": 1400, "spread_deg": 0.5, "pellets": 1,
     "critical_chance": 0.30, "critical_multiplier": 3.0,
     "auto": false, "price": 3000, "start_reserve": 15
+  },
+  "flamethrower": {
+    "name": "FLAMETHROWER",
+    "damage": 18, "magazine": 60, "fire_rate": 0.05, "reload_time": 2.5,
+    "bullet_speed": 700, "range": 280, "spread_deg": 18, "pellets": 1,
+    "critical_chance": 0.05, "critical_multiplier": 1.5,
+    "auto": true, "price": 1800, "start_reserve": 120,
+    "elem": "fire", "bullet_radius": 6
+  },
+  "plasma": {
+    "name": "PLASMA RIFLE",
+    "damage": 55, "magazine": 20, "fire_rate": 0.20, "reload_time": 1.9,
+    "bullet_speed": 1400, "range": 750, "spread_deg": 2.0, "pellets": 1,
+    "critical_chance": 0.20, "critical_multiplier": 2.5,
+    "auto": true, "price": 4500, "start_reserve": 40,
+    "elem": "plasma", "bullet_radius": 7
+  },
+  "crossbow": {
+    "name": "CROSSBOW",
+    "damage": 90, "magazine": 1, "fire_rate": 0.85, "reload_time": 1.4,
+    "bullet_speed": 1500, "range": 1000, "spread_deg": 0.0, "pellets": 1,
+    "critical_chance": 0.40, "critical_multiplier": 2.5,
+    "auto": false, "price": 1200, "start_reserve": 20,
+    "elem": "pierce"
   }
 }

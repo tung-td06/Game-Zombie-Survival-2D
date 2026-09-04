@@ -40,6 +40,15 @@ const SFX_MAP: Record<string, string> = {
   "weapon.sniper.reload": "weapons/sniper/reload.wav",
   "weapon.sniper.bolt": "weapons/sniper/bolt.wav",
   "weapon.sniper.empty": "weapons/sniper/empty.wav",
+  "weapon.flamethrower.shoot": "weapons/smg/shoot.wav",
+  "weapon.flamethrower.reload": "weapons/smg/reload.wav",
+  "weapon.flamethrower.empty": "weapons/smg/empty.wav",
+  "weapon.plasma.shoot": "weapons/rifle/shoot.wav",
+  "weapon.plasma.reload": "weapons/rifle/reload.wav",
+  "weapon.plasma.empty": "weapons/rifle/empty.wav",
+  "weapon.crossbow.shoot": "weapons/sniper/bolt.wav",
+  "weapon.crossbow.reload": "weapons/sniper/reload.wav",
+  "weapon.crossbow.empty": "weapons/sniper/empty.wav",
 
   // UI SFX
   "ui.click": "ui/click.wav",

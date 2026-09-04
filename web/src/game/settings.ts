@@ -38,6 +38,23 @@ export const SPAWN_MIN_DIST = 500.0;
 export const SPAWN_MAX_DIST = 950.0;
 export const FIRST_BOSS_WAVE = 5; // from this wave on, EVERY wave includes a boss
 
+// Wave modifiers & biomes
+export type WaveModifier =
+  | "none"
+  | "blood_moon"
+  | "swarm"
+  | "frenzy"
+  | "fog";
+export const MODIFIER_PER_WAVE = 7; // every N waves a modifier is rolled
+export const BIOMES = ["city", "industrial", "suburbs", "park"] as const;
+export const BIOME_EVERY_WAVES = 5; // biome rotates every N waves
+export const BIOME_TINT: Record<string, string> = {
+  city: "rgba(0, 0, 0, 0)",
+  industrial: "rgba(150, 100, 60, 0.08)",
+  suburbs: "rgba(110, 160, 80, 0.07)",
+  park: "rgba(60, 150, 70, 0.12)",
+};
+
 // Day/night
 export const DAY_LENGTH = 120.0;
 export const NIGHT_LENGTH = 70.0;

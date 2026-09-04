@@ -10,6 +10,9 @@ export const WEAPON_ORDER: readonly string[] = [
   "smg",
   "rifle",
   "sniper",
+  "flamethrower",
+  "plasma",
+  "crossbow",
 ];
 
 export interface FireResult {
@@ -19,6 +22,10 @@ export interface FireResult {
   speed: number;
   /** Seconds this shot may fly = range / speed. */
   lifetime: number;
+  /** Elemental projectile behaviour for this shot. */
+  elem?: "fire" | "plasma" | "pierce";
+  /** Projectile radius for this shot. */
+  radius: number;
 }
 
 export class Weapon {
@@ -31,6 +38,8 @@ export class Weapon {
   bulletSpeed: number;
   /** Max reach in px before the projectile expires. */
   range: number;
+  elem?: "fire" | "plasma" | "pierce";
+  radius: number;
   spreadDeg: number;
   pellets: number;
   criticalChance: number;
@@ -56,6 +65,8 @@ export class Weapon {
     this.bulletSpeed = d.bullet_speed;
     this.range =
       d.range ?? this.bulletSpeed * BULLET_LIFETIME; // legacy fallback
+    this.elem = d.elem;
+    this.radius = d.bullet_radius ?? 4;
     this.spreadDeg = d.spread_deg;
     this.pellets = d.pellets;
     this.criticalChance = d.critical_chance;
@@ -92,6 +103,8 @@ export class Weapon {
         crit,
         speed: this.bulletSpeed,
         lifetime: this.range / Math.max(1, this.bulletSpeed),
+        elem: this.elem,
+        radius: this.radius,
       });
     }
     return shots;

@@ -1,6 +1,6 @@
 // tests/upgrade.test.ts
 import { describe, test, expect, vi } from "vitest";
-import { UpgradeSystem } from "@/game/upgrade";
+import { UpgradeSystem, SKILL_BRANCHES, DEFAULT_SKILL_LIMIT } from "@/game/upgrade";
 import type { UpgradeCatalog } from "@/game/data";
 
 const CAT: UpgradeCatalog = {
@@ -13,6 +13,10 @@ const CAT: UpgradeCatalog = {
     { id: "armor", text: "+10 ARMOR", desc: "" },
     { id: "crit_ch", text: "+5% CRIT", desc: "" },
     { id: "crit_dmg", text: "+25% CRIT DMG", desc: "" },
+    { id: "regen", text: "+1 HP/S", desc: "" },
+    { id: "magnet", text: "+30% RANGE", desc: "" },
+    { id: "vampire", text: "+2% STEAL", desc: "" },
+    { id: "pierce", text: "+1 PIERCE", desc: "" },
   ],
   limits: { max_hp: 10, armor: 10 },
 };
@@ -28,34 +32,45 @@ function makePlayer() {
     reloadMult: 1,
     critBonus: 0,
     critMultBonus: 0,
+    regen: 0,
+    magnetMult: 1,
+    lifeSteal: 0,
+    pierceBonus: 0,
     upgradeLevels: {} as Record<string, number>,
     heal: vi.fn(),
     addArmor: vi.fn(),
   } as unknown as Parameters<UpgradeSystem["apply"]>[1];
 }
 
-describe("UpgradeSystem", () => {
-  test("rolls 3 distinct choices from catalog", () => {
+describe("UpgradeSystem skill tree", () => {
+  test("every skill lives in exactly one branch", () => {
+    const flattened = SKILL_BRANCHES.flatMap((b) => b.skills);
+    expect(new Set(flattened).size).toBe(flattened.length);
+    // The full 12-skill catalog is covered by the three branches.
+    const catalogIds = CAT.upgrades.map((u) => u.id);
+    for (const id of catalogIds) expect(flattened).toContain(id);
+  });
+
+  test("three branches exist with expected names", () => {
+    expect(SKILL_BRANCHES.map((b) => b.name)).toEqual([
+      "Combat",
+      "Survival",
+      "Utility",
+    ]);
+  });
+
+  test("limitFor uses catalog limits, else default cap", () => {
     const u = new UpgradeSystem(CAT);
-    const choices = u.rollChoices(makePlayer());
-    expect(choices.length).toBe(3);
-    expect(new Set(choices).size).toBe(3);
+    expect(u.limitFor("max_hp")).toBe(10);
+    expect(u.limitFor("regen")).toBe(DEFAULT_SKILL_LIMIT);
   });
 
   test("apply max_hp stacks each call", () => {
     const u = new UpgradeSystem(CAT);
     const p = makePlayer();
     for (let i = 0; i < 15; i++) u.apply("max_hp", p);
-    // Limits are enforced by roll_choices; apply() trusts the caller.
+    // Limit enforcement happens in the UI/actions; apply() trusts the caller.
     expect(p.maxHp).toBe(100 + 20 * 15);
-  });
-
-  test("choices exclude upgrades at their limit", () => {
-    const u = new UpgradeSystem(CAT);
-    const p = makePlayer();
-    for (let i = 0; i < 10; i++) p.upgradeLevels["max_hp"] = 10;
-    const choices = u.rollChoices(p);
-    expect(choices.includes("max_hp")).toBe(false);
   });
 
   test("apply damage stacks", () => {
@@ -64,5 +79,19 @@ describe("UpgradeSystem", () => {
     u.apply("damage", p);
     u.apply("damage", p);
     expect(p.damageMult).toBeCloseTo(1.21);
+  });
+
+  test("apply regen / magnet / vampire / pierce stack", () => {
+    const u = new UpgradeSystem(CAT);
+    const p = makePlayer();
+    u.apply("regen", p);
+    u.apply("regen", p);
+    u.apply("magnet", p);
+    u.apply("vampire", p);
+    u.apply("pierce", p);
+    expect(p.regen).toBe(2);
+    expect(p.magnetMult).toBeCloseTo(1.3);
+    expect(p.lifeSteal).toBeCloseTo(0.02);
+    expect(p.pierceBonus).toBe(1);
   });
 });

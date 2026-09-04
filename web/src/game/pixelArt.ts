@@ -535,9 +535,24 @@ export function drawPlayerSprite(
   rect(ctx, 3, 8, 8, 11, "#235F80");
   rect(ctx, -8, 12 + Math.sin(walkCycle) * 2, 5, 8, "#1B2C3B");
   rect(ctx, 3, 12 - Math.sin(walkCycle) * 2, 5, 8, "#1B2C3B");
-  const gun = weapon === "shotgun" ? 29 : weapon === "sniper" ? 35 : weapon === "rifle" ? 31 : weapon === "smg" ? 25 : 23;
+  const gun =
+    weapon === "shotgun"
+      ? 29
+      : weapon === "sniper"
+        ? 35
+        : weapon === "rifle"
+          ? 31
+          : weapon === "smg"
+            ? 25
+            : weapon === "flamethrower"
+              ? 27
+              : weapon === "plasma"
+                ? 28
+                : weapon === "crossbow"
+                  ? 32
+                  : 23;
   rect(ctx, 5 - r, -5, gun, 7, "#171A20");
-  rect(ctx, 9 - r, -3, gun - 4, 3, weapon === "shotgun" ? "#A2713E" : "#66717A");
+  rect(ctx, 9 - r, -3, gun - 4, 3, weapon === "shotgun" || weapon === "crossbow" ? "#A2713E" : weapon === "flamethrower" ? "#C2501E" : weapon === "plasma" ? "#7A4FBF" : "#66717A");
   rect(ctx, 4 - r, 2, 10, 5, "#3B414A");
   if (recoil > 0) {
     rect(ctx, gun + 5 - r, -8, 7, 14, "#FFD15C");
@@ -553,6 +568,9 @@ const zombiePalette: Record<string, readonly [string, string, string]> = {
   exploder: ["#82441E", "#C06B2E", "#EEA047"],
   ranged: ["#276A6C", "#4B9891", "#89D3C4"],
   boss: ["#681B2A", "#AB2E3D", "#F06458"],
+  crawler: ["#4E3A1E", "#7C5A2E", "#B58A3C"],
+  necromancer: ["#2E2152", "#55408C", "#9A6FD0"],
+  necromancer_boss: ["#1A1030", "#3E2568", "#8A5AD0"],
 };
 
 export function drawZombieSprite(
@@ -584,6 +602,17 @@ export function drawZombieSprite(
   rect(ctx, 5 * scale, 1 * scale, 5 * scale, 4 * scale, "#EE3B3B");
   if (kind === "exploder") rect(ctx, -3 * scale, -6 * scale, 7 * scale, 9 * scale, "#FFD26E");
   if (kind === "ranged") rect(ctx, 8 * scale, -3 * scale, 13 * scale, 5 * scale, "#22454A");
+  if (kind === "crawler") {
+    // Low, wide body that stays close to the ground.
+    rect(ctx, -16 * scale, 4 * scale, 32 * scale, 7 * scale, palette[0]);
+    rect(ctx, -12 * scale, -2 * scale, 6 * scale, 8 * scale, palette[1]);
+    rect(ctx, 6 * scale, -2 * scale, 6 * scale, 8 * scale, palette[1]);
+  }
+  if (kind === "necromancer" || kind === "necromancer_boss") {
+    // Hooded caster silhouette + glowing eye.
+    rect(ctx, -10 * scale, -18 * scale, 20 * scale, 8 * scale, palette[0]);
+    rect(ctx, 5 * scale, -6 * scale, 4 * scale, 4 * scale, "#F2D5FF");
+  }
   ctx.restore();
 }
 
@@ -593,13 +622,31 @@ export function drawProjectileSprite(
   trailA: Vec,
   trailB: Vec,
   enemy: boolean,
+  elem?: string,
 ): void {
-  const col = enemy ? "#FF6A58" : "#FFE48A";
-  ctx.strokeStyle = enemy ? "#9F2F34" : "#D09036";
-  ctx.lineWidth = 4;
+  let col = enemy ? "#FF6A58" : "#FFE48A";
+  let trail = enemy ? "#9F2F34" : "#D09036";
+  let core = "#FFFFFF";
+  if (!enemy) {
+    if (elem === "fire") {
+      col = "#FFB03A";
+      trail = "#A63A00";
+      core = "#FFF3B0";
+    } else if (elem === "plasma") {
+      col = "#C58CFF";
+      trail = "#5A2FA0";
+      core = "#F0E0FF";
+    } else if (elem === "pierce") {
+      col = "#DCE6F2";
+      trail = "#6E7F96";
+      core = "#FFFFFF";
+    }
+  }
+  ctx.strokeStyle = trail;
+  ctx.lineWidth = elem === "pierce" ? 3 : 4;
   ctx.beginPath(); ctx.moveTo(Math.round(trailA.x), Math.round(trailA.y)); ctx.lineTo(Math.round(trailB.x), Math.round(trailB.y)); ctx.stroke();
   rect(ctx, pos.x - 3, pos.y - 3, 7, 7, col);
-  rect(ctx, pos.x - 1, pos.y - 1, 3, 3, "#FFFFFF");
+  rect(ctx, pos.x - 1, pos.y - 1, 3, 3, core);
 }
 
 export function drawLootSprite(ctx: CanvasRenderingContext2D, pos: Vec, kind: string, pulse = 0): void {

@@ -12,6 +12,11 @@ export interface WeaponData {
   bullet_speed: number;
   /** Max reach in px before the projectile expires; falls back to speed * BULLET_LIFETIME. */
   range?: number;
+  /** Projectile behaviour: fire leaves sparks, plasma explodes on impact,
+   *  pierce passes through zombies. */
+  elem?: "fire" | "plasma" | "pierce";
+  /** Larger projectile radius (flamethrower / plasma). */
+  bullet_radius?: number;
   spread_deg: number;
   pellets: number;
   critical_chance: number;

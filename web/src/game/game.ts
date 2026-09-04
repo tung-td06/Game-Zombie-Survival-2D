@@ -25,6 +25,7 @@ import { Client } from "./network";
 import { WEAPON_ORDER } from "./weapon";
 import { createZombie } from "./zombie";
 import {
+  BIOME_TINT,
   COMBO_KILLS_PER_STEP,
   COMBO_MAX_MULT,
   COMBO_WINDOW,
@@ -292,14 +293,8 @@ export class Game {
           this.doAction("back");
         }
       } else if (this.state === UPGRADE) {
-        // Keyboard shortcuts 1 / 2 / 3 for upgrade card selection
-        const digitMap: Record<string, number> = {
-          Digit1: 0, Digit2: 1, Digit3: 2,
-          Numpad1: 0, Numpad2: 1, Numpad3: 2,
-        };
-        const idx = digitMap[k];
-        if (idx !== undefined && idx < this.upgradeChoices.length) {
-          this.doAction(`upgrade:${this.upgradeChoices[idx]}`);
+        if (k === "Escape") {
+          this.doAction("upgrade_done");
         }
       }
     } else if (e.type === "mousedown" && this.state !== PLAYING) {
@@ -425,18 +420,21 @@ export class Game {
             );
             rp.weapons.current.cooldown = rp.weapons.current.fireRate / Math.max(0.01, rp.fireRateMult);
             for (const s of shots) {
-              this.bullets.push(
-                new Bullet(
-                  muzzle,
-                  s.angle,
-                  s.speed,
-                  s.damage,
-                  "player",
-                  s.crit,
-                  4,
-                  s.lifetime,
-                ),
+              const b = new Bullet(
+                muzzle,
+                s.angle,
+                s.speed,
+                s.damage,
+                "player",
+                s.crit,
+                s.radius,
+                s.lifetime,
+                s.elem,
               );
+              if (s.elem === "pierce") {
+                b.pierceLeft = 3 + (rp.pierceBonus ?? 0);
+              }
+              this.bullets.push(b);
             }
             this.particles.muzzleFlash(muzzle, rp.angle);
             const sound = rp.weapons.current.id === "shotgun" ? "shotgun" : rp.weapons.current.id === "sniper" ? "sniper" : rp.weapons.current.id === "smg" ? "smg" : rp.weapons.current.id === "rifle" ? "rifle" : "shoot";
@@ -735,6 +733,12 @@ export class Game {
       this.state === PAUSE_SHOP
     ) {
       this.drawWorld();
+      // Biome ground tint (subtle per-biome colour wash over the map).
+      const biomeTint = BIOME_TINT[this.waveManager.biome];
+      if (biomeTint && biomeTint !== "rgba(0, 0, 0, 0)") {
+        ctx.fillStyle = biomeTint;
+        ctx.fillRect(0, 0, this.viewW, this.viewH);
+      }
       if (this.player) this.player.draw(ctx, this.camera);
       for (const rp of this.remotePlayers.values()) {
         rp.draw(ctx, this.camera);
@@ -745,7 +749,14 @@ export class Game {
       for (const l of this.loots) l.draw(ctx, this.camera);
       for (const c of this.supplyCrates) c.draw(ctx, this.camera, this);
       this.particles.draw(ctx, this.camera);
-      drawPixelLight(ctx, this.collectLights(), this.viewW, this.viewH, this.nightFactor() * 0.42);
+      const fogDark = this.waveManager.modifier === "fog" ? 0.9 : 0;
+      drawPixelLight(
+        ctx,
+        this.collectLights(),
+        this.viewW,
+        this.viewH,
+        (this.nightFactor() + fogDark) * 0.42,
+      );
       drawHud(ctx, this, this.viewW, this.viewH);
       drawMinimap(ctx, this, this.viewW, 1);
       drawCrosshair(ctx, this.input.mouseX, this.input.mouseY, 0);
@@ -1062,18 +1073,41 @@ export class Game {
     else if (action.startsWith("buy:")) {
       if (!this.shop.buy(action.slice(4), this)) this.toast("NOT ENOUGH COINS!");
     } else if (action.startsWith("upgrade:")) {
-      const uid = action.slice(8);
-      this.upgrades.apply(uid, this.player as unknown as Parameters<UpgradeSystem["apply"]>[1], this);
-      this.player!.pendingLevels -= 1;
-      this.save.data["player_level"] = this.player!.level;
-      this.save.data["xp"] = this.player!.xp;
-      this.save.coins = this.player!.coins;
-      this.save.save();
-      if (this.player!.pendingLevels > 0) {
-        this.upgradeChoices = this.upgrades.rollChoices(
-          this.player as unknown as { upgradeLevels: Record<string, number> },
-        );
-      } else this.state = PLAYING;
+      // Skill tree purchase: costs one skill point.
+      const uid = action.slice("upgrade:".length);
+      const p = this.player!;
+      const limit = this.upgrades.limitFor(uid);
+      if ((p.upgradeLevels[uid] ?? 0) >= limit) {
+        this.toast("MAXED OUT");
+      } else if (p.skillPoints <= 0) {
+        this.toast("NO SKILL POINTS — LEVEL UP TO EARN ONE");
+      } else {
+        this.upgrades.apply(uid, p as unknown as Parameters<UpgradeSystem["apply"]>[1], this);
+        p.skillPoints -= 1;
+        this.save.data["player_level"] = p.level;
+        this.save.data["xp"] = p.xp;
+        this.save.coins = p.coins;
+        this.save.save();
+        this.audio.play("buy");
+        this.toast(`LEARNED ${uid.toUpperCase().replace(/_/g, " ")}`);
+      }
+    } else if (action === "upgrade_done") {
+      // Leave the skill tree (level-up overlay or entered from pause).
+      this.player!.pendingLevels = 0;
+      const target =
+        this.returnState === PLAYING || this.returnState === PAUSED
+          ? this.returnState
+          : PLAYING;
+      this.restoreAudioForState(target);
+      this.state = target;
+    } else if (action === "skill_tree") {
+      // Pause menu: open the skill tree (points can be spent anytime).
+      if (!this.player) this.createPreviewPlayer();
+      this.returnState = PAUSED;
+      this.state = UPGRADE;
+      if (typeof document !== "undefined" && document.pointerLockElement) {
+        document.exitPointerLock();
+      }
     } else if (action === "toggle_mute") {
       const st = this.save.settings;
       st.muted = !st.muted;
@@ -1291,6 +1325,8 @@ export class Game {
         this.upgrades.apply(uid, this.player as any);
       }
     }
+    // Restore unspent skill points earned before the save
+    this.player.skillPoints = pData.skillPoints ?? 0;
     
     // Explicitly restore hp/armor/maxHp in case it was modified
     this.player.maxHp = pData.maxHp;
@@ -1400,6 +1436,7 @@ export class Game {
         maxHp: this.player.maxHp,
         armor: this.player.armor,
         xp: this.player.xp,
+        skillPoints: this.player.skillPoints,
         upgradeLevels: this.player.upgradeLevels,
       },
       weapons: {
@@ -1471,13 +1508,13 @@ export class Game {
   }
 
   enterUpgradeChoice(): void {
-    this.upgradeChoices = this.upgrades.rollChoices(
-      this.player as unknown as { upgradeLevels: Record<string, number> },
-    );
+    // Level-ups grant skill points; open the SKILL TREE to spend them.
+    this.upgradeChoices = [];
+    this.returnState = PLAYING;
     this.state = UPGRADE;
     this.audio.play("levelup");
     // Free the pointer so the mouse cursor is visible and mouse coordinates
-    // are absolute again — required for hover hit-testing on upgrade cards.
+    // are absolute again — required for hover hit-testing in the tree.
     if (typeof document !== "undefined" && document.pointerLockElement) {
       document.exitPointerLock();
     }
@@ -1528,12 +1565,13 @@ export class Game {
 
   onLevelUp(): void {
     this.particles.heal(this.player!.pos);
-    this.toast(`LEVEL UP!  LV ${this.player!.level}`);
+    this.toast(`LEVEL UP!  LV ${this.player!.level}  ·  +1 SKILL POINT`);
   }
 
   onZombieKilled(z: import("./zombie").Zombie): void {
     const kind = z.KIND;
-    if (kind === "boss" || kind === "necromancer_boss") {
+    const isBoss = kind === "boss" || kind === "necromancer_boss";
+    if (isBoss) {
       this.stats.boss_kills = (this.stats.boss_kills ?? 0) + 1;
       this.waveManager.bossAlive = false;
     }
@@ -1545,9 +1583,37 @@ export class Game {
     this.stats.kills_by_type[kind] = (this.stats.kills_by_type[kind] ?? 0) + 1;
     this.player!.coins += z.coinValue;
     this.player!.addXp(z.xpValue, this);
+    const lifeSteal = this.player!.lifeSteal;
+    if (lifeSteal > 0) {
+      this.player!.heal(Math.max(1, Math.round(z.maxHp * lifeSteal)));
+    }
     const rng: Rng = mulberry32(Math.floor(Math.random() * 2 ** 31));
     this.loots.push(...dropsFor(z, rng));
-    this.camera.shake(kind === "boss" ? 6 : 2);
+    if (isBoss) {
+      this.spawnBossLoot(z.pos, rng);
+      this.camera.shake(10);
+      this.particles.explosion(z.pos, true);
+    } else {
+      this.camera.shake(2);
+    }
+  }
+
+  /** Boss kill bonus: a rich loot burst strewn around the corpse. */
+  private spawnBossLoot(pos: Vec, rng: Rng): void {
+    const scatter = (radius: number, angle: number): Vec => ({
+      x: pos.x + Math.cos(angle) * radius,
+      y: pos.y + Math.sin(angle) * radius,
+    });
+    // Golden shower: 10 x $25 coins on a ring around the body.
+    for (let i = 0; i < 10; i++) {
+      const ang = (Math.PI * 2 * i) / 10 + rng.next() * 0.4;
+      this.loots.push(new Loot(scatter(36 + rng.next() * 46, ang), "coin", 25));
+    }
+    this.loots.push(new Loot(scatter(60, rng.next() * Math.PI * 2), "health", 50));
+    this.loots.push(new Loot(scatter(70, rng.next() * Math.PI * 2), "armor", 30));
+    this.loots.push(new Loot(scatter(80, rng.next() * Math.PI * 2), "ammo", 0));
+    this.toast("BOSS DESTROYED — RICH LOOT DROPPED!");
+    this.audio.playSFX("ui.notification");
   }
 
   comboMultiplier(): number {

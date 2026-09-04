@@ -231,8 +231,9 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, game: IGame, screenW:
   }
   // Zombies
   for (const z of game.zombies) {
-    ctx.fillStyle = z.KIND === "boss" ? "#FFD250" : "#D23232";
-    const r = z.KIND === "boss" ? 3 : 2;
+    const isBoss = z.KIND === "boss" || z.KIND === "necromancer_boss";
+    ctx.fillStyle = z.KIND === "necromancer_boss" ? "#B06CFF" : isBoss ? "#FFD250" : "#D23232";
+    const r = isBoss ? 3 : 2;
     ctx.beginPath();
     ctx.arc(
       x0 + (z.pos.x * size) / 4000,
@@ -405,86 +406,6 @@ export class Button {
       drawText(ctx, this.text, r.x + r.w / 2, r.y + r.h / 2, 22, this.hover < 0.4 ? "#DEDED6" : "#FFFFFF", "center", "middle");
     }
   }
-}
-
-/**
- * Draw a self-contained upgrade selection card with hover glow.
- * Used by the level-up screen. Returns the button object for hit testing.
- */
-export function drawUpgradeCard(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  title: string,
-  desc: string,
-  accent: string,
-  hoverT: number,   // 0..1 smooth hover progress
-  index: number,    // card index for stagger label (1, 2, 3)
-): void {
-  const rad = 14;
-
-  ctx.save(); // ← save once at top, restore once at bottom
-
-  // ── Outer glow when hovered ──────────────────────────────────────────
-  if (hoverT > 0.02) {
-    ctx.globalAlpha = hoverT * 0.25;
-    ctx.fillStyle = accent;
-    roundRect(ctx, x - 8, y - 8, w + 16, h + 16, rad + 4);
-    ctx.fill();
-  }
-
-  // ── Card background ──────────────────────────────────────────────────
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = hoverT > 0.5 ? "#252530" : "#1C1C24";
-  roundRect(ctx, x, y, w, h, rad);
-  ctx.fill();
-
-  // Subtle gradient sheen on hover
-  if (hoverT > 0.02) {
-    const grad = ctx.createLinearGradient(x, y, x, y + h);
-    grad.addColorStop(0, `rgba(255,255,255,${0.04 * hoverT})`);
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = grad;
-    roundRect(ctx, x, y, w, h, rad);
-    ctx.fill();
-  }
-
-  // ── Border ───────────────────────────────────────────────────────────
-  ctx.globalAlpha = 0.35 + hoverT * 0.65;
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = hoverT > 0.6 ? 3 : 2;
-  roundRect(ctx, x, y, w, h, rad);
-  ctx.stroke();
-
-  // ── Top accent stripe ─────────────────────────────────────────────────
-  ctx.globalAlpha = 0.4 + hoverT * 0.6;
-  ctx.fillStyle = accent;
-  ctx.beginPath();
-  ctx.moveTo(x + rad, y);
-  ctx.lineTo(x + w - rad, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + rad);
-  ctx.lineTo(x + w, y + 4);
-  ctx.lineTo(x, y + 4);
-  ctx.lineTo(x, y + rad);
-  ctx.quadraticCurveTo(x, y, x + rad, y);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.restore(); // ← all alpha/style reset here
-
-  // ── Hotkey label [1] / [2] / [3] ─────────────────────────────────────
-  drawText(ctx, `[${index}]`, x + 22, y + h / 2, 13, "#82827E", "center", "middle");
-
-  // ── Title ─────────────────────────────────────────────────────────────
-  const titleCol = hoverT > 0.4 ? "#FFFFFF" : "#DEDED6";
-  const titleSize = Math.floor(20 + hoverT * 3);
-  drawText(ctx, title, x + w / 2 + 14, y + h * 0.36, titleSize, titleCol, "center", "middle");
-
-  // ── Description ───────────────────────────────────────────────────────
-  const descCol = hoverT > 0.4 ? "#B4B4AA" : "#82827E";
-  drawText(ctx, desc, x + w / 2 + 14, y + h * 0.70, 13, descCol, "center", "middle");
 }
 
 /**
@@ -839,9 +760,39 @@ export function drawShopIcon(
     ctx.moveTo(1, -5); ctx.lineTo(-1, -5);
     ctx.moveTo(2, 3); ctx.lineTo(0, 3);
     ctx.stroke();
+  } else if (id === "flamethrower") {
+    // Fuel tank + nozzle with a burning tip
+    ctx.fillStyle = "#C2501E";
+    roundRect(ctx, -12, -6, 10, 12, 3);
+    ctx.fill();
+    ctx.fillStyle = "#82827E";
+    ctx.fillRect(2, -2, 12, 4);
+    ctx.fillStyle = "#FFB03A";
+    ctx.beginPath(); ctx.moveTo(13, -4); ctx.lineTo(21, -1); ctx.lineTo(13, 2); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#FF5A1E";
+    ctx.beginPath(); ctx.moveTo(16, -2); ctx.lineTo(24, 0); ctx.lineTo(16, 2); ctx.closePath(); ctx.fill();
+  } else if (id === "plasma") {
+    // Coil rifle with a glowing energy orb
+    ctx.fillStyle = "#7A4FBF";
+    roundRect(ctx, -12, -3, 24, 6, 2);
+    ctx.fill();
+    ctx.fillStyle = "#2E2152";
+    ctx.fillRect(-10, -1, 8, 2);
+    ctx.fillStyle = "#C58CFF";
+    ctx.beginPath(); ctx.arc(13, 0, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#F0E0FF";
+    ctx.beginPath(); ctx.arc(12, -1, 1.5, 0, Math.PI * 2); ctx.fill();
+  } else if (id === "crossbow") {
+    // Stock + limb with string, and a bolt
+    ctx.fillStyle = "#A2713E";
+    ctx.fillRect(-12, -1, 10, 4);
+    ctx.fillRect(-4, -7, 3, 14);
+    ctx.strokeStyle = "#C8C8C8";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(-2, -7); ctx.lineTo(10, 0); ctx.lineTo(-2, 7); ctx.stroke();
+    ctx.fillStyle = "#E8E8E8";
+    ctx.beginPath(); ctx.moveTo(12, -1); ctx.lineTo(17, 0); ctx.lineTo(12, 1); ctx.closePath(); ctx.fill();
   }
 
   ctx.restore();
 }
-
-

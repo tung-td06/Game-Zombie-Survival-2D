@@ -7,7 +7,11 @@
     {"id": "reload",    "text": "+10% RELOAD SPEED", "desc": "Reload quicker"},
     {"id": "armor",     "text": "+10 ARMOR",         "desc": "Absorb damage first"},
     {"id": "crit_ch",   "text": "+5% CRIT CHANCE",   "desc": "More critical hits"},
-    {"id": "crit_dmg",  "text": "+25% CRIT DAMAGE",  "desc": "Crits hurt more"}
+    {"id": "crit_dmg",  "text": "+25% CRIT DAMAGE",  "desc": "Crits hurt more"},
+    {"id": "regen",     "text": "+1 HP / SEC",       "desc": "Slowly regenerate health"},
+    {"id": "magnet",    "text": "+30% PICKUP RANGE", "desc": "Loot vacuum reaches further"},
+    {"id": "vampire",   "text": "+2% LIFE STEAL",    "desc": "Heal on every kill"},
+    {"id": "pierce",    "text": "+1 PIERCE BOLT",    "desc": "Crossbow pierces one more enemy"}
   ],
   "limits": {
     "max_hp": 10,

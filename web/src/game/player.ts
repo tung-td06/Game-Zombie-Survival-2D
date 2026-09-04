@@ -55,6 +55,16 @@ export class Player {
   speedMult = 1;
   critBonus = 0;
   critMultBonus = 0;
+  regen = 0;
+  magnetMult = 1;
+  lifeSteal = 0;
+  pierceBonus = 0;
+  skillPoints = 0;
+
+  // Drone companion (always active from the start).
+  droneAngle = 0;
+  droneCooldown = 0;
+  droneDamage = 18;
 
   weapons: WeaponManager;
 
@@ -149,6 +159,9 @@ export class Player {
     if (inp.isPressed("weapon3")) this.weapons.selectSlot(3);
     if (inp.isPressed("weapon4")) this.weapons.selectSlot(4);
     if (inp.isPressed("weapon5")) this.weapons.selectSlot(5);
+    if (inp.isPressed("weapon6")) this.weapons.selectSlot(6);
+    if (inp.isPressed("weapon7")) this.weapons.selectSlot(7);
+    if (inp.isPressed("weapon8")) this.weapons.selectSlot(8);
     if (inp.isPressed("next_weapon")) this.weapons.cycle();
 
     if (this.weapons.currentId !== prevWepId) {
@@ -181,6 +194,33 @@ export class Player {
     this.flashTimer = Math.max(0, this.flashTimer - dt);
     this.recoilTimer = Math.max(0, this.recoilTimer - dt);
     this.invuln = Math.max(0, this.invuln - dt);
+    if (this.regen > 0) this.heal(this.regen * dt);
+    this.droneTick(dt, game);
+  }
+
+  /** Orbiting drone that auto-fires at the nearest zombie in range. */
+  private droneTick(dt: number, game: IGame): void {
+    this.droneAngle += dt * 1.6;
+    this.droneCooldown -= dt;
+    if (this.droneCooldown > 0) return;
+    for (const z of game.zombies) {
+      if (z.dying) continue;
+      const dx = z.pos.x - this.pos.x;
+      const dy = z.pos.y - this.pos.y;
+      if (dx * dx + dy * dy < 280 * 280) {
+        const muzzle: Vec = {
+          x: this.pos.x + Math.cos(this.droneAngle + Math.PI) * 36,
+          y: this.pos.y + Math.sin(this.droneAngle + Math.PI) * 36,
+        };
+        const ang = Math.atan2(z.pos.y - muzzle.y, z.pos.x - muzzle.x);
+        game.bullets.push(
+          new Bullet(muzzle, ang, 1200, this.droneDamage, "player"),
+        );
+        game.particles.muzzleFlash(muzzle, ang);
+        this.droneCooldown = 0.55;
+        return;
+      }
+    }
   }
 
   private fire(game: IGame): void {
@@ -197,18 +237,22 @@ export class Player {
     );
     w.cooldown = w.fireRate / Math.max(0.01, this.fireRateMult);
     for (const s of shots) {
-      game.bullets.push(
-        new Bullet(
-          muzzle,
-          s.angle,
-          s.speed,
-          s.damage,
-          "player",
-          s.crit,
-          4,
-          s.lifetime,
-        ),
+      const b = new Bullet(
+        muzzle,
+        s.angle,
+        s.speed,
+        s.damage,
+        "player",
+        s.crit,
+        s.radius,
+        s.lifetime,
+        s.elem,
       );
+      if (s.elem === "pierce") {
+        // Crossbow bolt: pierces 3 enemies by default, +1 per pierce skill.
+        b.pierceLeft = 3 + this.pierceBonus;
+      }
+      game.bullets.push(b);
     }
     game.particles.muzzleFlash(muzzle, this.angle);
     this.recoilTimer = 0.09;
@@ -235,14 +279,13 @@ export class Player {
       this.hp = 0;
       this.dead = true;
     }
-  }
-
-  addXp(amount: number, game: IGame): void {
+  }    addXp(amount: number, game: IGame): void {
     this.xp += amount;
     while (this.xp >= this.xpNeeded) {
       this.xp -= this.xpNeeded;
       this.level += 1;
       this.pendingLevels += 1;
+      this.skillPoints += 1;
       game.onLevelUp();
     }
     game.save.data["player_level"] = this.level;
@@ -270,5 +313,26 @@ export class Player {
       this.weapons.currentId,
       this.flashTimer > 0 && Math.floor(this.flashTimer * 20) % 2 === 0,
     );
+
+    // Drone companion: orbits the player and glows softly.
+    const dxx = sp.x + Math.cos(this.droneAngle) * 40;
+    const dyy = sp.y + Math.sin(this.droneAngle) * 40 - 14;
+    ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(dxx, dyy, 11, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#3A3A44";
+    ctx.beginPath();
+    ctx.arc(dxx, dyy, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#8FE8FF";
+    ctx.beginPath();
+    ctx.arc(dxx, dyy, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#EAFBFF";
+    ctx.beginPath();
+    ctx.arc(dxx - 2, dyy - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
   }
 }

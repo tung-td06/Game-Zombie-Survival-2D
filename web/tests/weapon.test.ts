@@ -146,13 +146,16 @@ describe("WeaponManager", () => {
     expect(m.currentId).toBe("pistol");
   });
 
-  test("WEAPON_ORDER has 5 weapons", () => {
+  test("WEAPON_ORDER lists all 8 weapons", () => {
     expect(WEAPON_ORDER).toEqual([
       "pistol",
       "shotgun",
       "smg",
       "rifle",
       "sniper",
+      "flamethrower",
+      "plasma",
+      "crossbow",
     ]);
   });
 });

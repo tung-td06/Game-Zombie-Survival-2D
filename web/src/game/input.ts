@@ -9,7 +9,7 @@ import type { Camera } from "./camera";
 import type { SaveData } from "./save";
 import type { Vec } from "./vec";
 
-export type WeaponSlot = 1 | 2 | 3 | 4 | 5;
+export type WeaponSlot = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 export type Action =
   | "up"
@@ -24,6 +24,9 @@ export type Action =
   | "weapon3"
   | "weapon4"
   | "weapon5"
+  | "weapon6"
+  | "weapon7"
+  | "weapon8"
   | "next_weapon"
   | "debug"
   | "fullscreen";
@@ -47,6 +50,9 @@ export const DEFAULT_BINDINGS: Record<Action, Key> = {
   weapon3: "Digit3",
   weapon4: "Digit4",
   weapon5: "Digit5",
+  weapon6: "Digit6",
+  weapon7: "Digit7",
+  weapon8: "Digit8",
   next_weapon: MOUSE_MIDDLE,
   debug: "F3",
   fullscreen: "F11",

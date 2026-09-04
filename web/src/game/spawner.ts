@@ -11,13 +11,22 @@ import type { Vec } from "./vec";
 export class ZombieSpawner {
   rng: Rng = mulberry32(Math.floor(Math.random() * 2 ** 31));
 
-  pickType(wave: number): string {
+  pickType(wave: number, modifier = "none"): string {
     const weights: Record<string, number> = { normal: 10 };
     if (wave >= 2) weights.fast = Math.min(6, 2 + wave * 0.5);
     if (wave >= 3) weights.tank = Math.min(5, 1 + (wave - 2) * 0.4);
     if (wave >= 4) {
       weights.exploder = Math.min(4, 1 + (wave - 3) * 0.35);
       weights.ranged = Math.min(4, 1 + (wave - 3) * 0.35);
+    }
+    if (wave >= 5) weights.crawler = Math.min(3, 1 + (wave - 4) * 0.25);
+    if (wave >= 7) weights.necromancer = Math.min(2, 0.5 + (wave - 6) * 0.15);
+    if (modifier === "blood_moon") {
+      for (const k of Object.keys(weights)) weights[k] *= 1.25;
+      weights.tank = (weights.tank ?? 0) * 1.5;
+    } else if (modifier === "swarm") {
+      weights.crawler = (weights.crawler ?? 0) * 2;
+      weights.fast = (weights.fast ?? 0) * 1.4;
     }
     const total = Object.values(weights).reduce((a, b) => a + b, 0);
     let roll = this.rng.next() * total;
@@ -47,12 +56,19 @@ export class ZombieSpawner {
     data: Record<string, ZombieData>,
     wave: number,
     night: number,
+    modifier = "none",
   ): Zombie {
-    // wave scaling matches game.py: hp_growth, speed_growth, damage_growth
+    // Wave scaling: hp_growth, speed_growth, damage_growth per wave,
+    // plus night bonuses and the active wave modifier.
     const waveIdx = Math.max(0, wave - 1);
-    const hpMult = 1 + 0.08 * waveIdx;
-    const speedMult = (1 + 0.02 * waveIdx) * (1 + 0.3 * night);
-    const dmgMult = (1 + 0.04 * waveIdx) * (1 + 0.25 * night);
+    let hpMult = 1 + 0.08 * waveIdx;
+    let speedMult = (1 + 0.02 * waveIdx) * (1 + 0.3 * night);
+    let dmgMult = (1 + 0.04 * waveIdx) * (1 + 0.25 * night);
+    if (modifier === "frenzy") speedMult *= 1.35;
+    if (modifier === "blood_moon") {
+      hpMult *= 1.4;
+      dmgMult *= 1.25;
+    }
     return createZombie(kind, pos, data, hpMult, speedMult, dmgMult);
   }
 }

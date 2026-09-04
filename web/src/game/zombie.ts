@@ -3,6 +3,7 @@
 
 import { moveCircle } from "./collision";
 import {
+  MAX_ALIVE_ZOMBIES,
   NIGHT_DAMAGE_BONUS,
   NIGHT_SPEED_BONUS,
   WORLD_HEIGHT,
@@ -23,6 +24,9 @@ export const ZOMBIE_COLORS: Record<string, string> = {
   exploder: "#C47834",
   ranged: "#468C8C",
   boss: "#AA282E",
+  crawler: "#B58A3C",
+  necromancer: "#7A4FBF",
+  necromancer_boss: "#4A2A8F",
 };
 
 interface ConstructorOpts {
@@ -48,6 +52,10 @@ export class Zombie {
   scoreValue: number;
   coinValue: number;
   xpValue: number;
+  /** Wave scaling this zombie was spawned with (needed by summoners). */
+  hpMult = 1;
+  speedMult = 1;
+  dmgMult = 1;
   state: "idle" | "chase" = "idle";
   faceAngle = 0;
   attackTimer = 0;
@@ -73,6 +81,9 @@ export class Zombie {
     this.scoreValue = d.score;
     this.coinValue = d.coins;
     this.xpValue = d.xp;
+    this.hpMult = opts.hpMult ?? 1;
+    this.speedMult = opts.speedMult ?? 1;
+    this.dmgMult = opts.dmgMult ?? 1;
     this.attackTimer = Math.random() * this.attackCooldownMax;
     this.wanderAngle = Math.random() * Math.PI * 2;
     this.growlCd = 2 + Math.random() * 6;
@@ -197,6 +208,31 @@ export class Zombie {
     _dist: number,
     _damage: number,
   ): void {}
+
+  /** Summon `count` crawler minions near this summoner. */
+  protected summonMinions(
+    game: IGame,
+    count: number,
+    hpMult: number,
+    speedMult: number,
+    dmgMult: number,
+  ): void {
+    const data = (game as unknown as { zombieData: Record<string, import("./data").ZombieData> })
+      .zombieData;
+    for (let i = 0; i < count; i++) {
+      const pos = game.spawner.spawnPosition(this.pos, game.map!);
+      if (pos) {
+        game.zombies.push(
+          createZombie("crawler", pos, data, hpMult, speedMult, dmgMult),
+        );
+        game.particles.heal(pos);
+      }
+    }
+    if (count > 0) {
+      game.audio.playSFX("enemy.spawn", this.pos);
+      game.camera.shake(2);
+    }
+  }
 
   takeDamage(amount: number, crit: boolean, game: IGame): void {
     this.hp -= amount;
@@ -344,7 +380,9 @@ export class BossZombie extends Zombie {
       }
     }
   }
-  private barrage(game: IGame): void {
+
+
+  protected barrage(game: IGame): void {
     const n = (this.data.barrage_bullets ?? 14) + (this.phase - 1) * 3;
     for (let i = 0; i < n; i++) {
       const ang = (Math.PI * 2 * i) / n;
@@ -371,6 +409,87 @@ export class BossZombie extends Zombie {
   }
 }
 
+export class CrawlerZombie extends Zombie {
+  static override KIND = "crawler";
+  // Low, fast, fragile — behavior is fully data-driven.
+}
+
+export class NecromancerZombie extends Zombie {
+  static override KIND = "necromancer";
+  static PREFERRED_DIST = 320;
+  private summonCd = 6;
+  protected override wantsToStop(dist: number): boolean {
+    return dist < this.attackRange;
+  }
+  protected override extraBehaviour(
+    dt: number,
+    game: IGame,
+    _dist: number,
+    _damage: number,
+  ): void {
+    this.summonCd -= dt;
+    if (this.summonCd <= 0 && game.zombies.length < MAX_ALIVE_ZOMBIES) {
+      this.summonCd = 8;
+      this.summonMinions(
+        game,
+        2,
+        this.hpMult,
+        this.speedMult * 0.9,
+        this.dmgMult * 0.6,
+      );
+    }
+  }
+}
+
+export class NecromancerBossZombie extends BossZombie {
+  static override KIND = "necromancer_boss";
+  private summonCd = 4;
+  protected override extraBehaviour(
+    dt: number,
+    game: IGame,
+    dist: number,
+    damage: number,
+  ): void {
+    super.extraBehaviour(dt, game, dist, damage);
+    this.summonCd -= dt;
+    if (this.summonCd <= 0 && game.zombies.length < MAX_ALIVE_ZOMBIES) {
+      this.summonCd = 5.5;
+      this.summonMinions(game, 3, this.hpMult, this.speedMult, this.dmgMult);
+      game.toast("MINIONS SUMMONED!");
+    }
+  }
+  protected override barrage(game: IGame): void {
+    const n = this.data.barrage_bullets ?? 10;
+    const spin = performance.now() / 1000;
+    for (let i = 0; i < n; i++) {
+      const ang = (Math.PI * 2 * i) / n + spin;
+      game.enemyBullets.push(
+        new Bullet(this.pos, ang, 280, this.damage * 0.7, "enemy"),
+      );
+    }
+    game.camera.shake(8);
+  }
+  override draw(ctx: CanvasRenderingContext2D, cam: Camera): void {
+    super.draw(ctx, cam);
+    const sp = cam.apply(this.pos);
+    const r = this.radius;
+    const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 300);
+    ctx.save();
+    ctx.globalAlpha = 0.5 + pulse * 0.3;
+    ctx.strokeStyle = "#AA5CF0";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, r + 10, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.18 + pulse * 0.12;
+    ctx.fillStyle = "#7A2FD0";
+    ctx.beginPath();
+    ctx.arc(sp.x, sp.y, r + 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 export const ZOMBIE_CLASSES: Record<string, new (pos: Vec, opts: ConstructorOpts) => Zombie> = {
   normal: NormalZombie,
   fast: FastZombie,
@@ -378,6 +497,9 @@ export const ZOMBIE_CLASSES: Record<string, new (pos: Vec, opts: ConstructorOpts
   exploder: ExploderZombie,
   ranged: RangedZombie,
   boss: BossZombie,
+  crawler: CrawlerZombie,
+  necromancer: NecromancerZombie,
+  necromancer_boss: NecromancerBossZombie,
 };
 
 export function createZombie(

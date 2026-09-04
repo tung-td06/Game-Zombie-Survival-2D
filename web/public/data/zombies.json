@@ -37,5 +37,26 @@
     "attack_range": 78, "attack_cooldown": 1.4, "detection_range": 100000,
     "barrage_interval": 6.0, "barrage_bullets": 14,
     "score": 5000, "coins": 500, "xp": 600
+  },
+  "crawler": {
+    "name": "Crawler",
+    "hp": 50, "speed": 130, "damage": 6, "radius": 12,
+    "attack_range": 30, "attack_cooldown": 0.7, "detection_range": 380,
+    "score": 80, "coins": 8, "xp": 15
+  },
+  "necromancer": {
+    "name": "Necromancer",
+    "hp": 220, "speed": 60, "damage": 8, "radius": 18,
+    "attack_range": 480, "attack_cooldown": 2.5, "detection_range": 600,
+    "projectile_speed": 380,
+    "score": 400, "coins": 80, "xp": 120
+  },
+  "necromancer_boss": {
+    "name": "NECROMANCER KING",
+    "hp": 8000, "speed": 50, "damage": 30, "radius": 44,
+    "attack_range": 480, "attack_cooldown": 2.0, "detection_range": 100000,
+    "barrage_interval": 5.0, "barrage_bullets": 10,
+    "projectile_speed": 380,
+    "score": 8000, "coins": 800, "xp": 1000
   }
 }

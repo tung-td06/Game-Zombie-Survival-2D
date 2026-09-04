@@ -4,9 +4,10 @@
 
 import { AchievementSystem } from "./achievement";
 import { formatTime } from "./utils";
-import { drawText, Button, drawUpgradeCard, roundRect, drawShopIcon } from "./ui";
+import { drawText, Button, roundRect, drawShopIcon } from "./ui";
 import { color } from "./colors";
 import { RESOLUTIONS, SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
+import { SKILL_BRANCHES } from "./upgrade";
 import type { IGame } from "./types";
 
 interface Ember {
@@ -209,10 +210,10 @@ export class MenuSystem {
 
     // ── Buttons ───────────────────────────────────────────────────────────
     const btnW = 280;
-    const btnH = 46;
+    const btnH = 42;
     const btnX = cx - btnW / 2;
-    const btnStartY = panelY + 86;
-    const btnGap = 56;
+    const btnStartY = panelY + 82;
+    const btnGap = 50;
 
     let saveBtnText = "💾 SAVE GAME";
     let saveBtnAction = "save_game";
@@ -232,13 +233,15 @@ export class MenuSystem {
       saveBtnColor = "#FF3C46";
     }
 
+    const hasPoints = (game.player?.skillPoints ?? 0) > 0;
     const buttons = [
       new Button("▶ RESUME GAME",     btnX, btnStartY + 0 * btnGap, btnW, btnH, "resume",        color("ui_green")),
       new Button(saveBtnText,         btnX, btnStartY + 1 * btnGap, btnW, btnH, saveBtnAction,   saveBtnColor),
       new Button("🛒 SHOP",            btnX, btnStartY + 2 * btnGap, btnW, btnH, "pause_shop",     color("ui_gold")),
-      new Button("⚙ SETTINGS",        btnX, btnStartY + 3 * btnGap, btnW, btnH, "pause_settings"),
-      new Button("🎮 CONTROLS",        btnX, btnStartY + 4 * btnGap, btnW, btnH, "pause_controls"),
-      new Button("↩ RETURN TO LOBBY", btnX, btnStartY + 5 * btnGap, btnW, btnH, "pause_leave",   "#787882"),
+      new Button("✨ SKILL TREE",      btnX, btnStartY + 3 * btnGap, btnW, btnH, "skill_tree",    hasPoints ? color("ui_blue") : "#5A5A62"),
+      new Button("⚙ SETTINGS",        btnX, btnStartY + 4 * btnGap, btnW, btnH, "pause_settings"),
+      new Button("🎮 CONTROLS",        btnX, btnStartY + 5 * btnGap, btnW, btnH, "pause_controls"),
+      new Button("↩ RETURN TO LOBBY", btnX, btnStartY + 6 * btnGap, btnW, btnH, "pause_leave",   "#787882"),
     ];
 
     for (const b of buttons) {
@@ -684,13 +687,22 @@ export class MenuSystem {
         { id: "smg",     name: "SMG",     desc: "High rate of fire, low accuracy." },
         { id: "rifle",   name: "RIFLE",   desc: "Excellent damage and auto-fire." },
         { id: "sniper",  name: "SNIPER",  desc: "Slow bolt-action but heavy damage." },
+        { id: "flamethrower", name: "FLAMETHROWER", desc: "Short-range stream of fire." },
+        { id: "plasma",  name: "PLASMA RIFLE", desc: "Energy bolts that explode." },
+        { id: "crossbow", name: "CROSSBOW", desc: "Bolt pierces through crowds." },
       ];
 
+      // Weapons tab uses a compact 3-column grid so all 8 guns fit.
+      const wCardW = 176;
+      const wCardH = 104;
+      const wGapX = 8;
+      const wGapY = 10;
+      const wGridX = cx - (wCardW * 3 + wGapX * 2) / 2;
       items.forEach((item, idx) => {
-        const col = idx % 2;
-        const row = Math.floor(idx / 2);
-        const cX = gridX + col * (cardW + cardGapX);
-        const cY = gridY + row * (cardH + cardGapY);
+        const col = idx % 3;
+        const row = Math.floor(idx / 3);
+        const cX = wGridX + col * (wCardW + wGapX);
+        const cY = gridY + row * (wCardH + wGapY);
 
         const wData = game.weaponData[item.id];
         const price = wData?.price ?? 500;
@@ -698,18 +710,18 @@ export class MenuSystem {
 
         // Card Border and Fill
         ctx.fillStyle = "#1E1E24";
-        roundRect(ctx, cX, cY, cardW, cardH, 8);
+        roundRect(ctx, cX, cY, wCardW, wCardH, 8);
         ctx.fill();
         ctx.strokeStyle = owned ? color("ui_green") : p.coins >= price ? color("ui_gold") : "#3C3C46";
         ctx.lineWidth = 1.5;
-        roundRect(ctx, cX, cY, cardW, cardH, 8);
+        roundRect(ctx, cX, cY, wCardW, wCardH, 8);
         ctx.stroke();
 
         // Draw weapon icon
-        drawShopIcon(ctx, `weapon:${item.id}`, cX + cardW - 84, cY + 12, 72, 48, owned);
+        drawShopIcon(ctx, `weapon:${item.id}`, cX + wCardW - 62, cY + 8, 52, 36, owned);
 
         // Text Info (Left aligned, vertically adjusted)
-        drawText(ctx, item.name, cX + 12, cY + 14, 15, owned ? color("ui_green") : "#FFFFFF", "left", "top");
+        drawText(ctx, item.name, cX + 10, cY + 10, 12, owned ? color("ui_green") : "#FFFFFF", "left", "top");
 
         // Split description into two lines
         let desc1 = item.desc;
@@ -726,6 +738,15 @@ export class MenuSystem {
         } else if (item.id === "sniper") {
           desc1 = "Slow bolt-action";
           desc2 = "but heavy damage.";
+        } else if (item.id === "flamethrower") {
+          desc1 = "Short-range stream";
+          desc2 = "of fire.";
+        } else if (item.id === "plasma") {
+          desc1 = "Energy bolts that";
+          desc2 = "explode on impact.";
+        } else if (item.id === "crossbow") {
+          desc1 = "Bolt pierces";
+          desc2 = "through crowds.";
         }
         drawText(ctx, desc1, cX + 12, cY + 36, 10, color("ui_dim"), "left", "top");
         if (desc2) {
@@ -748,10 +769,10 @@ export class MenuSystem {
 
         const buyBtn = new Button(
           btnText,
-          cX + 12,
-          cY + cardH - 34,
-          cardW - 24,
-          24,
+          cX + 10,
+          cY + wCardH - 30,
+          wCardW - 20,
+          22,
           enabled ? `ps_buy:weapon:${item.id}` : "",
           btnAccent
         );
@@ -1067,77 +1088,155 @@ export class MenuSystem {
   drawUpgrade(
     ctx: CanvasRenderingContext2D,
     game: IGame,
-    choices: string[],
+    _choices: string[],
   ): { action: string | null; buttons: Button[] } {
     const width = ctx.canvas.width / (window.devicePixelRatio || 1);
     const height = ctx.canvas.height / (window.devicePixelRatio || 1);
 
     this.drawBackground(ctx, game.dt);
 
+    const p = game.player!;
+    const isLevelUp = p.pendingLevels > 0;
+
     // ── Header ────────────────────────────────────────────────────────────
-    drawText(ctx, "LEVEL UP!", width / 2, 90, 52, color("ui_green"), "center");
     drawText(
       ctx,
-      `LEVEL ${game.player!.level}  ·  CHOOSE AN UPGRADE`,
+      isLevelUp ? "LEVEL UP!" : "SKILL TREE",
       width / 2,
-      152,
-      17,
-      color("ui_dim"),
+      62,
+      isLevelUp ? 46 : 40,
+      isLevelUp ? color("ui_green") : color("ui_gold"),
       "center",
+      "middle",
+    );
+    drawText(
+      ctx,
+      `LV ${p.level}   ·   SKILL POINTS: ${p.skillPoints}`,
+      width / 2,
+      112,
+      19,
+      p.skillPoints > 0 ? "#9FE8FF" : color("ui_dim"),
+      "center",
+      "middle",
     );
 
-    // ── Card layout ───────────────────────────────────────────────────────
-    const cardW = Math.min(560, width - 80);
-    const cardH = 120;
-    const gap = 18;
-    const totalH = choices.length * cardH + (choices.length - 1) * gap;
-    const startY = Math.max(190, (height - totalH) / 2 + 20);
+    // ── Branch columns ────────────────────────────────────────────────────
+    const branches = SKILL_BRANCHES;
+    const colW = Math.min(292, (width - 120) / branches.length);
+    const gapX = 18;
+    const totalW = branches.length * colW + (branches.length - 1) * gapX;
+    const startX = (width - totalW) / 2;
+    const topY = 148;
+    const rowH = 54;
+    const rowGap = 10;
+    const maxRows = Math.max(...branches.map((b) => b.skills.length));
+    const buttons: Button[] = [];
 
     const mx = game.input.mouseX;
     const my = game.input.mouseY;
     const dt = game.dt;
 
-    // Persist hover state across frames on the MenuSystem instance
-    const hoverMap = (this as unknown as { _upgradeHover: number[] })._upgradeHover;
-    if (!hoverMap || hoverMap.length !== choices.length) {
-      (this as unknown as { _upgradeHover: number[] })._upgradeHover = choices.map(() => 0);
-    }
-    const hovers = (this as unknown as { _upgradeHover: number[] })._upgradeHover;
+    branches.forEach((branch, bi) => {
+      const bx = startX + bi * (colW + gapX);
+      drawText(
+        ctx,
+        branch.name.toUpperCase(),
+        bx + colW / 2,
+        topY,
+        20,
+        branch.color,
+        "center",
+        "middle",
+      );
 
-    // Accent colours per slot — cycles if > 3 choices
-    const ACCENTS = ["#50A0FF", "#6EDC82", "#F0C850", "#FF6EB4", "#FF8C50"];
+      branch.skills.forEach((uid, si) => {
+        const cy = topY + 32 + si * (rowH + rowGap);
+        const cur = p.upgradeLevels[uid] ?? 0;
+        const limit = game.upgrades.limitFor(uid);
+        const maxed = cur >= limit;
+        const affordable = !maxed && p.skillPoints > 0;
+        const hovered =
+          mx >= bx && mx <= bx + colW && my >= cy && my <= cy + rowH;
 
-    const buttons: Button[] = [];
+        ctx.fillStyle = maxed
+          ? "rgba(70, 200, 100, 0.10)"
+          : affordable || hovered
+            ? "rgba(24, 24, 32, 0.92)"
+            : "rgba(14, 14, 18, 0.75)";
+        roundRect(ctx, bx, cy, colW, rowH, 8);
+        ctx.fill();
+        ctx.strokeStyle = maxed
+          ? "#6EDC82"
+          : affordable
+            ? branch.color
+            : hovered
+              ? "#4A4A54"
+              : "#2A2A32";
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, bx, cy, colW, rowH, 8);
+        ctx.stroke();
 
-    for (let i = 0; i < choices.length; i++) {
-      const uid = choices[i]!;
-      const cx = (width - cardW) / 2;
-      const cy = startY + i * (cardH + gap);
+        drawText(
+          ctx,
+          game.upgrades.textFor(uid),
+          bx + 10,
+          cy + 11,
+          12,
+          maxed ? "#C2F2D0" : affordable ? "#FFFFFF" : "#8A8A94",
+          "left",
+          "middle",
+        );
+        drawText(
+          ctx,
+          game.upgrades.descFor(uid),
+          bx + 10,
+          cy + rowH - 10,
+          8.5,
+          color("ui_dim"),
+          "left",
+          "middle",
+        );
+        drawText(
+          ctx,
+          maxed ? "MAX" : `${cur}/${limit}`,
+          bx + colW - 10,
+          cy + rowH / 2,
+          10,
+          maxed ? "#6EDC82" : affordable ? "#FFD36B" : "#5A5A62",
+          "right",
+          "middle",
+        );
 
-      // Hit-test for hover
-      const isHovered = mx >= cx && mx <= cx + cardW && my >= cy && my <= cy + cardH;
-      const target = isHovered ? 1 : 0;
-      hovers[i] = (hovers[i] ?? 0) + (target - (hovers[i] ?? 0)) * Math.min(1, dt * 10);
+        buttons.push(new Button("", bx, cy, colW, rowH, `upgrade:${uid}`, branch.color));
+      });
+    });
 
-      const accent = ACCENTS[i % ACCENTS.length]!;
-      const title = game.upgrades.textFor(uid);
-      const desc = game.upgrades.descFor(uid);
+    // ── Continue ──────────────────────────────────────────────────────────
+    const contY = topY + 32 + maxRows * (rowH + rowGap) + 10;
+    const contW = 240;
+    const contX = width / 2 - contW / 2;
+    const cont = new Button(
+      "CONTINUE",
+      contX,
+      contY,
+      contW,
+      46,
+      "upgrade_done",
+      color("ui_gold"),
+    );
+    cont.update(dt, mx, my, false);
+    cont.draw(ctx);
+    buttons.push(cont);
 
-      drawUpgradeCard(ctx, cx, cy, cardW, cardH, title, desc, accent, hovers[i]!, i + 1);
-
-      // Invisible Button for click handling (same bounds as card)
-      buttons.push(new Button("", cx, cy, cardW, cardH, `upgrade:${uid}`, accent));
-    }
-
-    // ── Hint ──────────────────────────────────────────────────────────────
     drawText(
       ctx,
-      "CLICK OR PRESS 1 / 2 / 3 TO CHOOSE",
+      "CLICK A SKILL TO LEARN IT · ESC / CONTINUE TO RESUME",
       width / 2,
-      startY + totalH + 32,
-      13,
+      contY + 62,
+      12,
       color("ui_dim"),
       "center",
+      "middle",
     );
 
     return { action: null, buttons };
@@ -1247,7 +1346,7 @@ export class MenuSystem {
       new Button("MAIN MENU", cx + 120, 560, 200, 54, "menu"),
       // Back to the main website (lobby) so players can start a fresh run
       // without reloading the page.
-      new Button("↩ RETURN TO LOBBY", cx - 150, 646, 300, 52, "leave_to_lobby", "#787882"),
+      new Button(" RETURN TO LOBBY", cx - 150, 646, 300, 52, "leave_to_lobby", "#787882"),
     ];
     for (const b of buttons) {
       b.update(game.dt, game.input.mouseX, game.input.mouseY, false);

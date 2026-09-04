@@ -1,8 +1,36 @@
 // src/game/upgrade.ts
-// UpgradeSystem: 3 choices per level-up, applied to player.
+// UpgradeSystem: skill catalog + skill tree branches. Mirrors desktop
+// upgrade.py: every level grants a skill point, spent in the SKILL TREE
+// (Combat / Survival / Utility branches) instead of a random 3-card pick.
 
 import type { UpgradeCatalog } from "./data";
 import type { IGame } from "./types";
+
+/** Skill-tree branch definition: name, accent colour, skill ids. */
+export const SKILL_BRANCHES: ReadonlyArray<{
+  name: string;
+  color: string;
+  skills: readonly string[];
+}> = [
+  {
+    name: "Combat",
+    color: "#FFC850",
+    skills: ["damage", "fire_rate", "reload", "crit_ch", "crit_dmg"],
+  },
+  {
+    name: "Survival",
+    color: "#6EDC82",
+    skills: ["max_hp", "armor", "regen", "vampire"],
+  },
+  {
+    name: "Utility",
+    color: "#6EC8FF",
+    skills: ["speed", "magnet", "pierce"],
+  },
+];
+
+/** Max levels for skills that have no explicit catalog limit. */
+export const DEFAULT_SKILL_LIMIT = 5;
 
 export class UpgradeSystem {
   catalog: UpgradeCatalog;
@@ -11,19 +39,8 @@ export class UpgradeSystem {
     this.catalog = catalog;
   }
 
-  rollChoices(player: { upgradeLevels: Record<string, number> }): string[] {
-    const pool: string[] = [];
-    for (const u of this.catalog.upgrades) {
-      const limit = this.catalog.limits[u.id];
-      if (limit != null && (player.upgradeLevels[u.id] ?? 0) >= limit) continue;
-      pool.push(u.id);
-    }
-    const out: string[] = [];
-    while (out.length < Math.min(3, pool.length)) {
-      const pick = pool[Math.floor(Math.random() * pool.length)]!;
-      if (!out.includes(pick)) out.push(pick);
-    }
-    return out;
+  limitFor(uid: string): number {
+    return this.catalog.limits[uid] ?? DEFAULT_SKILL_LIMIT;
   }
 
   textFor(uid: string): string {
@@ -45,6 +62,10 @@ export class UpgradeSystem {
     reloadMult: number;
     critBonus: number;
     critMultBonus: number;
+    regen: number;
+    magnetMult: number;
+    lifeSteal: number;
+    pierceBonus: number;
   }, _game?: IGame): void {
     player.upgradeLevels[uid] = (player.upgradeLevels[uid] ?? 0) + 1;
     switch (uid) {
@@ -72,6 +93,18 @@ export class UpgradeSystem {
         break;
       case "crit_dmg":
         player.critMultBonus += 0.25;
+        break;
+      case "regen":
+        player.regen += 1;
+        break;
+      case "magnet":
+        player.magnetMult *= 1.3;
+        break;
+      case "vampire":
+        player.lifeSteal += 0.02;
+        break;
+      case "pierce":
+        player.pierceBonus += 1;
         break;
     }
   }

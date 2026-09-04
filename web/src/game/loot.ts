@@ -38,7 +38,7 @@ export class Loot {
     const dy = p.pos.y - this.pos.y;
     const d = Math.hypot(dx, dy);
     const grabbing = game.input.isDown("vacuum");
-    const magnetRange = grabbing ? 220 : 110;
+    const magnetRange = (grabbing ? 220 : 110) * (p.magnetMult || 1);
     const pickupRange = p.radius + (grabbing ? 48 : 14);
     if (d < magnetRange) {
       const speed = grabbing ? 420 : 300;
@@ -136,7 +136,7 @@ export function dropsFor(
   else if (r < 0.17) drops.push(new Loot(off(), "ammo", 0));
   else if (r < 0.21) drops.push(new Loot(off(), "armor", 15));
   else if (r < 0.225) {
-    const pool = ["shotgun", "smg", "rifle", "sniper"];
+    const pool = ["shotgun", "smg", "rifle", "sniper", "crossbow", "flamethrower", "plasma"];
     drops.push(new Loot(zombie.pos, "weapon", 0, rng.pick(pool)));
   }
   return drops;
