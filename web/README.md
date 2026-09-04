@@ -1,9 +1,11 @@
 # Zombie Survival 2D — Web
 
-A browser port of the Python/Pygame zombie survival shooter. The desktop
-version lives in `../` and is unchanged. This web version targets feature
-parity (player, 6 zombie types, 5 weapons, waves+boss, shop, upgrades,
-quests, achievements, day/night cycle, save/load, settings).
+Standalone browser zombie survival shooter (Next.js + Canvas 2D). The
+former Python/Pygame desktop version has been removed — this is the only
+active build. Features: player, 6 zombie types, weapons with per-gun range
+stats, waves+boss (a boss on every wave from wave 5), shop, upgrades,
+quests, achievements, day/night cycle, save/load, settings, mobile touch
+controls.
 
 ## Stack
 
@@ -119,18 +121,14 @@ Unit tests exercise the same D1 SQL through a Node JSON-file fallback in
 
 ## Asset notes
 
-The web build draws the world with `fillRect`/`arc` using the same color
-palette as the Pygame version, plus a small set of generated SVGs in
-`public/assets/images/`. There are no audio files — every sfx is
+The web build draws the world with `fillRect`/`arc` from a shared color
+palette, plus a small set of generated SVGs in `public/assets/images/`.
+Optional `.wav` sound effects can be placed in `public/audio/` (see
+`scripts/generate-audio.py` to regenerate them); otherwise every sfx is
 synthesised on demand with the Web Audio API.
 
 ## Multiplayer scaffold
 
-`src/game/network.ts` defines a `Server` / `Client` pair wire-compatible
-with the Python transport. No server is bundled; the same game state
-machine (`update_playing` headless + snapshot render) is the integration
-point.
-
-## License
-
-Same as the parent project.
+`src/game/network.ts` defines a `Server` / `Client` pair. `server.js`
+relays WebSocket traffic (`/api/multiplayer`) between the room host and
+guests; host-authoritative snapshots drive guest rendering.
