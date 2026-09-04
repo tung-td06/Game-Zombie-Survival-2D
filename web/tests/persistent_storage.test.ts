@@ -14,12 +14,16 @@ import {
   getPlayerStats,
   deleteGameSave,
 } from "../src/lib/db";
-import { _resetCacheForTests, _dataDir } from "../src/lib/persistent-storage";
+import { _resetCacheForTests, _dataDir } from "../src/server/persistent-storage";
 
 // These tests exercise the on-disk persistent store. They use a dedicated
 // sub-directory so they never interfere with real dev data.
 
 const TEST_DIR = path.join(process.cwd(), "data", "persistent-test");
+
+// The persistent store debounces disk writes (200ms). Wait for the flush
+// before forcing a re-read from disk so tests don't race the timer.
+const flush = () => new Promise((r) => setTimeout(r, 250));
 
 beforeAll(async () => {
   // Redirect the persistent store to a sandboxed test directory.
@@ -46,6 +50,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(created.username).toBe(username);
     expect(created.id).toBeDefined();
 
+    await flush();
     // Force a re-read from disk by clearing the in-memory cache.
     _resetCacheForTests();
     const refetched = await getPlayerByUsername(null, username);
@@ -68,7 +73,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     await createPlayer(null, username, hash);
 
     // Allow the debounced flush to land.
-    await new Promise((r) => setTimeout(r, 300));
+    await flush();
 
     const playersFile = path.join(_dataDir(), "players.json");
     const stat = await fs.stat(playersFile).catch(() => null);
@@ -98,6 +103,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       world: {},
     });
 
+    await flush();
     _resetCacheForTests();
     const save = await getGameSave(null, created.id);
     expect(save).not.toBeNull();
@@ -113,6 +119,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       shots_hit: 150,
     });
 
+    await flush();
     _resetCacheForTests();
     const stats = await getPlayerStats(null, created.id);
     expect(stats).not.toBeNull();
@@ -126,6 +133,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(carolRow?.score).toBe(5000);
 
     await deleteGameSave(null, created.id);
+    await flush();
     _resetCacheForTests();
     const afterDelete = await getGameSave(null, created.id);
     expect(afterDelete).toBeNull();

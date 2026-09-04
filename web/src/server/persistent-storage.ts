@@ -68,7 +68,11 @@ export interface GameSaveRecord {
   updated_at: number;
 }
 
-const DATA_DIR = path.join(process.cwd(), "data", "persistent");
+// Resolved lazily so tests can redirect the store with
+// `PERSISTENT_TEST_DIR` before the first read/write.
+function getDataDir(): string {
+  return process.env.PERSISTENT_TEST_DIR || path.join(process.cwd(), "data", "persistent");
+}
 
 type FileShape = {
   players: Record<string, PlayerRecord>;
@@ -112,14 +116,14 @@ function isNodeRuntime(): boolean {
 async function ensureDir(): Promise<void> {
   if (!isNodeRuntime()) return;
   try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
+    await fs.mkdir(getDataDir(), { recursive: true });
   } catch {
     // ignore
   }
 }
 
 function filePath(name: keyof FileShape): string {
-  return path.join(DATA_DIR, `${name}.json`);
+  return path.join(getDataDir(), `${name}.json`);
 }
 
 async function readJson<T>(name: keyof FileShape, fallback: T): Promise<T> {
@@ -314,7 +318,7 @@ export function _resetCacheForTests(): void {
 
 /** Returns the directory used for the JSON files. */
 export function _dataDir(): string {
-  return DATA_DIR;
+  return getDataDir();
 }
 
 // Attach best-effort exit handlers the first time this module is loaded.
