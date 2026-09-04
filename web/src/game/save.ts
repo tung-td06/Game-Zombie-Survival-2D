@@ -12,6 +12,7 @@ export interface SaveData {
   player_level: number;
   xp: number;
   unlocked_weapons: string[];
+  has_drone: boolean;
   weapon_upgrades: Record<string, unknown>;
   player_upgrades: Record<string, number>;
   achievements: string[];
@@ -41,6 +42,7 @@ export const DEFAULT_SAVE: SaveData = {
   player_level: 1,
   xp: 0,
   unlocked_weapons: ["pistol"],
+  has_drone: false,
   weapon_upgrades: {},
   player_upgrades: {},
   achievements: [],

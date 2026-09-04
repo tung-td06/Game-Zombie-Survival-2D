@@ -13,7 +13,7 @@ import { ParticleSystem } from "./particle";
 import { Player } from "./player";
 import { QuestSystem } from "./quest";
 import { SaveManager } from "./save";
-import { Shop } from "./shop";
+import { DRONE_PRICE, Shop } from "./shop";
 import { UpgradeSystem } from "./upgrade";
 import { WaveManager } from "./waveManager";
 import { ZombieSpawner } from "./spawner";
@@ -930,6 +930,15 @@ export class Game {
       price: 300,
       owned: false,
     });
+    out.push({
+      key: "drone",
+      label: "UFO DRONE",
+      detail: p.hasDrone
+        ? "Combat drone active — auto-fires at zombies"
+        : "Orbiting drone that auto-fires at nearby zombies",
+      price: DRONE_PRICE,
+      owned: p.hasDrone,
+    });
     return out;
   }
 
@@ -1225,6 +1234,7 @@ export class Game {
         previewOnly: true,
       },
     );
+    this.player.hasDrone = !!this.save.data["has_drone"];
   }
 
   newRun(): void {
@@ -1246,6 +1256,7 @@ export class Game {
       weaponData: this.weaponData,
       username: this.username,
     });
+    this.player.hasDrone = !!this.save.data["has_drone"];
     this.camera = new Camera(this.viewW, this.viewH);
     this.camera.offset.x = Math.max(0, start.x - this.camera.viewW / 2);
     this.camera.offset.y = Math.max(0, start.y - this.camera.viewH / 2);
@@ -1317,6 +1328,7 @@ export class Game {
       weaponData: this.weaponData,
       username: this.username,
     });
+    this.player.hasDrone = !!pData.hasDrone;
 
     // Restore upgrades
     this.player.upgradeLevels = {};
@@ -1438,6 +1450,7 @@ export class Game {
         xp: this.player.xp,
         skillPoints: this.player.skillPoints,
         upgradeLevels: this.player.upgradeLevels,
+        hasDrone: this.player.hasDrone,
       },
       weapons: {
         currentId: this.player.weapons.currentId,

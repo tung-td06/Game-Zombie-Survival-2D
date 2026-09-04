@@ -792,6 +792,17 @@ export function drawShopIcon(
     ctx.beginPath(); ctx.moveTo(-2, -7); ctx.lineTo(10, 0); ctx.lineTo(-2, 7); ctx.stroke();
     ctx.fillStyle = "#E8E8E8";
     ctx.beginPath(); ctx.moveTo(12, -1); ctx.lineTo(17, 0); ctx.lineTo(12, 1); ctx.closePath(); ctx.fill();
+  } else if (id === "drone") {
+    // UFO saucer: dome + disc + glow, matching the in-game drone
+    ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = "#3A3A44";
+    ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#8FE8FF";
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#EAFBFF";
+    ctx.beginPath(); ctx.arc(-2.5, -2.5, 2.5, 0, Math.PI * 2); ctx.fill();
   }
 
   ctx.restore();

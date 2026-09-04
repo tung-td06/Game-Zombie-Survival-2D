@@ -1,7 +1,8 @@
 // src/game/zombie.ts
 // Zombie base + 6 subclasses. Data-driven via /data/zombies.json.
 
-import { moveCircle } from "./collision";
+import { moveCircle, circleRectCollide } from "./collision";
+import type { Rect } from "./collision";
 import {
   MAX_ALIVE_ZOMBIES,
   NIGHT_DAMAGE_BONUS,
@@ -63,6 +64,40 @@ export class Zombie {
   knockback: Vec = { x: 0, y: 0 };
   wanderAngle = 0;
   wanderTimer = 0;
+  /** Turning bias used when steering around obstacles (per zombie). */
+  steerBias = Math.random() < 0.5 ? -1 : 1;
+  /** Huge zombies bulldoze light scenery they wedge against. */
+  protected crushLight = false;
+  private crushCd = 0;
+  /** Rotates which escape side is tried first on successive jams. */
+  private escapeTry = 0;
+  private escapeLosT = 0;
+  /** How long this zombie has been blocked while trying to close in. */
+  stuckTime = 0;
+  /**
+   * Waypoint navigation around a blocking obstacle. When the line to the
+   * player crosses a building, the zombie walks to a point just outside the
+   * nearer corner of that building, then keeps walking corner to corner (in
+   * `pathOrder`) until the line opens again. Kept per zombie so the horde
+   * spreads across both ends of a face instead of stacking against it.
+   */
+  pathTarget: Vec | null = null;
+  private pathRect: Rect | null = null;
+  private pathOrder: number[] = [];
+  private pathStep = 0;
+  private losTimer = 0;
+  /** Jam escape: while true the zombie walks straight along `escapeDir`. */
+  private escaping = false;
+  private escapeDir: Vec = { x: 0, y: 0 };
+  private escapeTimer = 0;
+  private escapeStart: Vec | null = null;
+  private escapeDist = 170;
+  /** Dither detection: net approach vs gross movement over a short window. */
+  private winT = 0;
+  private winApproach = 0;
+  private winGross = 0;
+  private winStartX = 0;
+  private winStartY = 0;
   growlCd = 0;
   dying = false;
 
@@ -129,16 +164,45 @@ export class Zombie {
       if (this.growlCd <= 0 && dist < 600) {
         this.growlCd = 4 + Math.random() * 5;
       }
-      if (this.wantsToStop(dist)) {
+      if (this.escaping) {
+        // Jam escape: keep walking along the chosen open direction until it
+        // has travelled far enough (or times out), then re-plan normally.
+        this.escapeTimer -= dt;
+        const travelled = this.escapeStart
+          ? Math.hypot(this.pos.x - this.escapeStart.x, this.pos.y - this.escapeStart.y)
+          : 0;
+        // Stop the moment a straight line to the player opens up again —
+        // never march past the point where chasing can resume.
+        const mapNow = game.map;
+        this.escapeLosT -= dt;
+        if (mapNow && this.escapeLosT <= 0) {
+          this.escapeLosT = 0.3;
+          if (!this.losBlocked(mapNow, player.pos)) this.escaping = false;
+        }
+        if (this.escapeTimer <= 0 || travelled >= this.escapeDist) this.escaping = false;
+        if (this.escaping) move = { x: this.escapeDir.x * speed, y: this.escapeDir.y * speed };
+        else if (this.wantsToStop(dist)) {
+          // hold position
+        } else if (dist > this.attackRange * 0.85 && dist > 0.001) {
+          const dirX = toP.x / dist;
+          const dirY = toP.y / dist;
+          move = this.steerMove(game, dirX, dirY, speed, dt);
+        }
+      } else if (this.wantsToStop(dist)) {
         // hold position
       } else if (dist > this.attackRange * 0.85) {
         if (dist > 0.001) {
-          move = { x: (toP.x / dist) * speed, y: (toP.y / dist) * speed };
+          const dirX = toP.x / dist;
+          const dirY = toP.y / dist;
+          move = this.steerMove(game, dirX, dirY, speed, dt);
         }
       }
       const reach = this.attackRange + this.radius + player.radius * 0.5;
       this.attackTimer -= dt;
-      if (dist <= reach && this.attackTimer <= 0) {
+      // Melee never reaches through a wall: if an obstacle sits between the
+      // zombie and its target it keeps pushing around it instead.
+      const wallBetween = this.wallBetween(game, player.pos);
+      if (dist <= reach && this.attackTimer <= 0 && !wallBetween) {
         this.attackTimer = this.attackCooldownMax;
         player.takeDamage(damage, game);
         this.onAttack(game);
@@ -158,13 +222,289 @@ export class Zombie {
     this.knockback.x *= decay;
     this.knockback.y *= decay;
     const total = { x: move.x * dt + kb.x, y: move.y * dt + kb.y };
+    const px0 = this.pos.x;
+    const py0 = this.pos.y;
     if (total.x !== 0 || total.y !== 0) {
       const rects = game.map!.getNear(this.pos, this.radius + 4);
       moveCircle(this.pos, total, this.radius, rects);
       this.pos.x = clamp(this.pos.x, this.radius, WORLD_WIDTH - this.radius);
       this.pos.y = clamp(this.pos.y, this.radius, WORLD_HEIGHT - this.radius);
     }
+    // Stuck meters: (1) a hard-stuck zombie that barely moves at all, and
+    // (2) a dithering zombie that keeps moving back and forth (or sideways)
+    // along a wall but never actually approaches the player. Both drop the
+    // current plan and trigger a jam-escape toward the most open side.
+    if (
+      this.state === "chase" &&
+      !this.wantsToStop(dist) &&
+      dist > this.attackRange * 0.85
+    ) {
+      const moved = Math.hypot(this.pos.x - px0, this.pos.y - py0);
+      const expected = Math.hypot(total.x, total.y);
+      const newDist = Math.hypot(player.pos.x - this.pos.x, player.pos.y - this.pos.y);
+      // Reactive crush: a bulldozing zombie smashes light props the moment
+      // they block it, instead of waiting until it is fully stuck.
+      this.crushCd -= dt;
+      if (this.crushLight && this.crushCd <= 0 && expected > 0.5 && moved < expected * 0.5) {
+        if (this.crushBlockers(game)) {
+          this.crushCd = 0.4;
+          this.stuckTime = 0;
+        } else {
+          this.crushCd = 0.8;
+        }
+      }
+      if (expected > 0.5 && moved < expected * 0.35) {
+        this.stuckTime += dt;
+        if (this.stuckTime > 0.5) {
+          this.stuckTime = 0;
+          // Alternate the escape side every jam so successive escapes try
+          // BOTH ends of the obstacle instead of always undoing each other.
+          this.steerBias = -this.steerBias;
+          // Wedged against something that isn't on our route: drop the path
+          // so the next line check picks a fresh corner (opposite side).
+          this.pathRect = null;
+          this.pathTarget = null;
+          if (this.crushBlockers(game)) this.stuckTime = 0;
+          else if (!this.escaping) this.startEscape(game, toP, dist);
+        }
+      } else {
+        this.stuckTime = Math.max(0, this.stuckTime - dt * 2);
+      }
+
+      // Dither window: measure whether movement translates into progress.
+      if (this.winT === 0) {
+        this.winStartX = this.pos.x;
+        this.winStartY = this.pos.y;
+      }
+      this.winT += dt;
+      this.winApproach += dist - newDist;
+      this.winGross += moved;
+      if (this.winT >= 0.7) {
+        const winT = this.winT;
+        const approach = this.winApproach;
+        const gross = this.winGross;
+        const net = Math.hypot(this.pos.x - this.winStartX, this.pos.y - this.winStartY);
+        this.winT = 0;
+        this.winApproach = 0;
+        this.winGross = 0;
+        // Moving a lot but ending up (almost) where it started, without
+        // net-approaching the player => vibrating against an obstacle.
+        if (approach < 10 && gross > winT * 35 && net < 14 && !this.escaping) {
+          this.stuckTime = 0;
+          this.steerBias = -this.steerBias;
+          this.pathRect = null;
+          this.pathTarget = null;
+          if (this.crushBlockers(game)) this.stuckTime = 0;
+          else this.startEscape(game, toP, dist);
+        }
+      }
+    } else {
+      this.winT = 0;
+      this.winApproach = 0;
+      this.winGross = 0;
+    }
     this.flash = Math.max(0, this.flash - dt);
+  }
+
+  /**
+   * Chase movement with obstacle navigation. Every ~0.25s the zombie checks
+   * whether a straight line to the player is clear; if a building blocks it,
+   * it walks to a waypoint just outside the nearer corner of that building
+   * and keeps advancing corner to corner until the line opens again. Between
+   * checks it simply beelines to the current waypoint (or the player), and
+   * the collision resolver slides it along wall faces.
+   */
+  private steerMove(game: IGame, dx: number, dy: number, speed: number, dt: number): Vec {
+    const map = game.map;
+    const player = game.player!;
+    if (!map) return { x: dx * speed, y: dy * speed };
+
+    this.losTimer -= dt;
+    if (this.losTimer <= 0) {
+      this.losTimer = 0.25;
+      this.refreshPath(map, player.pos);
+    }
+
+    if (this.pathTarget) {
+      const vx = this.pathTarget.x - this.pos.x;
+      const vy = this.pathTarget.y - this.pos.y;
+      const d = Math.hypot(vx, vy);
+      if (d > 24) return { x: (vx / d) * speed, y: (vy / d) * speed };
+      // Reached the corner waypoint: advance to the next corner of the
+      // blocking building.
+      this.advancePath();
+      if (this.pathTarget) {
+        const wx = this.pathTarget.x - this.pos.x;
+        const wy = this.pathTarget.y - this.pos.y;
+        const wd = Math.hypot(wx, wy);
+        if (wd > 24) return { x: (wx / wd) * speed, y: (wy / wd) * speed };
+      }
+    }
+    return { x: dx * speed, y: dy * speed };
+  }
+
+  /** True when an obstacle blocks the straight line to `target`. */
+  private wallBetween(game: IGame, target: Vec): boolean {
+    const map = game.map;
+    if (!map) return false;
+    for (let t = 0.3; t <= 0.7; t += 0.2) {
+      const sx = this.pos.x + (target.x - this.pos.x) * t;
+      const sy = this.pos.y + (target.y - this.pos.y) * t;
+      if (map.blocked({ x: sx, y: sy }, Math.max(2, this.radius * 0.3))) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Walk the line of sight from this zombie to `to` and report the first
+   * obstacle rect it crosses (and a sample point on it), or null if clear.
+   */
+  private losBlocked(map: { getNear(pos: Vec, radius: number): Rect[] }, to: Vec): { rect: Rect; entry: Vec } | null {
+    const dx = to.x - this.pos.x;
+    const dy = to.y - this.pos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1) return null;
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const step = Math.max(24, this.radius + 6);
+    for (let t = step; t < dist; t += step) {
+      const p = { x: this.pos.x + ux * t, y: this.pos.y + uy * t };
+      for (const r of map.getNear(p, this.radius)) {
+        if (circleRectCollide(p.x, p.y, this.radius, r)) return { rect: r, entry: p };
+      }
+    }
+    return null;
+  }
+
+  private refreshPath(map: { getNear(pos: Vec, radius: number): Rect[] }, playerPos: Vec): void {
+    const hit = this.losBlocked(map, playerPos);
+    if (!hit) {
+      this.pathRect = null;
+      this.pathTarget = null;
+      return;
+    }
+    // Already rounding this obstacle (or one merged into the same cluster)?
+    // Keep walking instead of re-planning every LOS tick.
+    const pr = this.pathRect;
+    const inside =
+      pr !== null &&
+      hit.rect.x >= pr.x - 1 &&
+      hit.rect.y >= pr.y - 1 &&
+      hit.rect.x + hit.rect.w <= pr.x + pr.w + 1 &&
+      hit.rect.y + hit.rect.h <= pr.y + pr.h + 1;
+    if (inside && this.pathTarget) return;
+    this.beginPath(playerPos, hit.rect, hit.entry);
+  }
+
+  /** Break out of a jam: walk toward the side with the most open room. */
+  private startEscape(game: IGame, toP: Vec, dist: number): void {
+    const map = game.map;
+    if (!map || dist < 1) return;
+    const hx = toP.x / dist;
+    const hy = toP.y / dist;
+    // Laterals (left/right of the heading, by per-zombie bias) plus back
+    // (away from the player). Every jam rotates which side is tried first,
+    // so repeated escapes sweep through all open sides instead of always
+    // undoing each other by picking the same one.
+    const left = { x: -hy, y: hx };
+    const right = { x: hy, y: -hx };
+    const base: Vec[] = this.steerBias > 0
+      ? [left, right, { x: -hx, y: -hy }]
+      : [right, left, { x: -hx, y: -hy }];
+    const start = this.escapeTry % base.length;
+    this.escapeTry = start + 1;
+    const cands: Vec[] = [];
+    for (let i = 0; i < base.length; i++) cands.push(base[(start + i) % base.length]);
+    const r = this.radius + 2;
+    let best: Vec | null = null;
+    let bestScore = -1;
+    let firstOpen: Vec | null = null;
+    for (const d of cands) {
+      let score = 0;
+      for (let t = 60; t <= 340; t += 40) {
+        const p = { x: this.pos.x + d.x * t, y: this.pos.y + d.y * t };
+        if (!map.blocked(p, r)) score = t;
+        else break;
+      }
+      if (!firstOpen && score >= 160) firstOpen = d;
+      if (score > bestScore) {
+        bestScore = score;
+        best = d;
+      }
+    }
+    // Prefer the first side with a genuinely open run; fall back to the
+    // most open direction only when boxed in.
+    const dir = firstOpen ?? (best && bestScore >= 100 ? best : null);
+    if (dir) {
+      // Repeated jams (escapeTry has rotated several times without breaking
+      // out) take a much longer detour so the zombie clears the whole
+      // obstacle side instead of orbiting its corner.
+      const longEscape = this.escapeTry >= 3;
+      this.escaping = true;
+      this.escapeDir = dir;
+      this.escapeDist = longEscape ? 420 : 170;
+      this.escapeTimer = longEscape ? 9 : 3.2;
+      this.escapeStart = { x: this.pos.x, y: this.pos.y };
+    }
+  }
+
+  /** Start rounding `rect`, heading for the corner closest to the zombie. */
+  private beginPath(playerPos: Vec, rect: Rect, entry: Vec): void {
+    this.pathRect = { ...rect };
+    const margin = this.radius + 14;
+    // Corner offsets just outside the rect: TL, TR, BR, BL.
+    const corners: Vec[] = [
+      { x: rect.x - margin, y: rect.y - margin },
+      { x: rect.x + rect.w + margin, y: rect.y - margin },
+      { x: rect.x + rect.w + margin, y: rect.y + rect.h + margin },
+      { x: rect.x - margin, y: rect.y + rect.h + margin },
+    ];
+    // Which face of the rect does the sightline cross? Round the nearer end.
+    const dl = Math.abs(entry.x - rect.x);
+    const dr = Math.abs(entry.x - (rect.x + rect.w));
+    const dt = Math.abs(entry.y - rect.y);
+    const db = Math.abs(entry.y - (rect.y + rect.h));
+    const min = Math.min(dl, dr, dt, db);
+    const vertical = min === dl || min === dr;
+    const a = vertical ? (min === dl ? 0 : 1) : min === dt ? 0 : 3;
+    const b = vertical ? (min === dl ? 3 : 2) : min === dt ? 1 : 2;
+    const da = Math.hypot(this.pos.x - corners[a].x, this.pos.y - corners[a].y);
+    const db2 = Math.hypot(this.pos.x - corners[b].x, this.pos.y - corners[b].y);
+    // Ties (zombie centred on the face) split the horde by steering bias.
+    const pick = da < db2 - 30 ? a : db2 < da - 30 ? b : this.steerBias > 0 ? a : b;
+    // Walk the perimeter in the direction whose next corner is closer to the
+    // player, so thin/wide obstacles are rounded the short way instead of
+    // marching the long way around (or into a dead pocket) first.
+    const cw = corners[(pick + 1) % 4];
+    const ccw = corners[(pick + 3) % 4];
+    const cwD = Math.hypot(playerPos.x - cw.x, playerPos.y - cw.y);
+    const ccwD = Math.hypot(playerPos.x - ccw.x, playerPos.y - ccw.y);
+    if (ccwD < cwD) {
+      this.pathOrder = [pick, (pick + 3) % 4, (pick + 2) % 4, (pick + 1) % 4];
+    } else {
+      this.pathOrder = [pick, (pick + 1) % 4, (pick + 2) % 4, (pick + 3) % 4];
+    }
+    this.pathStep = 0;
+    this.pathTarget = { ...corners[pick] };
+  }
+
+  /** Move to the next corner of the building being rounded. */
+  private advancePath(): void {
+    const rect = this.pathRect;
+    if (!rect) {
+      this.pathTarget = null;
+      return;
+    }
+    this.pathStep = (this.pathStep + 1) % this.pathOrder.length;
+    const idx = this.pathOrder[this.pathStep];
+    const margin = this.radius + 14;
+    const corners: Vec[] = [
+      { x: rect.x - margin, y: rect.y - margin },
+      { x: rect.x + rect.w + margin, y: rect.y - margin },
+      { x: rect.x + rect.w + margin, y: rect.y + rect.h + margin },
+      { x: rect.x - margin, y: rect.y + rect.h + margin },
+    ];
+    this.pathTarget = { ...corners[idx] };
   }
 
   private separation(game: IGame): Vec {
@@ -198,6 +538,22 @@ export class Zombie {
     return { x: px * 2, y: py * 2 };
   }
 
+  /**
+   * Big zombies bulldoze the light scenery they have wedged against (small
+   * trees, bushes, hydrants…). Returns true when an obstacle was smashed.
+   */
+  protected crushBlockers(game: IGame): boolean {
+    if (!this.crushLight) return false;
+    const map = game.map as unknown as {
+      tryCrushSmallObstacle?: (pos: Vec, radius: number) => boolean;
+    } | null;
+    if (!map || !map.tryCrushSmallObstacle) return false;
+    if (map.tryCrushSmallObstacle(this.pos, this.radius + 30)) {
+      game.particles?.deathBurst?.(this.pos, "#7A6A4A");
+      return true;
+    }
+    return false;
+  }
   protected wantsToStop(_dist: number): boolean {
     return false;
   }
@@ -350,6 +706,7 @@ export class BossZombie extends Zombie {
   constructor(pos: Vec, opts: ConstructorOpts) {
     super(pos, opts);
     this.detectionRange = 100000;
+    this.crushLight = true;
   }
   private currentPhase(): number {
     const f = this.hp / this.maxHp;

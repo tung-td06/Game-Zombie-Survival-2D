@@ -35,7 +35,7 @@ export function getPixelArtAtlas(ctx: CanvasRenderingContext2D): PixelArtAtlas {
   return atlas;
 }
 
-function rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
+export function rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
   ctx.fillStyle = color;
   ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
 }
@@ -46,11 +46,11 @@ function strokeRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numb
   ctx.strokeRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
 }
 
-function px(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, size = PIXEL): void {
+export function px(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, size = PIXEL): void {
   rect(ctx, x, y, size, size, color);
 }
 
-function worldHash(seed: number, x: number, y: number): number {
+export function worldHash(seed: number, x: number, y: number): number {
   return pixelVariant(seed + 71, Math.floor(x / 8), Math.floor(y / 8), 997);
 }
 
@@ -160,6 +160,150 @@ export function drawGroundTile(
   if (variant === 3) {
     rect(ctx, sx + 8, sy + 39, 16, 6, "#1C302A");
     rect(ctx, sx + 10, sy + 40, 11, 2, "#2E5146");
+  }
+}
+
+/**
+ * Per-tile terrain zone wash. Cell = 260px world block. Makes the open land
+ * read as districts instead of one flat meadow: damp hollows, dirt yards,
+ * gravel lots, mossy patches and bare concrete plazas. Deliberately very
+ * low alpha so gameplay stays readable.
+ */
+export function drawTileZone(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  worldX: number,
+  worldY: number,
+  seed: number,
+): void {
+  const cx = Math.floor(worldX / 260);
+  const cy = Math.floor(worldY / 260);
+  const h = worldHash(seed + 509, cx, cy);
+  const m = h % 16;
+  if (m === 0) {
+    ctx.fillStyle = "rgba(26,34,20,0.16)";
+  } else if (m === 1 || m === 8) {
+    ctx.fillStyle = "rgba(82,72,46,0.14)";
+  } else if (m === 2 || m === 9) {
+    ctx.fillStyle = "rgba(96,94,84,0.10)";
+  } else if (m === 3) {
+    ctx.fillStyle = "rgba(42,54,30,0.14)";
+  } else if (m === 4) {
+    ctx.fillStyle = "rgba(30,38,26,0.18)";
+  } else if (m === 5) {
+    ctx.fillStyle = "rgba(116,88,60,0.10)";
+  } else {
+    return;
+  }
+  ctx.fillRect(sx, sy, TILE_SIZE, TILE_SIZE);
+}
+
+/**
+ * Sparse macro decals for ground overlays. Painted by the map on cells that
+ * are away from roads and obstacles, so litter/remains never sit on top of
+ * gameplay geometry. `h` is a stable hash of the cell; kind selects what
+ * cluster appears. All specks derive from world coordinates.
+ */
+export function drawGroundDecal(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  seed: number,
+  h: number,
+): void {
+  const kind = h % 12;
+  if (kind === 0) {
+    // Scattered papers / cardboard.
+    rect(ctx, x, y, 7, 5, "#A8A492");
+    rect(ctx, x + 9, y + 7, 6, 4, "#8F8A78");
+    rect(ctx, x + 15, y - 3, 5, 4, "#B5B09C");
+    rect(ctx, x + 12, y + 12, 6, 4, "#9E9984");
+    px(ctx, x + 1, y + 1, "#C9C5B4", 2);
+  } else if (kind === 1) {
+    // Rusted cans.
+    px(ctx, x, y, "#7C8786", 2);
+    px(ctx, x + 4, y + 2, "#9AA5A2", 3);
+    px(ctx, x + 2, y + 6, "#5F6B68", 2);
+    px(ctx, x - 4, y + 4, "#848F8C", 2);
+  } else if (kind === 2) {
+    // Broken glass glints.
+    px(ctx, x + 2, y, "#AFC6CF", 2);
+    px(ctx, x + 6, y + 3, "#8FB2BE", 2);
+    px(ctx, x, y + 5, "#7D9BA8", 2);
+    px(ctx, x + 9, y + 7, "#C2D8DE", 1);
+    px(ctx, x + 4, y + 8, "#9DBBC6", 2);
+  } else if (kind === 3) {
+    // Old dried blood stain.
+    ctx.fillStyle = "rgba(64,18,16,0.5)";
+    ctx.beginPath();
+    ctx.arc(x + 5, y + 5, 6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(84,26,22,0.4)";
+    ctx.beginPath();
+    ctx.arc(x + 12, y + 12, 4, 0, Math.PI * 2);
+    ctx.fill();
+    px(ctx, x + 1, y + 1, "#4E1C18", 2);
+    px(ctx, x + 8, y + 7, "#5E241F", 2);
+  } else if (kind === 4) {
+    // Trash bag / bundle.
+    rect(ctx, x, y, 10, 9, "#2C2E33");
+    rect(ctx, x + 6, y + 4, 8, 7, "#383B41");
+    px(ctx, x + 2, y + 2, "#1F2126", 2);
+    rect(ctx, x + 3, y + 11, 6, 2, "#3E4048");
+  } else if (kind === 5) {
+    // Old oil / coolant stain.
+    ctx.fillStyle = "rgba(10,12,16,0.35)";
+    ctx.beginPath();
+    ctx.ellipse ? ctx.ellipse(x + 5, y + 4, 9, 6, 0.4, 0, Math.PI * 2) : ctx.arc(x + 5, y + 4, 7, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (kind === 6) {
+    // Mangled fence / wire + debris.
+    ctx.strokeStyle = "rgba(40,44,40,0.6)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 2);
+    ctx.lineTo(x + 12, y + 6);
+    ctx.moveTo(x + 4, y);
+    ctx.lineTo(x + 15, y + 3);
+    ctx.stroke();
+    px(ctx, x + 12, y + 8, "#6A675C", 3);
+    px(ctx, x + 16, y + 5, "#55534A", 2);
+  } else if (kind === 7) {
+    // Clothing / remains tatter.
+    rect(ctx, x, y, 8, 5, "#4A5560");
+    rect(ctx, x + 5, y + 4, 7, 6, "#5A6772");
+    rect(ctx, x + 2, y + 8, 6, 4, "#46505A");
+    px(ctx, x + 3, y + 3, "#2E3842", 2);
+  } else if (kind === 8) {
+    // Concrete chunks.
+    px(ctx, x, y, "#6E6F6A", 4);
+    px(ctx, x + 6, y + 2, "#585A56", 3);
+    px(ctx, x + 3, y + 7, "#7A7B74", 3);
+    px(ctx, x + 10, y + 8, "#4E504C", 3);
+  } else if (kind === 9) {
+    // Fallen branches / twigs.
+    ctx.strokeStyle = "rgba(64,50,34,0.65)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x, y + 6);
+    ctx.lineTo(x + 14, y + 2);
+    ctx.moveTo(x + 7, y + 4);
+    ctx.lineTo(x + 5, y - 1);
+    ctx.moveTo(x + 10, y + 3);
+    ctx.lineTo(x + 13, y - 2);
+    ctx.stroke();
+  } else if (kind === 10) {
+    // Muddy footprint trail.
+    ctx.fillStyle = "rgba(58,44,28,0.35)";
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.arc(x + i * 6, y + (i % 2) * 6, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    // Empty cell.
+    return;
   }
 }
 
@@ -523,18 +667,9 @@ export function drawPlayerSprite(
   flash: boolean,
 ): void {
   const bob = walkCycle ? Math.sin(walkCycle) * 2 : 0;
-  const dir = Math.round(angle / (Math.PI / 2)) * (Math.PI / 2);
   const r = recoil > 0 ? 3 : 0;
-  ctx.save();
-  ctx.translate(Math.round(pos.x), Math.round(pos.y + bob));
-  ctx.rotate(dir);
-  rect(ctx, -13, -12, 26, 29, "#111921");
-  rect(ctx, -10, -14, 20, 20, flash ? "#EAFBFF" : "#57CDE5");
-  rect(ctx, -7, -11, 14, 8, "#A8E8EF");
-  rect(ctx, -11, 8, 8, 11, "#2A7699");
-  rect(ctx, 3, 8, 8, 11, "#235F80");
-  rect(ctx, -8, 12 + Math.sin(walkCycle) * 2, 5, 8, "#1B2C3B");
-  rect(ctx, 3, 12 - Math.sin(walkCycle) * 2, 5, 8, "#1B2C3B");
+  const sx = Math.round(pos.x);
+  const sy = Math.round(pos.y + bob);
   const gun =
     weapon === "shotgun"
       ? 29
@@ -551,12 +686,45 @@ export function drawPlayerSprite(
                 : weapon === "crossbow"
                   ? 32
                   : 23;
-  rect(ctx, 5 - r, -5, gun, 7, "#171A20");
-  rect(ctx, 9 - r, -3, gun - 4, 3, weapon === "shotgun" || weapon === "crossbow" ? "#A2713E" : weapon === "flamethrower" ? "#C2501E" : weapon === "plasma" ? "#7A4FBF" : "#66717A");
-  rect(ctx, 4 - r, 2, 10, 5, "#3B414A");
+  const weaponColor =
+    weapon === "shotgun" || weapon === "crossbow"
+      ? "#A2713E"
+      : weapon === "flamethrower"
+        ? "#C2501E"
+        : weapon === "plasma"
+          ? "#7A4FBF"
+          : "#66717A";
+
+  // Body: always upright (head up, feet pointing down) so the character
+  // never appears upside down; only mirror it when aiming to the left.
+  ctx.save();
+  ctx.translate(sx, sy);
+  // Soft contact shadow beneath the feet.
+  ctx.fillStyle = "rgba(0,0,0,0.26)";
+  ctx.beginPath();
+  ctx.arc(0, 15, 12, 0, Math.PI * 2);
+  ctx.fill();
+  if (Math.cos(angle) < -0.2) ctx.scale(-1, 1);
+  rect(ctx, -13, -12, 26, 29, "#111921");
+  rect(ctx, -10, -14, 20, 20, flash ? "#EAFBFF" : "#57CDE5");
+  rect(ctx, -7, -11, 14, 8, "#A8E8EF");
+  rect(ctx, -11, 8, 8, 11, "#2A7699");
+  rect(ctx, 3, 8, 8, 11, "#235F80");
+  rect(ctx, -8, 13 + Math.sin(walkCycle) * 2, 5, 7, "#1B2C3B");
+  rect(ctx, 3, 13 - Math.sin(walkCycle) * 2, 5, 7, "#1B2C3B");
+  ctx.restore();
+
+  // Weapon: freely rotates to the aim angle around the fixed upright body.
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(angle);
+  rect(ctx, -2, -3, 10, 6, "#3B414A"); // stock / shoulder
+  rect(ctx, 4 - r, -3.5, gun, 6, "#171A20");
+  rect(ctx, 9 - r, -1.5, gun - 6, 3, weaponColor);
+  rect(ctx, 1 - r, -2, 5, 4, "#2A7699"); // gripping hand
   if (recoil > 0) {
-    rect(ctx, gun + 5 - r, -8, 7, 14, "#FFD15C");
-    rect(ctx, gun + 12 - r, -4, 5, 6, "#FFF1A0");
+    rect(ctx, gun + 4 - r, -7, 7, 13, "#FFD15C");
+    rect(ctx, gun + 10 - r, -3, 5, 5, "#FFF1A0");
   }
   ctx.restore();
 }
@@ -586,7 +754,15 @@ export function drawZombieSprite(
   const gait = Math.sin((pos.x + pos.y) * 0.04 + performance.now() / 130) * 2 * scale;
   ctx.save();
   ctx.translate(Math.round(pos.x), Math.round(pos.y));
-  ctx.rotate(Math.round(angle / (Math.PI / 2)) * (Math.PI / 2));
+  // Soft contact shadow beneath the feet.
+  ctx.fillStyle = "rgba(0,0,0,0.24)";
+  ctx.beginPath();
+  ctx.arc(0, 12 * scale, 12 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  // Body always stands upright (head up / feet down) — it never flips upside
+  // down; only mirror it when moving horizontally to the left.
+  const flip = Math.cos(angle) < -0.25;
+  if (flip) ctx.scale(-1, 1);
   if (kind === "boss") {
     ctx.globalAlpha = 0.24 + Math.abs(gait) * 0.04;
     ctx.fillStyle = "#C2294D"; ctx.beginPath(); ctx.arc(0, 0, radius + 11, 0, Math.PI * 2); ctx.fill();

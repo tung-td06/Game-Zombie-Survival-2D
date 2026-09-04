@@ -9,6 +9,7 @@ export const HEALTH_REFILL_PRICE = 150;
 export const MAX_HP_PRICE = 300;
 export const ARMOR_PRICE = 500;
 export const AMMO_PACK_PRICE = 150;
+export const DRONE_PRICE = 10000;
 
 export class Shop {
   data: Record<string, WeaponData>;
@@ -31,6 +32,7 @@ export class Shop {
       const list = save.data.unlocked_weapons;
       if (!list.includes(wid)) list.push(wid);
     } else {
+      if (key === "drone" && p.hasDrone) return false;
       const price = priceFor(key);
       if (p.coins < price) return false;
       p.coins -= price;
@@ -44,6 +46,9 @@ export class Shop {
       } else if (key === "max_hp") {
         p.maxHp += 20;
         p.heal(20);
+      } else if (key === "drone") {
+        p.hasDrone = true;
+        save.data["has_drone"] = true;
       } else {
         return false;
       }
@@ -66,6 +71,8 @@ function priceFor(key: string): number {
       return ARMOR_PRICE;
     case "max_hp":
       return MAX_HP_PRICE;
+    case "drone":
+      return DRONE_PRICE;
     default:
       return Infinity;
   }

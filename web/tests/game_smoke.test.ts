@@ -80,6 +80,7 @@ class FakeCtx {
   restore() {}
   translate() {}
   rotate() {}
+  scale() {}
   drawImage() {}
   strokeRect() {}
   measureText() { return { width: 0 } as any; }

@@ -61,7 +61,8 @@ export class Player {
   pierceBonus = 0;
   skillPoints = 0;
 
-  // Drone companion (always active from the start).
+  // Drone companion ("UFO") — unlocked by buying it in the shop.
+  hasDrone = false;
   droneAngle = 0;
   droneCooldown = 0;
   droneDamage = 18;
@@ -195,7 +196,7 @@ export class Player {
     this.recoilTimer = Math.max(0, this.recoilTimer - dt);
     this.invuln = Math.max(0, this.invuln - dt);
     if (this.regen > 0) this.heal(this.regen * dt);
-    this.droneTick(dt, game);
+    if (this.hasDrone) this.droneTick(dt, game);
   }
 
   /** Orbiting drone that auto-fires at the nearest zombie in range. */
@@ -315,24 +316,26 @@ export class Player {
     );
 
     // Drone companion: orbits the player and glows softly.
-    const dxx = sp.x + Math.cos(this.droneAngle) * 40;
-    const dyy = sp.y + Math.sin(this.droneAngle) * 40 - 14;
-    ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.arc(dxx, dyy, 11, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = "#3A3A44";
-    ctx.beginPath();
-    ctx.arc(dxx, dyy, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#8FE8FF";
-    ctx.beginPath();
-    ctx.arc(dxx, dyy, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#EAFBFF";
-    ctx.beginPath();
-    ctx.arc(dxx - 2, dyy - 2, 2, 0, Math.PI * 2);
-    ctx.fill();
+    if (this.hasDrone) {
+      const dxx = sp.x + Math.cos(this.droneAngle) * 40;
+      const dyy = sp.y + Math.sin(this.droneAngle) * 40 - 14;
+      ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(dxx, dyy, 11, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "#3A3A44";
+      ctx.beginPath();
+      ctx.arc(dxx, dyy, 8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#8FE8FF";
+      ctx.beginPath();
+      ctx.arc(dxx, dyy, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#EAFBFF";
+      ctx.beginPath();
+      ctx.arc(dxx - 2, dyy - 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 }
