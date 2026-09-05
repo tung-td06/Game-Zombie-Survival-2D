@@ -10,6 +10,7 @@ import type { InputManager } from "@/game/input";
 import type { Game } from "@/game/game";
 import VirtualJoystick from "./VirtualJoystick";
 import FireButton from "./FireButton";
+import BombButton from "./BombButton";
 import WeaponSwitcher from "./WeaponSwitcher";
 import PauseButton from "./PauseButton";
 
@@ -117,6 +118,17 @@ export default function TouchHUD({ input, gameRef }: Props) {
         }}
       >
         <FireButton input={input} gameRef={gameRef} />
+      </div>
+      {/* Bomb sits above FIRE so a thumb reaches both without overlap. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: "calc(max(16px, env(safe-area-inset-bottom)) + 124px)",
+          right: "max(16px, env(safe-area-inset-right))",
+          pointerEvents: "auto",
+        }}
+      >
+        <BombButton input={input} gameRef={gameRef} />
       </div>
     </div>
   );

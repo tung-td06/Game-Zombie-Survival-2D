@@ -804,6 +804,14 @@ export default function Home() {
                   <span style={controlDesc}>Hút nhanh Loot quanh người</span>
                 </li>
                 <li style={controlRow}>
+                  <span
+                    style={{ ...keyBadge, color: C.gold, borderColor: C.gold }}
+                  >
+                    F
+                  </span>
+                  <span style={controlDesc}>Ném bom (nổ theo vùng)</span>
+                </li>
+                <li style={controlRow}>
                   <span style={keyBadge}>ESC</span>
                   <span style={controlDesc}>Tạm dừng</span>
                 </li>

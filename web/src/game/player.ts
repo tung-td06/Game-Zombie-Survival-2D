@@ -18,6 +18,12 @@ import type { IGame } from "./types";
 import type { Vec } from "./vec";
 import type { Camera } from "./camera";
 import { drawPlayerSprite } from "./pixelArt";
+import { BOMB_MAX, BOMB_START_COUNT, BOMB_THROW_COOLDOWN, Grenade } from "./grenade";
+
+/** UFO drone companion tuning. */
+const DRONE_ORBIT = 40;
+const DRONE_RANGE = 280;
+const DRONE_FIRE_COOLDOWN = 0.55;
 
 export interface PlayerOpts {
   unlocked?: string[];
@@ -72,6 +78,13 @@ export class Player {
 
   weapons: WeaponManager;
 
+  // Throwable bombs ("BOMB PACK" in the shop, F to throw).
+  bombs = BOMB_START_COUNT;
+  maxBombs = BOMB_MAX;
+  bombCooldown = 0;
+  /** Suppresses the repeated "NO BOMBS" toast while F is mashed. */
+  private noBombTimer = 0;
+
   flashTimer = 0;
   recoilTimer = 0;
   emptyClickTimer = 0;
@@ -106,6 +119,33 @@ export class Player {
 
   addArmor(amount: number): void {
     this.armor = Math.min(100, this.armor + amount);
+  }
+
+  /** Add bombs up to the carry cap; returns how many were actually taken. */
+  addBombs(amount: number): number {
+    const before = this.bombs;
+    this.bombs = Math.min(this.maxBombs, this.bombs + Math.max(0, Math.floor(amount)));
+    return this.bombs - before;
+  }
+
+  /** Lob a bomb at the current aim point. Returns false if none was thrown. */
+  throwBomb(game: IGame): boolean {
+    if (this.previewOnly || this.dead || this.bombCooldown > 0) return false;
+    if (this.bombs <= 0) {
+      if (this.noBombTimer <= 0) {
+        this.noBombTimer = 1;
+        game.audio.playSFX("ui.purchase_failed", this.pos);
+        game.toast("NO BOMBS LEFT");
+      }
+      return false;
+    }
+    this.bombs -= 1;
+    this.bombCooldown = BOMB_THROW_COOLDOWN;
+    const aim = game.input.getAimWorld(game.camera);
+    game.grenades.push(Grenade.toward(this.pos, aim));
+    game.audio.playSFX("player.dash", this.pos);
+    this.recoilTimer = 0.09;
+    return true;
   }
 
   /** Push the player away from `source`, sliding along walls like a zombie's knockback. */
@@ -202,6 +242,9 @@ export class Player {
         game.audio.playSFX(`weapon.${w.id}.reload`, this.pos);
       }
     }
+    if (!stunned && (inp.isPressed("throw_bomb") || inp.bombPressed)) {
+      this.throwBomb(game);
+    }
     if (!stunned && wantFire && w.canFire(wantFire || w.auto)) {
       this.fire(game);
     } else if (!stunned && wantFire && !w.reloading && w.ammo === 0 && w.cooldown <= 0 && this.emptyClickTimer <= 0) {
@@ -212,9 +255,19 @@ export class Player {
 
     this.flashTimer = Math.max(0, this.flashTimer - dt);
     this.recoilTimer = Math.max(0, this.recoilTimer - dt);
+    this.bombCooldown = Math.max(0, this.bombCooldown - dt);
+    this.noBombTimer = Math.max(0, this.noBombTimer - dt);
     this.invuln = Math.max(0, this.invuln - dt);
     if (this.regen > 0) this.heal(this.regen * dt);
     if (this.hasDrone) this.droneTick(dt, game);
+  }
+
+  /** World position of the orbiting drone (matches how it is drawn). */
+  dronePos(): Vec {
+    return {
+      x: this.pos.x + Math.cos(this.droneAngle) * DRONE_ORBIT,
+      y: this.pos.y + Math.sin(this.droneAngle) * DRONE_ORBIT - 14,
+    };
   }
 
   /** Orbiting drone that auto-fires at the nearest zombie in range. */
@@ -222,24 +275,28 @@ export class Player {
     this.droneAngle += dt * 1.6;
     this.droneCooldown -= dt;
     if (this.droneCooldown > 0) return;
+
+    let target: { pos: Vec } | null = null;
+    let bestDist = DRONE_RANGE * DRONE_RANGE;
     for (const z of game.zombies) {
       if (z.dying) continue;
       const dx = z.pos.x - this.pos.x;
       const dy = z.pos.y - this.pos.y;
-      if (dx * dx + dy * dy < 280 * 280) {
-        const muzzle: Vec = {
-          x: this.pos.x + Math.cos(this.droneAngle + Math.PI) * 36,
-          y: this.pos.y + Math.sin(this.droneAngle + Math.PI) * 36,
-        };
-        const ang = Math.atan2(z.pos.y - muzzle.y, z.pos.x - muzzle.x);
-        game.bullets.push(
-          new Bullet(muzzle, ang, 1200, this.droneDamage, "player"),
-        );
-        game.particles.muzzleFlash(muzzle, ang);
-        this.droneCooldown = 0.55;
-        return;
+      const d2 = dx * dx + dy * dy;
+      if (d2 < bestDist) {
+        bestDist = d2;
+        target = z;
       }
     }
+    if (!target) return;
+
+    const muzzle = this.dronePos();
+    const ang = Math.atan2(target.pos.y - muzzle.y, target.pos.x - muzzle.x);
+    game.bullets.push(
+      new Bullet(muzzle, ang, 1200, this.droneDamage, "player"),
+    );
+    game.particles.muzzleFlash(muzzle, ang);
+    this.droneCooldown = DRONE_FIRE_COOLDOWN;
   }
 
   private fire(game: IGame): void {
@@ -335,8 +392,8 @@ export class Player {
 
     // Drone companion: orbits the player and glows softly.
     if (this.hasDrone) {
-      const dxx = sp.x + Math.cos(this.droneAngle) * 40;
-      const dyy = sp.y + Math.sin(this.droneAngle) * 40 - 14;
+      const dxx = sp.x + Math.cos(this.droneAngle) * DRONE_ORBIT;
+      const dyy = sp.y + Math.sin(this.droneAngle) * DRONE_ORBIT - 14;
       ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
       ctx.lineWidth = 1;
       ctx.beginPath();

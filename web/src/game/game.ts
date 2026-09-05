@@ -14,12 +14,13 @@ import { Player } from "./player";
 import { QuestSystem } from "./quest";
 import { SaveManager } from "./save";
 import { DRONE_PRICE, Shop } from "./shop";
-import { UpgradeSystem } from "./upgrade";
+import { LEVELUP_PICK_LOCK, UpgradeSystem, rollLevelUpChoices } from "./upgrade";
 import { WaveManager } from "./waveManager";
 import { ZombieSpawner } from "./spawner";
 import { Bullet } from "./bullet";
 import { Loot, dropsFor } from "./loot";
 import { SupplyCrate, spawnSupplyCrates, CRATE_SPAWN_INTERVAL } from "./supplyCrate";
+import { Grenade, BOMB_PACK_AMOUNT, BOMB_PACK_PRICE, BOMB_START_COUNT } from "./grenade";
 import { mulberry32, type Rng } from "../lib/rng";
 import { Client } from "./network";
 import { WEAPON_ORDER } from "./weapon";
@@ -99,6 +100,7 @@ export class Game {
   zombies: import("./zombie").Zombie[] = [];
   bullets: Bullet[] = [];
   enemyBullets: Bullet[] = [];
+  grenades: Grenade[] = [];
   loots: Loot[] = [];
   supplyCrates: SupplyCrate[] = [];
 
@@ -123,6 +125,12 @@ export class Game {
   waveBanner: WaveBanner | null = null;
   newHigh = false;
   upgradeChoices: string[] = [];
+  /**
+   * Seconds left on the level-up card lock. While > 0 the three cards cannot be
+   * clicked, so a click meant for shooting can't burn the pick the instant the
+   * overlay opens. The overlay then waits indefinitely for a real choice.
+   */
+  levelUpLockTimer = 0;
 
   // Data caches
   weaponData: Record<string, WeaponData> = {};
@@ -292,9 +300,8 @@ export class Game {
           this.state === UPGRADE_INFO
         ) {
           this.doAction("back");
-        }
-      } else if (this.state === UPGRADE) {
-        if (k === "Escape") {
+        } else if (this.state === UPGRADE) {
+          // No-op while a level-up pick is pending — doAction() guards it.
           this.doAction("upgrade_done");
         }
       }
@@ -363,6 +370,10 @@ export class Game {
   // ----------------------------------------------------------- update --
   private update() {
     if (this.state === PLAYING) this.updatePlaying(this.dt);
+    else if (this.state === UPGRADE && this.levelUpLockTimer > 0) {
+      // Countdown before the level-up cards accept clicks.
+      this.levelUpLockTimer = Math.max(0, this.levelUpLockTimer - this.dt);
+    }
     // Tick toasts always so they fade in menus too
     this.tickToasts(this.dt);
   }
@@ -588,6 +599,11 @@ export class Game {
     for (const b of this.enemyBullets) b.update(dt, this);
     this.enemyBullets = this.enemyBullets.filter((b) => !b.dead);
 
+    for (const g of this.grenades) g.update(dt, this);
+    this.grenades = this.grenades.filter((g) => !g.dead);
+    // A grenade blast can kill outright, so prune corpses before loot ticks.
+    this.zombies = this.zombies.filter((z) => z.hp > 0);
+
     for (const l of this.loots) l.update(dt, this);
     this.loots = this.loots.filter((l) => !l.dead);
 
@@ -747,6 +763,7 @@ export class Game {
       for (const z of this.zombies) z.draw(ctx, this.camera);
       for (const b of this.bullets) b.draw(ctx, this.camera);
       for (const b of this.enemyBullets) b.draw(ctx, this.camera);
+      for (const g of this.grenades) g.draw(ctx, this.camera);
       for (const l of this.loots) l.draw(ctx, this.camera);
       for (const c of this.supplyCrates) c.draw(ctx, this.camera, this);
       this.particles.draw(ctx, this.camera);
@@ -863,6 +880,7 @@ export class Game {
     }
     for (const loot of this.loots.slice(0, 20)) lights.push({ pos: this.camera.apply(loot.pos), radius: 38, color: "#67D9F5", intensity: 0.5 });
     for (const bullet of this.enemyBullets.slice(0, 28)) lights.push({ pos: this.camera.apply(bullet.pos), radius: 28, color: "#FF655A", intensity: 0.75 });
+    for (const g of this.grenades) lights.push({ pos: this.camera.apply(g.pos), radius: 44, color: "#FF7A3C", intensity: 0.6 });
     return lights;
   }
 
@@ -908,6 +926,13 @@ export class Game {
       label: "AMMO PACK",
       detail: `+${cw.magazineSize * 3} reserve (${cw.name})`,
       price: 150,
+      owned: false,
+    });
+    out.push({
+      key: "bomb_pack",
+      label: "BOMB PACK",
+      detail: `+${BOMB_PACK_AMOUNT} throwable bombs (${p.bombs}/${p.maxBombs}) — press F`,
+      price: BOMB_PACK_PRICE,
       owned: false,
     });
     out.push({
@@ -1004,6 +1029,19 @@ export class Game {
         } else {
           this.toast("NOT ENOUGH CASH");
         }
+      } else if (payload === "bomb") {
+        if (p.bombs >= p.maxBombs) {
+          this.toast("BOMB BAG FULL");
+        } else if (p.coins >= BOMB_PACK_PRICE) {
+          p.coins -= BOMB_PACK_PRICE;
+          const got = p.addBombs(BOMB_PACK_AMOUNT);
+          this.save.coins = p.coins;
+          this.save.save();
+          this.audio.play("buy");
+          this.toast(`PURCHASED: +${got} BOMB${got === 1 ? "" : "S"}`);
+        } else {
+          this.toast("NOT ENOUGH CASH");
+        }
       } else if (payload === "medkit") {
         const price = 200;
         if (p.hp >= p.maxHp) {
@@ -1029,6 +1067,16 @@ export class Game {
           this.save.save();
           this.audio.play("buy");
           this.toast("PURCHASED: +15 ARMOR");
+        } else {
+          this.toast("NOT ENOUGH CASH");
+        }
+      } else if (payload === "drone") {
+        // UFO drone: one-time unlock, shares price/persistence with the
+        // main shop entry via Shop.buy().
+        if (p.hasDrone) {
+          this.toast("DRONE ALREADY ACTIVE");
+        } else if (this.shop.buy("drone", this)) {
+          this.toast("PURCHASED: UFO DRONE");
         } else {
           this.toast("NOT ENOUGH CASH");
         }
@@ -1105,33 +1153,48 @@ export class Game {
       // Skill tree purchase: costs one skill point.
       const uid = action.slice("upgrade:".length);
       const p = this.player!;
+      const picking = this.isLevelUpPick();
+      if (picking) {
+        // Level-up card pick: locked for the first seconds (anti-misclick) and
+        // restricted to the three rolled skills.
+        if (this.levelUpLockTimer > 0) return;
+        if (!this.upgradeChoices.includes(uid)) return;
+      }
       const limit = this.upgrades.limitFor(uid);
       if ((p.upgradeLevels[uid] ?? 0) >= limit) {
         this.toast("MAXED OUT");
-      } else if (p.skillPoints <= 0) {
+      } else if (!picking && p.skillPoints <= 0) {
         this.toast("NO SKILL POINTS — LEVEL UP TO EARN ONE");
       } else {
         this.upgrades.apply(uid, p as unknown as Parameters<UpgradeSystem["apply"]>[1], this);
-        p.skillPoints -= 1;
+        p.skillPoints = Math.max(0, p.skillPoints - 1);
         this.save.data["player_level"] = p.level;
         this.save.data["xp"] = p.xp;
         this.save.coins = p.coins;
         this.save.save();
         this.audio.play("buy");
         this.toast(`LEARNED ${uid.toUpperCase().replace(/_/g, " ")}`);
+        if (picking) {
+          p.pendingLevels = Math.max(0, p.pendingLevels - 1);
+          if (p.pendingLevels > 0) {
+            // Stacked level-ups: roll a fresh offer and re-arm the lock.
+            this.rollUpgradeChoices();
+            if (this.upgradeChoices.length > 0) return;
+            p.pendingLevels = 0;
+          }
+          this.closeUpgradeScreen();
+        }
       }
     } else if (action === "upgrade_done") {
-      // Leave the skill tree (level-up overlay or entered from pause).
-      this.player!.pendingLevels = 0;
-      const target =
-        this.returnState === PLAYING || this.returnState === PAUSED
-          ? this.returnState
-          : PLAYING;
-      this.restoreAudioForState(target);
-      this.state = target;
+      // Leave the skill tree. During a level-up pick there is no way out but
+      // choosing a skill, so the overlay can't be dismissed by a stray click.
+      if (this.isLevelUpPick()) return;
+      this.closeUpgradeScreen();
     } else if (action === "skill_tree") {
       // Pause menu: open the skill tree (points can be spent anytime).
       if (!this.player) this.createPreviewPlayer();
+      this.upgradeChoices = [];
+      this.levelUpLockTimer = 0;
       this.returnState = PAUSED;
       this.state = UPGRADE;
       if (typeof document !== "undefined" && document.pointerLockElement) {
@@ -1288,6 +1351,7 @@ export class Game {
     this.zombies = [];
     this.bullets = [];
     this.enemyBullets = [];
+    this.grenades = [];
     this.loots = [];
     this.supplyCrates = [];
     this.crateTimer = CRATE_SPAWN_INTERVAL;
@@ -1353,6 +1417,12 @@ export class Game {
       username: this.username,
     });
     this.player.hasDrone = !!pData.hasDrone;
+    // Bombs were added after the first save schema, so older saves fall back
+    // to the fresh-run stock instead of stranding the player with zero.
+    this.player.bombs = Math.min(
+      this.player.maxBombs,
+      Math.max(0, Math.floor(pData.bombs ?? BOMB_START_COUNT)),
+    );
 
     // Restore upgrades
     this.player.upgradeLevels = {};
@@ -1416,6 +1486,7 @@ export class Game {
     this.zombies = [];
     this.bullets = [];
     this.enemyBullets = [];
+    this.grenades = [];
 
     // 6. Restore Loot drops
     this.loots = dbSave.world_data?.loot?.map((l: any) => new Loot(l.pos, l.kind, l.amount, l.payload)) ?? [];
@@ -1475,6 +1546,7 @@ export class Game {
         skillPoints: this.player.skillPoints,
         upgradeLevels: this.player.upgradeLevels,
         hasDrone: this.player.hasDrone,
+        bombs: this.player.bombs,
       },
       weapons: {
         currentId: this.player.weapons.currentId,
@@ -1544,9 +1616,38 @@ export class Game {
     }, 2000);
   }
 
-  enterUpgradeChoice(): void {
-    // Level-ups grant skill points; open the SKILL TREE to spend them.
+  /** True while the level-up 3-card overlay is waiting for a choice. */
+  isLevelUpPick(): boolean {
+    return (
+      this.state === UPGRADE &&
+      !!this.player &&
+      this.player.pendingLevels > 0 &&
+      this.upgradeChoices.length > 0
+    );
+  }
+
+  /** Close the skill-tree / level-up overlay and resume where we came from. */
+  closeUpgradeScreen(): void {
+    if (this.player) this.player.pendingLevels = 0;
     this.upgradeChoices = [];
+    this.levelUpLockTimer = 0;
+    const target =
+      this.returnState === PLAYING || this.returnState === PAUSED
+        ? this.returnState
+        : PLAYING;
+    this.restoreAudioForState(target);
+    this.state = target;
+  }
+
+  enterUpgradeChoice(): void {
+    // A level-up offers ONE random skill per skill-tree branch (3 cards). The
+    // overlay stays up until the player actually picks one.
+    this.rollUpgradeChoices();
+    if (this.upgradeChoices.length === 0) {
+      // Every skill is capped — nothing to offer, so don't stall the run.
+      this.player!.pendingLevels = 0;
+      return;
+    }
     this.returnState = PLAYING;
     this.state = UPGRADE;
     this.audio.play("levelup");
@@ -1555,6 +1656,15 @@ export class Game {
     if (typeof document !== "undefined" && document.pointerLockElement) {
       document.exitPointerLock();
     }
+  }
+
+  /** Roll a fresh 3-card offer and restart the anti-misclick lock. */
+  rollUpgradeChoices(): void {
+    const p = this.player!;
+    this.upgradeChoices = rollLevelUpChoices(p.upgradeLevels, (uid) =>
+      this.upgrades.limitFor(uid),
+    );
+    this.levelUpLockTimer = LEVELUP_PICK_LOCK;
   }
 
   gameOver(): void {

@@ -143,8 +143,14 @@ export class SupplyCrate {
         const ammoBonus = 10 + Math.floor(rng.next() * 11); // 10 to 20 bullets
         w.addReserve(ammoBonus);
 
+        // Mixed crates are the only free source of throwable bombs.
+        const bombs = p.addBombs(1);
+
         game.particles.floatText(this.pos, `+${heal} HP  +${armor} ARMOR`, "#D096FF");
         game.particles.floatText({ x: this.pos.x, y: this.pos.y - 15 }, `+${ammoBonus} AMMO  +$${coins}`, "#DEDED6");
+        if (bombs > 0) {
+          game.particles.floatText({ x: this.pos.x, y: this.pos.y - 30 }, `+${bombs} BOMB`, "#8FCC6E");
+        }
         game.toast("SUPPLY CRATE — STOCKED UP!");
         break;
       }

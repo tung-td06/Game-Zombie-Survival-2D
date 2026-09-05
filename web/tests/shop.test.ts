@@ -1,6 +1,7 @@
 // tests/shop.test.ts
 import { describe, test, expect, vi } from "vitest";
-import { Shop } from "@/game/shop";
+import { Shop, DRONE_PRICE, BOMB_PACK_PRICE } from "@/game/shop";
+import { BOMB_MAX, BOMB_PACK_AMOUNT } from "@/game/grenade";
 import type { WeaponData } from "@/game/data";
 
 const DATA: Record<string, WeaponData> = {
@@ -46,6 +47,13 @@ function makeGame(coins: number, weapons = ["pistol"] as string[]) {
       },
       heal: vi.fn(),
       addArmor: vi.fn(),
+      bombs: 0,
+      maxBombs: BOMB_MAX,
+      addBombs(n: number) {
+        const before = this.bombs;
+        this.bombs = Math.min(this.maxBombs, this.bombs + n);
+        return this.bombs - before;
+      },
     },
     save: {
       data: { unlocked_weapons: weapons },
@@ -75,6 +83,41 @@ describe("Shop", () => {
     const s = new Shop(DATA);
     const g = makeGame(10000, ["shotgun"]);
     expect(s.buy("weapon:shotgun", g)).toBe(false);
+  });
+
+  test("UFO drone costs 10000 and unlocks once", () => {
+    expect(DRONE_PRICE).toBe(10000);
+    const s = new Shop(DATA);
+    const g = makeGame(DRONE_PRICE);
+    expect(s.buy("drone", g)).toBe(true);
+    expect(g.player!.coins).toBe(0);
+    expect(g.player!.hasDrone).toBe(true);
+    expect(g.save.data["has_drone"]).toBe(true);
+    // Already owned: no second charge.
+    expect(s.buy("drone", g)).toBe(false);
+  });
+
+  test("UFO drone refused below 10000 coins", () => {
+    const s = new Shop(DATA);
+    const g = makeGame(DRONE_PRICE - 1);
+    expect(s.buy("drone", g)).toBe(false);
+    expect(g.player!.hasDrone).toBeFalsy();
+  });
+
+  test("bomb pack grants bombs and charges once", () => {
+    const s = new Shop(DATA);
+    const g = makeGame(BOMB_PACK_PRICE);
+    expect(s.buy("bomb_pack", g)).toBe(true);
+    expect(g.player!.bombs).toBe(BOMB_PACK_AMOUNT);
+    expect(g.player!.coins).toBe(0);
+  });
+
+  test("bomb pack refused at the carry cap without charging", () => {
+    const s = new Shop(DATA);
+    const g = makeGame(BOMB_PACK_PRICE);
+    g.player!.bombs = BOMB_MAX;
+    expect(s.buy("bomb_pack", g)).toBe(false);
+    expect(g.player!.coins).toBe(BOMB_PACK_PRICE);
   });
 
   test("health refill", () => {

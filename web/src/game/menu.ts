@@ -7,8 +7,10 @@ import { formatTime } from "./utils";
 import { drawText, Button, roundRect, drawShopIcon } from "./ui";
 import { color } from "./colors";
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
-import { SKILL_BRANCHES } from "./upgrade";
+import { SKILL_BRANCHES, branchForSkill, LEVELUP_PICK_LOCK } from "./upgrade";
 import { MOD_CATALOG } from "./mods";
+import { DRONE_PRICE } from "./shop";
+import { BOMB_PACK_AMOUNT, BOMB_PACK_PRICE } from "./grenade";
 import type { IGame } from "./types";
 
 interface Ember {
@@ -36,6 +38,30 @@ function makeEmbers(): Embers {
     });
   }
   return { embers, t: 0 };
+}
+
+/** Split `text` into lines that fit `maxW` at the given drawText size. */
+function wrapLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  size: number,
+  maxW: number,
+): string[] {
+  if (!text) return [];
+  ctx.font = `bold ${size}px ui-monospace, monospace`;
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(/\s+/)) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && ctx.measureText(next).width > maxW) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
 }
 
 export class MenuSystem {
@@ -487,6 +513,7 @@ export class MenuSystem {
       ["R",         "Thay đạn"],
       ["1 – 5",     "Đổi súng theo danh sách"],
       ["E  (HOLD)", "Hút nhanh Loot quanh người"],
+      ["F",         "Ném bom (nổ theo vùng)"],
       ["ESC",       "Tạm dừng"],
     ];
 
@@ -788,30 +815,36 @@ export class MenuSystem {
     } else if (this.activeShopTab === "supplies") {
       const items = [
         { id: "ammo",   name: "AMMO PACK",   desc: "Adds +30 reserve ammo.",        price: 100 },
-        { id: "bomb",   name: "BOMB PACK",   desc: "N/A — no bomb system in game.", price: 150, disabled: true },
+        { id: "bomb",   name: "BOMB PACK",   desc: `Adds +${BOMB_PACK_AMOUNT} throwable bombs.`, price: BOMB_PACK_PRICE },
         { id: "medkit", name: "MEDKIT",      desc: "Restores +25 health.",          price: 200 },
         { id: "armor",  name: "ARMOR PLATE", desc: "Adds +15 armor plating.",       price: 250 },
       ];
+
+      // Supplies use slightly shorter cards than the shared grid so the
+      // featured UFO DRONE card fits on a third row inside the panel.
+      const sCardH = 92;
+      const sGapY = 10;
 
       items.forEach((item, idx) => {
         const col = idx % 2;
         const row = Math.floor(idx / 2);
         const cX = gridX + col * (cardW + cardGapX);
-        const cY = gridY + row * (cardH + cardGapY);
+        const cY = gridY + row * (sCardH + sGapY);
 
         ctx.fillStyle = "#1E1E24";
-        roundRect(ctx, cX, cY, cardW, cardH, 8);
+        roundRect(ctx, cX, cY, cardW, sCardH, 8);
         ctx.fill();
-        
-        let available = !item.disabled;
+
+        let available = true;
         let isMax = false;
         let btnText = `$${item.price} [BUY]`;
         let btnAccent = color("ui_gold");
 
-        if (item.disabled) {
+        if (item.id === "bomb" && p.bombs >= p.maxBombs) {
           available = false;
-          btnText = "LOCKED / N/A";
-          btnAccent = "#5A5A60";
+          isMax = true;
+          btnText = "BAG FULL";
+          btnAccent = color("ui_green");
         } else if (item.id === "medkit" && p.hp >= p.maxHp) {
           available = false;
           isMax = true;
@@ -830,14 +863,14 @@ export class MenuSystem {
 
         ctx.strokeStyle = isMax ? btnAccent : available ? color("ui_gold") : "#3C3C46";
         ctx.lineWidth = 1.5;
-        roundRect(ctx, cX, cY, cardW, cardH, 8);
+        roundRect(ctx, cX, cY, cardW, sCardH, 8);
         ctx.stroke();
 
         // Draw supply icon
-        drawShopIcon(ctx, item.id, cX + cardW - 84, cY + 12, 72, 48, isMax);
+        drawShopIcon(ctx, item.id, cX + cardW - 82, cY + 10, 70, 44, isMax);
 
         // Text Info (Left aligned)
-        drawText(ctx, item.name, cX + 12, cY + 14, 15, isMax ? btnAccent : "#FFFFFF", "left", "top");
+        drawText(ctx, item.name, cX + 12, cY + 12, 15, isMax ? btnAccent : "#FFFFFF", "left", "top");
 
         // Split description into two lines
         let desc1 = item.desc;
@@ -846,8 +879,8 @@ export class MenuSystem {
           desc1 = "Adds +30 reserve";
           desc2 = "ammo.";
         } else if (item.id === "bomb") {
-          desc1 = "Locked / No bomb";
-          desc2 = "system in game.";
+          desc1 = `Adds +${BOMB_PACK_AMOUNT} bombs — F`;
+          desc2 = `to throw (${p.bombs}/${p.maxBombs}).`;
         } else if (item.id === "medkit") {
           desc1 = "Restores +25";
           desc2 = "health.";
@@ -855,15 +888,15 @@ export class MenuSystem {
           desc1 = "Adds +15 armor";
           desc2 = "plating.";
         }
-        drawText(ctx, desc1, cX + 12, cY + 36, 10, color("ui_dim"), "left", "top");
+        drawText(ctx, desc1, cX + 12, cY + 32, 10, color("ui_dim"), "left", "top");
         if (desc2) {
-          drawText(ctx, desc2, cX + 12, cY + 48, 10, color("ui_dim"), "left", "top");
+          drawText(ctx, desc2, cX + 12, cY + 44, 10, color("ui_dim"), "left", "top");
         }
 
         const buyBtn = new Button(
           btnText,
           cX + 12,
-          cY + cardH - 34,
+          cY + sCardH - 30,
           cardW - 24,
           24,
           available ? `ps_buy:${item.id}` : "",
@@ -873,6 +906,83 @@ export class MenuSystem {
         buyBtn.draw(ctx);
         if (available) buttons.push(buyBtn);
       });
+
+      // ── Featured: UFO DRONE (one-time unlock, persists across runs) ────
+      const dX = gridX;
+      const dY = gridY + 2 * (sCardH + sGapY);
+      const dW = cardW * 2 + cardGapX;
+      const dH = 76;
+      const droneOwned = p.hasDrone;
+      const droneAfford = p.coins >= DRONE_PRICE;
+
+      ctx.fillStyle = droneOwned ? "#16242A" : "#1E1E24";
+      roundRect(ctx, dX, dY, dW, dH, 8);
+      ctx.fill();
+      ctx.strokeStyle = droneOwned
+        ? color("ui_green")
+        : droneAfford
+          ? color("ui_blue")
+          : "#3C3C46";
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, dX, dY, dW, dH, 8);
+      ctx.stroke();
+
+      drawShopIcon(ctx, "drone", dX + dW - 96, dY + 8, 84, 60, droneOwned);
+
+      drawText(
+        ctx,
+        "UFO DRONE",
+        dX + 14,
+        dY + 12,
+        17,
+        droneOwned ? color("ui_green") : color("ui_blue"),
+        "left",
+        "top",
+      );
+      drawText(
+        ctx,
+        droneOwned
+          ? "Combat saucer active — auto-fires at nearby zombies."
+          : "Orbiting saucer that auto-fires at nearby zombies.",
+        dX + 14,
+        dY + 36,
+        10,
+        color("ui_dim"),
+        "left",
+        "top",
+      );
+      drawText(
+        ctx,
+        "One-time unlock — kept across runs.",
+        dX + 14,
+        dY + 50,
+        10,
+        color("ui_dim"),
+        "left",
+        "top",
+      );
+
+      let droneText = `$${DRONE_PRICE} [BUY]`;
+      let droneAccent = color("ui_blue");
+      if (droneOwned) {
+        droneText = "OWNED / ACTIVE";
+        droneAccent = color("ui_green");
+      } else if (!droneAfford) {
+        droneText = "NOT ENOUGH CASH";
+        droneAccent = "#787882";
+      }
+      const droneBtn = new Button(
+        droneText,
+        dX + 296,
+        dY + 24,
+        150,
+        30,
+        !droneOwned && droneAfford ? "ps_buy:drone" : "",
+        droneAccent,
+      );
+      droneBtn.update(dt, mx, my, false);
+      droneBtn.draw(ctx);
+      if (!droneOwned && droneAfford) buttons.push(droneBtn);
     } else if (this.activeShopTab === "upgrades") {
       const items = [
         { id: "max_hp",    name: "MAX HP UPGRADE", desc: "Gain +20 Max HP and heal.",       price: 300 },
@@ -991,8 +1101,21 @@ export class MenuSystem {
         roundRect(ctx, cX, cY, cardW, cardH, 8);
         ctx.stroke();
 
+        // Product icon — same slot the weapons/supplies/upgrades cards use.
+        drawShopIcon(ctx, `mod:${mod.id}`, cX + cardW - 84, cY + 12, 72, 48, equipped);
+
         drawText(ctx, mod.name.toUpperCase(), cX + 12, cY + 14, 15, equipped ? color("ui_green") : "#FFFFFF", "left", "top");
         drawText(ctx, mod.desc, cX + 12, cY + 40, 11, color("ui_dim"), "left", "top");
+        drawText(
+          ctx,
+          `Fits: ${w.name.toUpperCase()}`,
+          cX + 12,
+          cY + 56,
+          10,
+          equipped ? color("ui_green") : color("ui_gold"),
+          "left",
+          "top",
+        );
 
         const buyBtn = new Button(
           btnText,
@@ -1147,10 +1270,261 @@ export class MenuSystem {
     return { action: null, buttons };
   }
 
+  /**
+   * Level-up offer: three cards, one random skill rolled from each skill-tree
+   * branch. The cards ignore clicks for the first `LEVELUP_PICK_LOCK` seconds
+   * (shown as a countdown) because the player is normally holding fire when the
+   * level lands — without the lock that click picks a skill at random. After
+   * the countdown the overlay simply waits: there is no dismiss button.
+   */
+  private drawLevelUpChoice(
+    ctx: CanvasRenderingContext2D,
+    game: IGame,
+    choices: string[],
+    width: number,
+    height: number,
+  ): { action: string | null; buttons: Button[] } {
+    const p = game.player!;
+    const buttons: Button[] = [];
+    const mx = game.input.mouseX;
+    const my = game.input.mouseY;
+    const lock = Math.max(0, game.levelUpLockTimer ?? 0);
+    const locked = lock > 0;
+
+    // Dim curtain over the ember background so the cards pop.
+    ctx.fillStyle = "rgba(8, 8, 12, 0.55)";
+    ctx.fillRect(0, 0, width, height);
+
+    // A short window (small browser, landscape phone) gets a tighter header so
+    // the cards keep the room their text needs.
+    const compact = height < 560;
+    drawText(
+      ctx,
+      "LEVEL UP!",
+      width / 2,
+      compact ? 38 : 66,
+      compact ? 32 : 46,
+      color("ui_green"),
+      "center",
+      "middle",
+    );
+    drawText(
+      ctx,
+      `LV ${p.level}   ·   CHOOSE ONE SKILL`,
+      width / 2,
+      compact ? 70 : 110,
+      compact ? 14 : 18,
+      "#9FE8FF",
+      "center",
+      "middle",
+    );
+    if (p.pendingLevels > 1) {
+      drawText(
+        ctx,
+        `${p.pendingLevels} LEVELS PENDING`,
+        width / 2,
+        compact ? 90 : 136,
+        compact ? 11 : 13,
+        color("ui_gold"),
+        "center",
+        "middle",
+      );
+    }
+
+    // ── Cards ─────────────────────────────────────────────────────────────
+    // The card is sized to its own text: never taller (which leaves a dead gap
+    // above the pips) and never shorter (which would overlap them).
+    const RIBBON_H = 40;
+    const NAME_LH = compact ? 21 : 24;
+    const DESC_LH = compact ? 15 : 18;
+    const NAME_SIZE = compact ? 16 : 19;
+    const DESC_SIZE = compact ? 11 : 12;
+    const gap = compact ? 14 : 22;
+    const cardW = Math.max(
+      120,
+      Math.min(300, (width - (compact ? 48 : 80) - gap * (choices.length - 1)) / choices.length),
+    );
+    const cards = choices.map((uid) => ({
+      uid,
+      branch: branchForSkill(uid),
+      name: wrapLines(ctx, game.upgrades.textFor(uid), NAME_SIZE, cardW - 24),
+      desc: wrapLines(ctx, game.upgrades.descFor(uid), DESC_SIZE, cardW - 24),
+    }));
+    const bodyH = Math.max(
+      ...cards.map((c) => c.name.length * NAME_LH + c.desc.length * DESC_LH),
+    );
+    // ribbon + top pad + text + pad + pips + label + bottom pad
+    const topPad = compact ? 18 : 26;
+    const cardH = RIBBON_H + topPad + bodyH + (compact ? 26 : 34) + 7 + (compact ? 26 : 30);
+    const totalW = choices.length * cardW + (choices.length - 1) * gap;
+    const startX = (width - totalW) / 2;
+    const headroom = compact ? 104 : 158;
+    // Room for the two footer lines (prompt + hint, or countdown + bar + hint).
+    const footroom = compact ? 84 : 108;
+    let cardY = Math.max(headroom, height / 2 - cardH / 2 - (compact ? 4 : 16));
+    // Pull the block up if the footer prompt would fall off the bottom.
+    if (cardY + cardH + footroom > height) {
+      cardY = Math.max(headroom, height - footroom - cardH);
+    }
+
+    cards.forEach((card, i) => {
+      const uid = card.uid;
+      const branch = card.branch;
+      const accent = branch?.color ?? color("ui_gold");
+      const x = startX + i * (cardW + gap);
+      const hovered = !locked && mx >= x && mx <= x + cardW && my >= cardY && my <= cardY + cardH;
+      const cur = p.upgradeLevels[uid] ?? 0;
+      const limit = game.upgrades.limitFor(uid);
+
+      ctx.save();
+      ctx.globalAlpha = locked ? 0.45 : 1;
+
+      if (hovered) {
+        ctx.globalAlpha = 0.16;
+        ctx.fillStyle = accent;
+        roundRect(ctx, x - 6, cardY - 6, cardW + 12, cardH + 12, 18);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      ctx.fillStyle = hovered ? "rgba(30, 30, 40, 0.97)" : "rgba(18, 18, 24, 0.95)";
+      roundRect(ctx, x, cardY, cardW, cardH, 14);
+      ctx.fill();
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = hovered ? 3 : 1.6;
+      roundRect(ctx, x, cardY, cardW, cardH, 14);
+      ctx.stroke();
+
+      // Branch ribbon
+      ctx.fillStyle = accent;
+      ctx.globalAlpha *= 0.18;
+      roundRect(ctx, x, cardY, cardW, RIBBON_H, 14);
+      ctx.fill();
+      ctx.globalAlpha = locked ? 0.45 : 1;
+      drawText(
+        ctx,
+        (branch?.name ?? "SKILL").toUpperCase(),
+        x + cardW / 2,
+        cardY + RIBBON_H / 2 + 1,
+        15,
+        accent,
+        "center",
+        "middle",
+      );
+
+      // Skill name, then description — both pre-wrapped above.
+      let ty = cardY + RIBBON_H + topPad + NAME_LH / 2;
+      for (const line of card.name) {
+        drawText(ctx, line, x + cardW / 2, ty, NAME_SIZE, "#FFFFFF", "center", "middle");
+        ty += NAME_LH;
+      }
+      ty += 2;
+      for (const line of card.desc) {
+        drawText(ctx, line, x + cardW / 2, ty, DESC_SIZE, color("ui_dim"), "center", "middle");
+        ty += DESC_LH;
+      }
+
+      // Level pips
+      const pipY = cardY + cardH - (compact ? 40 : 46);
+      const pipGap = limit > 6 ? 3 : 4;
+      const pipW = Math.max(3, Math.min(22, (cardW - 30 - (limit - 1) * pipGap) / limit));
+      const pipsW = limit * pipW + (limit - 1) * pipGap;
+      let px = x + (cardW - pipsW) / 2;
+      for (let l = 0; l < limit; l++) {
+        ctx.fillStyle = l < cur ? accent : "rgba(255, 255, 255, 0.14)";
+        roundRect(ctx, px, pipY, pipW, 7, 3);
+        ctx.fill();
+        px += pipW + pipGap;
+      }
+      drawText(
+        ctx,
+        cur > 0 ? `LV ${cur} → ${cur + 1} / ${limit}` : `NEW · MAX ${limit}`,
+        x + cardW / 2,
+        cardY + cardH - (compact ? 17 : 20),
+        compact ? 11 : 12,
+        locked ? "#6A6A74" : accent,
+        "center",
+        "middle",
+      );
+      ctx.restore();
+
+      // Only register the hit box once unlocked, so a stray click during the
+      // countdown finds no button at all.
+      if (!locked) {
+        buttons.push(new Button("", x, cardY, cardW, cardH, `upgrade:${uid}`, accent));
+      }
+    });
+
+    // ── Countdown / prompt ────────────────────────────────────────────────
+    // `footY` is the FIRST footer line; everything below is measured from it so
+    // nothing slides off the bottom of a short window.
+    const footY = Math.min(
+      cardY + cardH + (compact ? 30 : 44),
+      height - (compact ? 58 : 66),
+    );
+    const bigFoot = compact ? 14 : 16;
+    const smallFoot = compact ? 11 : 12;
+    if (locked) {
+      drawText(
+        ctx,
+        `SELECTION UNLOCKS IN ${Math.ceil(lock)}`,
+        width / 2,
+        footY,
+        bigFoot,
+        color("ui_gold"),
+        "center",
+        "middle",
+      );
+      const frac = Math.max(0, Math.min(1, 1 - lock / LEVELUP_PICK_LOCK));
+      const barW = Math.min(360, width - 80);
+      const barX = (width - barW) / 2;
+      const barY = footY + 16;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
+      roundRect(ctx, barX, barY, barW, 8, 4);
+      ctx.fill();
+      ctx.fillStyle = color("ui_gold");
+      roundRect(ctx, barX, barY, Math.max(4, barW * frac), 8, 4);
+      ctx.fill();
+      drawText(
+        ctx,
+        "TAKE A BREATH — STRAY CLICKS ARE IGNORED",
+        width / 2,
+        barY + 22,
+        smallFoot,
+        color("ui_dim"),
+        "center",
+        "middle",
+      );
+    } else {
+      drawText(
+        ctx,
+        "CLICK A CARD TO LEARN THE SKILL",
+        width / 2,
+        footY,
+        bigFoot,
+        color("ui_green"),
+        "center",
+        "middle",
+      );
+      drawText(
+        ctx,
+        "THE GAME WAITS UNTIL YOU CHOOSE",
+        width / 2,
+        footY + 26,
+        smallFoot,
+        color("ui_dim"),
+        "center",
+        "middle",
+      );
+    }
+
+    return { action: null, buttons };
+  }
+
   drawUpgrade(
     ctx: CanvasRenderingContext2D,
     game: IGame,
-    _choices: string[],
+    choices: string[],
   ): { action: string | null; buttons: Button[] } {
     const width = ctx.canvas.width / (window.devicePixelRatio || 1);
     const height = ctx.canvas.height / (window.devicePixelRatio || 1);
@@ -1159,6 +1533,12 @@ export class MenuSystem {
 
     const p = game.player!;
     const isLevelUp = p.pendingLevels > 0;
+
+    // Level-up: pick one of three rolled skills (one per branch) instead of
+    // browsing the whole tree.
+    if (isLevelUp && choices.length > 0) {
+      return this.drawLevelUpChoice(ctx, game, choices, width, height);
+    }
 
     // ── Header ────────────────────────────────────────────────────────────
     drawText(

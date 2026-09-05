@@ -1,6 +1,13 @@
 // tests/upgrade.test.ts
 import { describe, test, expect, vi } from "vitest";
-import { UpgradeSystem, SKILL_BRANCHES, DEFAULT_SKILL_LIMIT } from "@/game/upgrade";
+import {
+  UpgradeSystem,
+  SKILL_BRANCHES,
+  DEFAULT_SKILL_LIMIT,
+  LEVELUP_PICK_LOCK,
+  branchForSkill,
+  rollLevelUpChoices,
+} from "@/game/upgrade";
 import type { UpgradeCatalog } from "@/game/data";
 
 const CAT: UpgradeCatalog = {
@@ -93,5 +100,63 @@ describe("UpgradeSystem skill tree", () => {
     expect(p.magnetMult).toBeCloseTo(1.3);
     expect(p.lifeSteal).toBeCloseTo(0.02);
     expect(p.pierceBonus).toBe(1);
+  });
+});
+
+describe("level-up random offer", () => {
+  const u = new UpgradeSystem(CAT);
+  const limitFor = (uid: string) => u.limitFor(uid);
+
+  test("offers one skill per branch, all distinct", () => {
+    for (let i = 0; i < 200; i++) {
+      const picks = rollLevelUpChoices({}, limitFor);
+      expect(picks).toHaveLength(SKILL_BRANCHES.length);
+      expect(new Set(picks).size).toBe(picks.length);
+      const branches = picks.map((uid) => branchForSkill(uid)?.name);
+      expect(branches).toEqual(SKILL_BRANCHES.map((b) => b.name));
+    }
+  });
+
+  test("never offers a maxed-out skill", () => {
+    const levels: Record<string, number> = {};
+    // Cap every Combat skill except crit_dmg.
+    for (const uid of SKILL_BRANCHES[0]!.skills) levels[uid] = limitFor(uid);
+    levels["crit_dmg"] = 0;
+    for (let i = 0; i < 100; i++) {
+      const picks = rollLevelUpChoices(levels, limitFor);
+      expect(picks[0]).toBe("crit_dmg");
+      for (const uid of picks) expect(levels[uid] ?? 0).toBeLessThan(limitFor(uid));
+    }
+  });
+
+  test("back-fills from other branches when one is fully capped", () => {
+    const levels: Record<string, number> = {};
+    for (const uid of SKILL_BRANCHES[2]!.skills) levels[uid] = limitFor(uid);
+    const picks = rollLevelUpChoices(levels, limitFor);
+    expect(picks).toHaveLength(3);
+    expect(new Set(picks).size).toBe(3);
+    for (const uid of picks) expect(SKILL_BRANCHES[2]!.skills).not.toContain(uid);
+  });
+
+  test("offers nothing once every skill is capped", () => {
+    const levels: Record<string, number> = {};
+    for (const b of SKILL_BRANCHES) for (const uid of b.skills) levels[uid] = limitFor(uid);
+    expect(rollLevelUpChoices(levels, limitFor)).toEqual([]);
+  });
+
+  test("uses the whole pool of a branch over many rolls", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 400; i++) seen.add(rollLevelUpChoices({}, limitFor)[1]!);
+    expect(seen).toEqual(new Set(SKILL_BRANCHES[1]!.skills));
+  });
+
+  test("rand() returning 1 stays in range", () => {
+    const picks = rollLevelUpChoices({}, limitFor, () => 1);
+    expect(picks.every((uid) => typeof uid === "string")).toBe(true);
+    expect(picks).toHaveLength(3);
+  });
+
+  test("the misclick lock is a real, positive delay", () => {
+    expect(LEVELUP_PICK_LOCK).toBeGreaterThanOrEqual(3);
   });
 });

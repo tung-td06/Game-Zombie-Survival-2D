@@ -2,6 +2,7 @@
 // Shop: weapon unlocks, ammo, health, armor, max HP. Mirrors shop.py.
 
 import { WEAPON_ORDER } from "./weapon";
+import { BOMB_PACK_AMOUNT, BOMB_PACK_PRICE } from "./grenade";
 import type { WeaponData } from "./data";
 import type { IGame } from "./types";
 
@@ -9,6 +10,7 @@ export const HEALTH_REFILL_PRICE = 150;
 export const MAX_HP_PRICE = 300;
 export const ARMOR_PRICE = 500;
 export const AMMO_PACK_PRICE = 150;
+export { BOMB_PACK_PRICE };
 export const DRONE_PRICE = 10000;
 
 export class Shop {
@@ -33,12 +35,15 @@ export class Shop {
       if (!list.includes(wid)) list.push(wid);
     } else {
       if (key === "drone" && p.hasDrone) return false;
+      if (key === "bomb_pack" && p.bombs >= p.maxBombs) return false;
       const price = priceFor(key);
       if (p.coins < price) return false;
       p.coins -= price;
       if (key === "ammo_pack") {
         const w = p.weapons.current;
         w.addReserve(w.magazineSize * 3);
+      } else if (key === "bomb_pack") {
+        p.addBombs(BOMB_PACK_AMOUNT);
       } else if (key === "health") {
         p.heal(p.maxHp);
       } else if (key === "armor") {
@@ -65,6 +70,8 @@ function priceFor(key: string): number {
   switch (key) {
     case "ammo_pack":
       return AMMO_PACK_PRICE;
+    case "bomb_pack":
+      return BOMB_PACK_PRICE;
     case "health":
       return HEALTH_REFILL_PRICE;
     case "armor":

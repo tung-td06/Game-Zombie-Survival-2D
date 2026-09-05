@@ -138,6 +138,9 @@ export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, h
     .join(" ");
   drawText(ctx, slotStr, 30, hgt - 34, 12, color("ui_dim"));
 
+  // Bomb pouch: [F] plus one pip per carried bomb, greyed out when empty.
+  drawBombPouch(ctx, p, 352, hgt - 84);
+
   // Bottom-right: time + day/night
   const isNight = game.isNight();
   const icon = isNight ? "NIGHT" : "DAY";
@@ -176,6 +179,47 @@ export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, h
       drawText(ctx, `• ${name}`, 28, py, 12, "#EBEBE1", "left", "top");
       py += 20;
     }
+  }
+}
+
+/** Bomb counter beside the weapon panel: key hint + one pip per bomb. */
+function drawBombPouch(
+  ctx: CanvasRenderingContext2D,
+  p: IGame["player"],
+  x: number,
+  y: number,
+): void {
+  if (!p) return;
+  const w = 96;
+  const h = 68;
+  const empty = p.bombs <= 0;
+  drawPanel(ctx, x, y, w, h);
+  drawText(ctx, "[F] BOMB", x + w / 2, y + 14, 12, empty ? "#787882" : color("ui_gold"), "center", "middle");
+  drawText(
+    ctx,
+    `${p.bombs}/${p.maxBombs}`,
+    x + w / 2,
+    y + 34,
+    18,
+    empty ? "#787882" : "#FFFFFF",
+    "center",
+    "middle",
+  );
+  // Pips
+  const pipR = 4;
+  const gap = 13;
+  const startX = x + w / 2 - ((p.maxBombs - 1) * gap) / 2;
+  for (let i = 0; i < p.maxBombs; i++) {
+    ctx.fillStyle = i < p.bombs ? "#6E9A50" : "#2A2A32";
+    ctx.beginPath();
+    ctx.arc(startX + i * gap, y + 54, pipR, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Throw cooldown sweep across the bottom edge.
+  if (p.bombCooldown > 0) {
+    const frac = Math.min(1, p.bombCooldown / 0.65);
+    ctx.fillStyle = "rgba(240, 200, 80, 0.5)";
+    ctx.fillRect(x + 6, y + h - 5, (w - 12) * frac, 2);
   }
 }
 
@@ -451,6 +495,8 @@ export function drawShopIcon(
     id = "medkit";
   } else if (key === "armor_plate") {
     id = "armor";
+  } else if (key === "bomb_pack") {
+    id = "bomb";
   }
 
   const cx = x + w / 2;
@@ -800,6 +846,91 @@ export function drawShopIcon(
     ctx.beginPath(); ctx.moveTo(-2, -7); ctx.lineTo(10, 0); ctx.lineTo(-2, 7); ctx.stroke();
     ctx.fillStyle = "#E8E8E8";
     ctx.beginPath(); ctx.moveTo(12, -1); ctx.lineTo(17, 0); ctx.lineTo(12, 1); ctx.closePath(); ctx.fill();
+  } else if (id === "bomb") {
+    // Frag bomb: casing + lever + lit fuse spark
+    ctx.fillStyle = "#2E4028";
+    ctx.beginPath();
+    ctx.arc(0, 2, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#1A2418";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-10, 2); ctx.lineTo(10, 2);
+    ctx.moveTo(0, -8);  ctx.lineTo(0, 12);
+    ctx.stroke();
+    // Fuse head + lever
+    ctx.fillStyle = "#8A8A78";
+    ctx.fillRect(-3, -12, 6, 5);
+    ctx.fillRect(3, -12, 7, 2);
+    // Spark
+    ctx.fillStyle = "#FFB03A";
+    ctx.beginPath(); ctx.arc(0, -14, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#FF5A32";
+    ctx.beginPath(); ctx.arc(0, -16, 1.5, 0, Math.PI * 2); ctx.fill();
+  } else if (id === "mod:scope") {
+    // Scope tube seen from the side + crosshair lens
+    ctx.fillStyle = "#1E1E24";
+    roundRect(ctx, -14, -5, 24, 10, 3);
+    ctx.fill();
+    ctx.fillStyle = "#2E2E34";
+    ctx.fillRect(-16, -7, 4, 14);
+    ctx.fillStyle = "#5AB4FF";
+    ctx.beginPath(); ctx.arc(13, 0, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "#0A1420";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(6, 0); ctx.lineTo(20, 0);
+    ctx.moveTo(13, -7); ctx.lineTo(13, 7);
+    ctx.stroke();
+  } else if (id === "mod:extended_mag") {
+    // Tall magazine with rounds stacked inside
+    ctx.fillStyle = "#2E2E32";
+    roundRect(ctx, -7, -14, 14, 28, 3);
+    ctx.fill();
+    ctx.strokeStyle = "#5A5A60";
+    ctx.lineWidth = 1;
+    roundRect(ctx, -7, -14, 14, 28, 3);
+    ctx.stroke();
+    ctx.fillStyle = "#F0C850";
+    for (let i = 0; i < 4; i++) {
+      ctx.fillRect(-4, -10 + i * 6, 8, 4);
+    }
+    // "+" marking the extra capacity
+    ctx.fillStyle = "#6EDC82";
+    ctx.fillRect(11, -3, 8, 3);
+    ctx.fillRect(13.5, -5.5, 3, 8);
+  } else if (id === "mod:tight_choke") {
+    // Muzzle choke: barrel end with the pellet cone squeezed narrow
+    ctx.fillStyle = "#4E4E54";
+    ctx.fillRect(-18, -4, 16, 8);
+    ctx.fillStyle = "#82827E";
+    roundRect(ctx, -3, -6, 8, 12, 2);
+    ctx.fill();
+    ctx.strokeStyle = "#F0C850";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(6, -3); ctx.lineTo(19, -6);
+    ctx.moveTo(6, 0);  ctx.lineTo(20, 0);
+    ctx.moveTo(6, 3);  ctx.lineTo(19, 6);
+    ctx.stroke();
+  } else if (id === "mod:quick_reload") {
+    // Speed-loader: magazine with a circular reload arrow
+    ctx.strokeStyle = "#6EDC82";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, 11, Math.PI * 0.35, Math.PI * 1.85);
+    ctx.stroke();
+    ctx.fillStyle = "#6EDC82";
+    ctx.beginPath();
+    ctx.moveTo(10, -6); ctx.lineTo(4, -9); ctx.lineTo(11, 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "#2E2E32";
+    roundRect(ctx, -4, -7, 8, 14, 2);
+    ctx.fill();
+    ctx.fillStyle = "#F0C850";
+    ctx.fillRect(-2, -4, 4, 3);
+    ctx.fillRect(-2, 1, 4, 3);
   } else if (id === "drone") {
     // UFO saucer: dome + disc + glow, matching the in-game drone
     ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";

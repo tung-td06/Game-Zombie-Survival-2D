@@ -18,6 +18,7 @@ export type Action =
   | "right"
   | "reload"
   | "vacuum"
+  | "throw_bomb"
   | "pause"
   | "weapon1"
   | "weapon2"
@@ -44,6 +45,7 @@ export const DEFAULT_BINDINGS: Record<Action, Key> = {
   right: "KeyD",
   reload: "KeyR",
   vacuum: "KeyE",
+  throw_bomb: "KeyF",
   pause: "Escape",
   weapon1: "Digit1",
   weapon2: "Digit2",
@@ -77,6 +79,8 @@ export class InputManager {
   fireHeld = false;
   weaponPressed: Set<WeaponSlot> = new Set();
   pausePressed = false;
+  /** Touch bomb button — one-shot, cleared in endFrame() like keysPressed. */
+  bombPressed = false;
   /** World-space aim override (auto-aim) or null to fall back to mouse. */
   aimOverride: Vec | null = null;
 
@@ -141,6 +145,7 @@ export class InputManager {
     this.mousePressed.clear();
     this.weaponPressed.clear();
     this.pausePressed = false;
+    this.bombPressed = false;
   }
 
   isDown(action: Action): boolean {

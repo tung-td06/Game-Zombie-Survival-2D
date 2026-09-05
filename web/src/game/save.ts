@@ -78,6 +78,7 @@ export const DEFAULT_SAVE: SaveData = {
       weapon8: "Digit8",
       next_weapon: "MouseMiddle",
       vacuum: "KeyE",
+      throw_bomb: "KeyF",
       pause: "Escape",
       debug: "F3",
       fullscreen: "F11",

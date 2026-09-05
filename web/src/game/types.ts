@@ -51,6 +51,7 @@ export interface IGame {
   zombies: import("./zombie").Zombie[];
   bullets: import("./bullet").Bullet[];
   enemyBullets: import("./bullet").Bullet[];
+  grenades: import("./grenade").Grenade[];
   loots: import("./loot").Loot[];
   particles: import("./particle").ParticleSystem;
   camera: import("./camera").Camera;
@@ -75,6 +76,8 @@ export interface IGame {
   showFps: boolean;
   fpsDisplay: number;
   upgradeChoices: string[];
+  /** Seconds left before the level-up cards accept clicks (0 = unlocked). */
+  levelUpLockTimer: number;
   saveButtonState?: "idle" | "saving" | "success" | "error";
   weaponData: Record<string, import("./data").WeaponData>;
   spawner: import("./spawner").ZombieSpawner;
