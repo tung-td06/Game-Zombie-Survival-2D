@@ -500,6 +500,18 @@ export function drawTent(ctx: CanvasRenderingContext2D, x: number, y: number, w:
 
 // ─────────────────────────────────────────────────────────────────── park
 /** Still pond: reeds at the margin, shallow shelf and a dark centre. */
+function ellipsePath(ctx: CanvasRenderingContext2D, cx: number, cy: number, rx: number, ry: number): void {
+  // Scaled arc rather than ctx.ellipse: the headless canvas used by the
+  // tests does not implement ellipse().
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, ry / Math.max(0.001, rx));
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 export function drawPond(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, wx: number, wy: number): void {
   const cx = x + w / 2;
   const cy = y + h / 2;
@@ -507,35 +519,29 @@ export function drawPond(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   const ry = h / 2;
   // Muddy bank.
   ctx.fillStyle = "#4A4230";
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ellipsePath(ctx, cx, cy, rx, ry);
   // Shallow shelf.
   ctx.fillStyle = "#3E5F5C";
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx * 0.92, ry * 0.92, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ellipsePath(ctx, cx, cy, rx * 0.92, ry * 0.92);
   // Deep water.
   ctx.fillStyle = "#22403F";
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx * 0.74, ry * 0.74, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ellipsePath(ctx, cx, cy, rx * 0.74, ry * 0.74);
   ctx.fillStyle = "#16302F";
-  ctx.beginPath();
-  ctx.ellipse(cx + rx * 0.06, cy + ry * 0.08, rx * 0.44, ry * 0.44, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ellipsePath(ctx, cx + rx * 0.06, cy + ry * 0.08, rx * 0.44, ry * 0.44);
   // Sky glint + ripples.
   ctx.fillStyle = "rgba(178,214,220,0.16)";
-  ctx.beginPath();
-  ctx.ellipse(cx - rx * 0.3, cy - ry * 0.34, rx * 0.34, ry * 0.20, -0.4, 0, Math.PI * 2);
-  ctx.fill();
+  ellipsePath(ctx, cx - rx * 0.3, cy - ry * 0.34, rx * 0.34, ry * 0.2);
   ctx.strokeStyle = "rgba(160,200,206,0.16)";
   ctx.lineWidth = 2;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, ry / Math.max(0.001, rx));
   for (let i = 1; i <= 3; i++) {
     ctx.beginPath();
-    ctx.ellipse(cx, cy, rx * (0.3 + i * 0.16), ry * (0.3 + i * 0.16), 0, 0, Math.PI * 2);
+    ctx.arc(0, 0, rx * (0.3 + i * 0.16), 0, Math.PI * 2);
     ctx.stroke();
   }
+  ctx.restore();
   // Reeds + lily pads around the rim.
   for (let i = 0; i < 22; i++) {
     const hh = worldHash(7801 + i, wx + i * 23, wy - i * 17);

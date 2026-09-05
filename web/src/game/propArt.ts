@@ -75,7 +75,9 @@ export type PropKind =
   | "fuel_pump"
   | "kiosk"
   | "sign"
-  | "pylon";
+  | "pylon"
+  // Lake collision. Painted on the ground layer, never as a sprite.
+  | "water";
 
 // ---------------------------------------------------------------------
 // Façade palettes. styleVariant selects a district-consistent palette; the

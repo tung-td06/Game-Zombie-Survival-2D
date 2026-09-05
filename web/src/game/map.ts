@@ -60,6 +60,7 @@ import {
 } from "./terrainArt";
 import { worldHash } from "./pixelArt";
 import { drawPropSprite, type PropKind } from "./propArt";
+import { drawPond } from "./propArtExtra";
 
 /** Spatial-hash cell size for obstacle lookups. */
 export const CELL = 400;
@@ -83,8 +84,15 @@ export function windowLightSeed(worldX: number, worldY: number): number {
 export type ObstacleKind = PropKind;
 
 export interface Obstacle {
+  /** Drawn bounds — the rect the sprite is painted into. */
   rect: Rect;
   kind: ObstacleKind;
+  /**
+   * Collision box. Identical to `rect` for the sprites that fill their
+   * bounds; smaller for the ones that don't (see HITBOX_SCALE), so the
+   * player never collides with empty space around a round sprite.
+   */
+  hit: Rect;
 }
 
 interface RoadSlab {
@@ -148,6 +156,8 @@ export class GameMap {
   craters: Crater[] = [];
   paths: Rect[] = [];
   rails: Rect[] = [];
+  /** Lake bounds. Drawn on the ground layer; blocked by "water" rects. */
+  ponds: Rect[] = [];
   minimap: HTMLCanvasElement | null = null;
   private grid: Map<string, Obstacle[]> = new Map();
 
@@ -160,7 +170,7 @@ export class GameMap {
 
   // ═══════════════════════════════════════════════════════ bookkeeping ══
   private add(kind: ObstacleKind, rect: Rect): Obstacle {
-    const o: Obstacle = { rect, kind };
+    const o: Obstacle = { rect, kind, hit: hitboxFor(kind, rect) };
     this.obstacles.push(o);
     this.index(o);
     return o;
@@ -266,12 +276,59 @@ export class GameMap {
     if (this.overlaps(rect, pad)) return false;
     if (roadPad >= 0 && this.touchesRoad(rect, roadPad)) return false;
     if (roadPad >= 0 && this.touchesRail(rect, roadPad)) return false;
+    if (roadPad >= 0 && this.touchesPond(rect, roadPad)) return false;
     this.add(kind, rect);
     return true;
   }
 
   private patch(kind: PatchKind, rect: Rect): void {
     this.patches.push({ kind, rect });
+  }
+
+  /**
+   * Lay a lake. A lake is drawn as an ellipse, so a rectangular hitbox would
+   * ring it with roughly 21% invisible wall — you would be stopped on dry
+   * grass well short of the water. Instead the water is painted on the
+   * ground layer and blocked by a staircase of rects inscribed in the DEEP
+   * water only, which leaves the muddy bank and the shallow shelf walkable
+   * right up to the water's edge.
+   */
+  private tryAddPond(bounds: Rect, pad = 20, roadPad = 26): boolean {
+    if (!this.inBounds(bounds)) return false;
+    if (this.overlaps(bounds, pad)) return false;
+    if (this.touchesRoad(bounds, roadPad) || this.touchesRail(bounds, roadPad)) return false;
+    this.ponds.push(bounds);
+    const cx = bounds.x + bounds.w / 2;
+    const cy = bounds.y + bounds.h / 2;
+    const a = (bounds.w / 2) * 0.78;
+    const b = (bounds.h / 2) * 0.78;
+    const BANDS = 11;
+    for (let i = 0; i < BANDS; i++) {
+      const y0 = -b + (2 * b * i) / BANDS;
+      const y1 = -b + (2 * b * (i + 1)) / BANDS;
+      // Measure the band at its narrow end so the staircase stays strictly
+      // inside the ellipse and can never poke out past the visible water.
+      const edge = Math.max(Math.abs(y0), Math.abs(y1));
+      const hw = a * Math.sqrt(Math.max(0, 1 - (edge * edge) / (b * b)));
+      if (hw < 10) continue;
+      this.add("water", { x: cx - hw, y: cy + y0, w: hw * 2, h: y1 - y0 });
+    }
+    return true;
+  }
+
+  /** True when the rect touches a lake's drawn bounds (extended by `pad`). */
+  private touchesPond(r: Rect, pad = 0): boolean {
+    for (const p of this.ponds) {
+      if (
+        r.x - pad < p.x + p.w &&
+        r.x + r.w + pad > p.x &&
+        r.y - pad < p.y + p.h &&
+        r.y + r.h + pad > p.y
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // ══════════════════════════════════════════════════════════ generate ══
@@ -513,8 +570,8 @@ export class GameMap {
 
   /** Riverside park south: a boating lake, footpaths and a pavilion. */
   private buildLake(): void {
-    this.tryAdd("pond", { x: 1330, y: 3150, w: 540, h: 330 }, 20, 26);
-    this.tryAdd("pond", { x: 2170, y: 3190, w: 470, h: 270 }, 20, 26);
+    this.tryAddPond({ x: 1330, y: 3150, w: 540, h: 330 });
+    this.tryAddPond({ x: 2170, y: 3190, w: 470, h: 270 });
     this.patch("sand", { x: 1290, y: 3096, w: 620, h: 80 });
     this.patch("lawn", { x: 900, y: 3096, w: 1200, h: 420 });
     this.patch("lawn", { x: 2300, y: 3110, w: 1000, h: 380 });
@@ -1089,6 +1146,11 @@ export class GameMap {
     ): boolean => {
       for (let i = 0; i < tries; i++) {
         const a2 = rng.next() * Math.PI * 2;
+        // Leave the four path axes clear: the plaza needs open gateways
+        // where the cross paths meet its edge, or the furniture rings read
+        // (and behave) as a fence around the square.
+        const off = Math.abs(((a2 % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2));
+        if (off < 0.32 || off > Math.PI / 2 - 0.32) continue;
         const r = minR + rng.next() * (maxR - minR);
         const box: Rect = { x: CX + Math.cos(a2) * r - w / 2, y: CY + Math.sin(a2) * r - h / 2, w, h };
         if (this.tryAdd(kind, box, 14, 16)) return true;
@@ -1111,9 +1173,9 @@ export class GameMap {
     // furniture must never form a closed barrier around it: each ring uses
     // few, small, crushable pieces with wide gaps, and nothing heavy is ever
     // placed on the approaches.
-    for (let i = 0, n = 0; i < 12 && n < 4; i++) if (ring("bench", 52, 18, 180, 216, 4)) n++;
-    for (let i = 0, n = 0; i < 12 && n < 4; i++) if (ring("planter", 46, 46, 246, 280, 4)) n++;
-    for (let i = 0, n = 0; i < 14 && n < 7; i++) if (ring("tree", 46, 46, 296, 328, 4)) n++;
+    for (let i = 0, n = 0; i < 20 && n < 4; i++) if (ring("bench", 52, 18, 180, 216, 6)) n++;
+    for (let i = 0, n = 0; i < 20 && n < 4; i++) if (ring("planter", 46, 46, 246, 280, 6)) n++;
+    for (let i = 0, n = 0; i < 22 && n < 8; i++) if (ring("tree", 46, 46, 296, 328, 6)) n++;
   }
 
   // ─────────────────────────────────────────────────────── safety pass ──
@@ -1162,7 +1224,7 @@ export class GameMap {
         for (const o of list) {
           if (seen.has(o)) continue;
           seen.add(o);
-          out.push(o.rect);
+          out.push(o.hit);
         }
       }
     }
@@ -1187,7 +1249,7 @@ export class GameMap {
     let bestD = Infinity;
     for (const o of this.getNearObstacles(pos, radius)) {
       if (!crushable(o)) continue;
-      const r = o.rect;
+      const r = o.hit;
       const nx = Math.max(r.x, Math.min(pos.x, r.x + r.w));
       const ny = Math.max(r.y, Math.min(pos.y, r.y + r.h));
       const dx = pos.x - nx;
@@ -1268,6 +1330,11 @@ export class GameMap {
       if (!rectsIntersect(view, p.rect)) continue;
       const s = applyRect(cam, p.rect);
       drawSurfacePatch(ctx, s.x, s.y, s.w, s.h, p.rect.x, p.rect.y, p.kind, this.seed);
+    }
+    for (const p of this.ponds) {
+      if (!rectsIntersect(view, p)) continue;
+      const s = applyRect(cam, p);
+      drawPond(ctx, s.x, s.y, s.w, s.h, p.x, p.y);
     }
     for (const c of this.craters) {
       if (c.x + c.r < view.x || c.x - c.r > view.x + view.w) continue;
@@ -1380,6 +1447,9 @@ export class GameMap {
     kind: ObstacleKind,
     windowLights: boolean,
   ): void {
+    // Lakes are painted on the ground layer (see drawGround); these rects
+    // only exist to block movement.
+    if (kind === "water") return;
     const sr = applyRect(cam, rect);
     // Structures share a palette across a whole neighbourhood; smaller props
     // mix in a per-prop hash so a street never repeats the same object.
@@ -1413,9 +1483,14 @@ export class GameMap {
     }
     // Water first — it reads as a landmark even at 160px.
     ctx.fillStyle = "#24484C";
-    for (const o of this.obstacles) {
-      if (o.kind !== "pond") continue;
-      ctx.fillRect(o.rect.x * scale, o.rect.y * scale, o.rect.w * scale, o.rect.h * scale);
+    for (const p of this.ponds) {
+      fillEllipse(
+        ctx,
+        (p.x + p.w / 2) * scale,
+        (p.y + p.h / 2) * scale,
+        (p.w / 2) * scale,
+        (p.h / 2) * scale,
+      );
     }
     // Rail line.
     ctx.fillStyle = "#4A4436";
@@ -1452,6 +1527,28 @@ export class GameMap {
 }
 
 // ═══════════════════════════════════════════════════════════ helpers ══
+
+/**
+ * Filled ellipse via a scaled arc. CanvasRenderingContext2D.ellipse is
+ * missing from the headless canvas the tests build the minimap on, and the
+ * minimap is built in the GameMap constructor — so this path has to work
+ * without it.
+ */
+function fillEllipse(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, ry / rx);
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
 
 /** Road importance — used for draw order and frontage priority. */
 function rank(c: RoadClass): number {
@@ -1498,7 +1595,7 @@ const CRUSH_HEAVY: ReadonlySet<ObstacleKind> = new Set<ObstacleKind>([
   "container",
   "silo",
   "tank",
-  "pond",
+  "water",
   "watchtower",
   "gazebo",
   "bus",
@@ -1510,6 +1607,33 @@ const CRUSH_HEAVY: ReadonlySet<ObstacleKind> = new Set<ObstacleKind>([
   "car_yellow",
   "car_police",
 ]);
+
+/**
+ * How much of a prop's drawn bounds is actually solid. Most sprites fill
+ * their rect and are absent here. The ones listed do not: a tree canopy is
+ * a circle of radius 0.36w inside a square bound, so blocking the whole
+ * rect is ~13px of invisible wall on every side — which is what makes a
+ * wooded block feel like it is snagging the player. Each value is the
+ * square inscribed in that sprite's drawn circle.
+ */
+const HITBOX_SCALE: Partial<Record<ObstacleKind, number>> = {
+  tree: 0.51, // canopy r = 0.36 * w
+  bush: 0.59, // canopy r = 0.42 * w
+  silo: 0.7, // circle filling the bounds
+  tank: 0.7,
+  gazebo: 0.7,
+  monument: 0.7,
+  traffic_light: 0.62, // a mast, not a box
+  pylon: 0.84,
+};
+
+function hitboxFor(kind: ObstacleKind, r: Rect): Rect {
+  const k = HITBOX_SCALE[kind];
+  if (!k) return r;
+  const w = r.w * k;
+  const h = r.h * k;
+  return { x: r.x + (r.w - w) / 2, y: r.y + (r.h - h) / 2, w, h };
+}
 
 function crushable(o: Obstacle): boolean {
   if (CRUSH_HEAVY.has(o.kind)) return false;

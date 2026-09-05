@@ -30,12 +30,41 @@ export const TILE = 64;
 
 // ── small helpers ──────────────────────────────────────────────────────
 
+/** Filled ellipse at an angle, built from a transformed arc. */
+function tiltedBlot(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  angle: number,
+  color: string,
+): void {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.scale(1, ry / rx);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(0, 0, rx, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 /** Hash → float in [0,1). */
 function h01(h: number): number {
   return (h % 1000) / 1000;
 }
 
-/** Soft, irregular blob built from a few overlapping arcs. */
+/**
+ * Soft, irregular blob built from a few overlapping arcs.
+ *
+ * `cx`/`cy` are where to draw it (screen space); `wx`/`wy` are the patch's
+ * WORLD origin and are the only thing the lobe layout is hashed from. That
+ * split matters: hashing the screen position re-rolls every lobe each time
+ * the camera moves 8px, which makes every lot, lawn and apron on the map
+ * pulse and flicker while the player runs.
+ */
 function blob(
   ctx: CanvasRenderingContext2D,
   cx: number,
@@ -43,10 +72,12 @@ function blob(
   rx: number,
   ry: number,
   seed: number,
+  wx: number,
+  wy: number,
   lobes = 7,
 ): void {
   for (let i = 0; i < lobes; i++) {
-    const hh = worldHash(seed + i * 131, Math.round(cx) + i * 37, Math.round(cy) - i * 19);
+    const hh = worldHash(seed + i * 131, Math.round(wx) + i * 37, Math.round(wy) - i * 19);
     const a = h01(hh) * Math.PI * 2;
     const d = 0.28 + h01(hh >> 3) * 0.34;
     ctx.beginPath();
@@ -191,9 +222,9 @@ export function drawSurfacePatch(
   const ry = h * 0.5;
   if (kind === "concrete") {
     ctx.fillStyle = "rgba(126,124,116,0.10)";
-    blob(ctx, cx, cy, rx * 0.9, ry * 0.9, seed + 11, 10);
+    blob(ctx, cx, cy, rx * 0.9, ry * 0.9, seed + 11, wx, wy, 10);
     ctx.fillStyle = "rgba(88,86,80,0.10)";
-    blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 17, 7);
+    blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 17, wx, wy, 7);
     // Expansion-joint grid + a few parking bay stripes.
     ctx.fillStyle = "rgba(14,14,12,0.20)";
     for (let gx = sx + 40; gx < sx + w; gx += 68) ctx.fillRect(gx, sy + 6, 1, h - 12);
@@ -204,16 +235,16 @@ export function drawSurfacePatch(
     }
   } else if (kind === "dirt") {
     ctx.fillStyle = "rgba(104,80,46,0.20)";
-    blob(ctx, cx, cy, rx, ry, seed + 31, 9);
+    blob(ctx, cx, cy, rx, ry, seed + 31, wx, wy, 9);
     ctx.fillStyle = "rgba(74,56,30,0.18)";
-    blob(ctx, cx, cy, rx * 0.62, ry * 0.62, seed + 37, 5);
+    blob(ctx, cx, cy, rx * 0.62, ry * 0.62, seed + 37, wx, wy, 5);
     // Tyre ruts.
     ctx.fillStyle = "rgba(44,32,18,0.28)";
     ctx.fillRect(sx + w * 0.2, sy + h * 0.34, w * 0.6, 2);
     ctx.fillRect(sx + w * 0.16, sy + h * 0.62, w * 0.66, 2);
   } else if (kind === "gravel") {
     ctx.fillStyle = "rgba(112,106,92,0.17)";
-    blob(ctx, cx, cy, rx, ry, seed + 41, 7);
+    blob(ctx, cx, cy, rx, ry, seed + 41, wx, wy, 7);
     for (let i = 0; i < 26; i++) {
       const hh = worldHash(seed + 43 + i, wx + i * 13, wy - i * 7);
       px(
@@ -226,9 +257,9 @@ export function drawSurfacePatch(
     }
   } else if (kind === "scorch") {
     ctx.fillStyle = "rgba(20,17,14,0.26)";
-    blob(ctx, cx, cy, rx, ry, seed + 53, 8);
+    blob(ctx, cx, cy, rx, ry, seed + 53, wx, wy, 8);
     ctx.fillStyle = "rgba(58,34,18,0.16)";
-    blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 59, 5);
+    blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 59, wx, wy, 5);
     // Radial soot streaks — reads as a blast mark.
     ctx.strokeStyle = "rgba(12,10,8,0.30)";
     ctx.lineWidth = 2;
@@ -241,23 +272,29 @@ export function drawSurfacePatch(
     }
   } else if (kind === "lawn") {
     ctx.fillStyle = "rgba(86,132,58,0.09)";
-    blob(ctx, cx, cy, rx * 0.92, ry * 0.92, seed + 67, 11);
+    blob(ctx, cx, cy, rx * 0.92, ry * 0.92, seed + 67, wx, wy, 11);
     ctx.fillStyle = "rgba(52,88,40,0.09)";
-    blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 71, 7);
-    // Mown stripes — the detail that actually says "kept lawn".
+    blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 71, wx, wy, 7);
+    // Mown stripes — the detail that actually says "kept lawn". Inset well
+    // inside the blob: a stripe that runs to the patch edge reinstates the
+    // hard rectangle the soft blob exists to hide.
     ctx.fillStyle = "rgba(104,150,66,0.07)";
-    for (let gx = sx + 12; gx < sx + w - 8; gx += 46) ctx.fillRect(gx, sy + 8, 22, Math.max(0, h - 16));
+    const mx0 = sx + w * 0.2;
+    const mx1 = sx + w * 0.8;
+    for (let gx = mx0; gx < mx1; gx += 46) {
+      ctx.fillRect(gx, sy + h * 0.22, Math.min(22, mx1 - gx), h * 0.56);
+    }
   } else if (kind === "sand") {
     ctx.fillStyle = "rgba(168,146,100,0.20)";
-    blob(ctx, cx, cy, rx, ry, seed + 73, 7);
+    blob(ctx, cx, cy, rx, ry, seed + 73, wx, wy, 7);
     ctx.fillStyle = "rgba(140,118,78,0.16)";
-    blob(ctx, cx, cy, rx * 0.6, ry * 0.6, seed + 79, 4);
+    blob(ctx, cx, cy, rx * 0.6, ry * 0.6, seed + 79, wx, wy, 4);
   } else {
     // water — shallow margin, deep centre, a few ripple glints.
     ctx.fillStyle = "rgba(46,74,80,0.55)";
-    blob(ctx, cx, cy, rx, ry, seed + 83, 9);
+    blob(ctx, cx, cy, rx, ry, seed + 83, wx, wy, 9);
     ctx.fillStyle = "rgba(26,48,58,0.55)";
-    blob(ctx, cx, cy, rx * 0.66, ry * 0.66, seed + 89, 6);
+    blob(ctx, cx, cy, rx * 0.66, ry * 0.66, seed + 89, wx, wy, 6);
     ctx.fillStyle = "rgba(150,190,196,0.16)";
     for (let i = 0; i < 7; i++) {
       const hh = worldHash(seed + 97 + i, wx + i * 29, wy + i * 17);
@@ -734,14 +771,10 @@ export function drawGroundDecal(
     px(ctx, x + 2, y + 2, "#1F2126", 2);
   } else if (kind === 5) {
     // Oil slick.
-    ctx.fillStyle = "rgba(10,12,16,0.42)";
-    ctx.beginPath();
-    ctx.ellipse(x + 6, y + 4, 11, 6, 0.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(60,44,80,0.20)";
-    ctx.beginPath();
-    ctx.ellipse(x + 4, y + 3, 6, 3, 0.4, 0, Math.PI * 2);
-    ctx.fill();
+    // Tilted ellipses via a transformed arc — ctx.ellipse is missing from
+    // the headless canvas the tests render on.
+    tiltedBlot(ctx, x + 6, y + 4, 11, 6, 0.4, "rgba(10,12,16,0.42)");
+    tiltedBlot(ctx, x + 4, y + 3, 6, 3, 0.4, "rgba(60,44,80,0.20)");
   } else if (kind === 6) {
     // Twisted rebar + wire.
     ctx.strokeStyle = "rgba(84,66,48,0.75)";
@@ -775,14 +808,16 @@ export function drawGroundDecal(
     ctx.stroke();
   } else if (kind === 10) {
     // Leaf litter.
+    // Derived from `h` (the cell's stable world hash), never from x/y —
+    // those are screen coordinates and would re-roll as the camera moves.
     for (let i = 0; i < 6; i++) {
-      const hh = worldHash(seed + 909 + i, x + i * 7, y - i * 5);
+      const hh = worldHash(seed + 909, h + i * 7, i * 13);
       px(ctx, x + (hh % 16), y + ((hh >> 4) % 14), hh % 2 === 0 ? "#6E7A34" : "#4E5A26", 3);
     }
   } else if (kind === 12) {
     // Spent shell casings — glints of brass.
     for (let i = 0; i < 7; i++) {
-      const hh = worldHash(seed + 977 + i, x - i * 9, y + i * 6);
+      const hh = worldHash(seed + 977, h + i * 11, i * 17);
       px(ctx, x + (hh % 18), y + ((hh >> 5) % 15), hh % 3 === 0 ? "#D8B45A" : "#B08A3C", 2);
     }
   } else if (kind === 13) {
