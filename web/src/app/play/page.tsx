@@ -24,7 +24,7 @@ export default async function PlayPage({ searchParams }: PlayPageProps) {
   }
 
   return (
-    <main style={{ position: "fixed", inset: 0, background: "#10120E" }}>
+    <main className="zs-stage">
       <GameCanvas
         mode={params.mode}
         room={params.room}

@@ -10,6 +10,27 @@ import {
   rect,
   worldHash,
 } from "./pixelArt";
+import {
+  drawBillboard,
+  drawBusStop,
+  drawFence,
+  drawFuelPump,
+  drawGazebo,
+  drawJersey,
+  drawKiosk,
+  drawPlanter,
+  drawPond,
+  drawPylon,
+  drawSandbag,
+  drawSign,
+  drawSilo,
+  drawTank,
+  drawTent,
+  drawTower,
+  drawTrafficLight,
+  drawWarehouse,
+  drawWatchtower,
+} from "./propArtExtra";
 
 export type PropKind =
   | "border"
@@ -34,7 +55,27 @@ export type PropKind =
   | "mailbox"
   | "bench"
   | "cart"
-  | "monument";
+  | "monument"
+  // ── Greenfield district landmarks (see propArtExtra.ts) ──────────────
+  | "tower"
+  | "warehouse"
+  | "silo"
+  | "tank"
+  | "fence"
+  | "sandbag"
+  | "jersey"
+  | "watchtower"
+  | "tent"
+  | "pond"
+  | "gazebo"
+  | "planter"
+  | "bus_stop"
+  | "traffic_light"
+  | "billboard"
+  | "fuel_pump"
+  | "kiosk"
+  | "sign"
+  | "pylon";
 
 // ---------------------------------------------------------------------
 // Façade palettes. styleVariant selects a district-consistent palette; the
@@ -120,6 +161,26 @@ export function drawPropSprite(
   if (kind === "bench") return drawBench(ctx, x, y, w, h);
   if (kind === "cart") return drawCart(ctx, x, y, w, h);
   if (kind === "monument") return drawMonument(ctx, x, y, w, h);
+  // ── Greenfield district landmarks ───────────────────────────────────
+  if (kind === "tower") return drawTower(ctx, x, y, w, h, litWindows, styleVariant, worldX, worldY);
+  if (kind === "warehouse") return drawWarehouse(ctx, x, y, w, h, litWindows, styleVariant, worldX, worldY);
+  if (kind === "silo") return drawSilo(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "tank") return drawTank(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "fence") return drawFence(ctx, x, y, w, h, styleVariant, worldX, worldY);
+  if (kind === "sandbag") return drawSandbag(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "jersey") return drawJersey(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "watchtower") return drawWatchtower(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "tent") return drawTent(ctx, x, y, w, h, styleVariant, worldX, worldY);
+  if (kind === "pond") return drawPond(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "gazebo") return drawGazebo(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "planter") return drawPlanter(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "bus_stop") return drawBusStop(ctx, x, y, w, h);
+  if (kind === "traffic_light") return drawTrafficLight(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "billboard") return drawBillboard(ctx, x, y, w, h, styleVariant, worldX, worldY);
+  if (kind === "fuel_pump") return drawFuelPump(ctx, x, y, w, h, worldX, worldY);
+  if (kind === "kiosk") return drawKiosk(ctx, x, y, w, h, styleVariant);
+  if (kind === "sign") return drawSign(ctx, x, y, w, h, styleVariant);
+  if (kind === "pylon") return drawPylon(ctx, x, y, w, h, worldX, worldY);
   if (
     kind === "car_red" ||
     kind === "car_blue" ||

@@ -160,99 +160,39 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
-      <canvas
-        ref={ref}
-        data-testid="game-canvas"
-        style={{ display: "block" }}
-      />
+      <canvas ref={ref} data-testid="game-canvas" />
+      {/* Inert screen treatment: corner falloff + faint scanlines. */}
+      <div className="zs-screen-fx" aria-hidden="true" />
       {isMobile && gameRef.current && (
         <TouchHUD input={gameRef.current.input} gameRef={gameRef} />
       )}
       {wsStatus !== "none" && wsStatus !== "open" && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            backgroundColor: "rgba(10, 12, 9, 0.85)",
-            backdropFilter: "blur(4px)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: "ui-monospace, monospace",
-            color: "#EBEBE1",
-            zIndex: 100,
-          }}
-        >
-          <div
-            style={{
-              padding: "30px",
-              border: "2px solid #3C3C36",
-              backgroundColor: "#1C1E1A",
-              borderRadius: "8px",
-              textAlign: "center",
-              maxWidth: "400px",
-            }}
-          >
-            {wsStatus === "connecting" && (
-              <>
-                <h2 style={{ color: "#FFC850", margin: "0 0 15px 0" }}>ROOM: {room}</h2>
-                <p style={{ margin: "0 0 20px 0" }}>Connecting to match lobby...</p>
-                <div
-                  style={{
-                    width: "40px",
-                    height: "40px",
-                    border: "4px solid #3C3C36",
-                    borderTop: "4px solid #FF3C46",
-                    borderRadius: "50%",
-                    margin: "0 auto",
-                    animation: "spin 1s linear infinite",
-                  }}
-                />
-              </>
-            )}
-            {wsStatus === "closed" && (
-              <>
-                <h2 style={{ color: "#FF3C46", margin: "0 0 15px 0" }}>DISCONNECTED</h2>
-                <p style={{ margin: "0 0 20px 0" }}>The connection to the server was lost.</p>
-                <button
-                  onClick={goBack}
-                  style={{
-                    padding: "10px 20px",
-                    backgroundColor: "#FF3C46",
-                    color: "#10120E",
-                    border: "none",
-                    fontWeight: "bold",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                  }}
-                >
-                  RETURN TO LOBBY
-                </button>
-              </>
-            )}
-            {wsStatus === "error" && (
-              <>
-                <h2 style={{ color: "#FF3C46", margin: "0 0 15px 0" }}>CONNECTION ERROR</h2>
-                <p style={{ margin: "0 0 20px 0" }}>Could not establish connection to the multiplayer room.</p>
-                <button
-                  onClick={goBack}
-                  style={{
-                    padding: "10px 20px",
-                    backgroundColor: "#FF3C46",
-                    color: "#10120E",
-                    border: "none",
-                    fontWeight: "bold",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                  }}
-                >
-                  RETURN TO LOBBY
-                </button>
-              </>
-            )}
-          </div>
-          <style>{`@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`}</style>
+        <div className="zs-overlay" role="status" aria-live="polite">
+          {wsStatus === "connecting" && (
+            <div className="zs-modal zs-modal--wait">
+              <h2>Room: {room}</h2>
+              <p>Connecting to match lobby…</p>
+              <div className="zs-spinner" />
+            </div>
+          )}
+          {wsStatus === "closed" && (
+            <div className="zs-modal zs-modal--alert">
+              <h2>Disconnected</h2>
+              <p>The connection to the server was lost.</p>
+              <button className="zs-btn" onClick={goBack}>
+                Return to lobby
+              </button>
+            </div>
+          )}
+          {wsStatus === "error" && (
+            <div className="zs-modal zs-modal--alert">
+              <h2>Connection error</h2>
+              <p>Could not establish a connection to the multiplayer room.</p>
+              <button className="zs-btn" onClick={goBack}>
+                Return to lobby
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
