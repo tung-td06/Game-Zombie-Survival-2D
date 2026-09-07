@@ -19,6 +19,23 @@ export interface PixelArtAtlas {
 
 const atlasCache = new WeakMap<CanvasRenderingContext2D, PixelArtAtlas>();
 
+/**
+ * Canvas backing-store scale.
+ *
+ * Snapped to a WHOLE number on purpose. Every surface in this game is drawn
+ * as axis-aligned fillRects at integer world coordinates; at a fractional
+ * devicePixelRatio (Windows 125% / 150% display scaling, the default on
+ * most laptops) an edge at an integer logical coordinate lands halfway
+ * across a device pixel, so two abutting rects each cover half of it and
+ * source-over compositing lets ~25% of the background through — the dark
+ * hairline that showed up as a seam between road stretches and terrain
+ * tiles. Rounding UP keeps the picture at least as sharp as the display.
+ */
+export function renderScale(): number {
+  const dpr = (typeof window === "undefined" ? 1 : window.devicePixelRatio) || 1;
+  return Math.min(3, Math.max(1, Math.ceil(dpr)));
+}
+
 export function pixelVariant(seed: number, x: number, y: number, variants: number): number {
   if (variants <= 1) return 0;
   let h = Math.imul((x | 0) ^ Math.imul(y | 0, 374761393) ^ seed, 668265263);
@@ -43,8 +60,22 @@ export function px(ctx: CanvasRenderingContext2D, x: number, y: number, color: s
   rect(ctx, x, y, size, size, color);
 }
 
+/**
+ * Hash of the CELL that world point (x, y) falls in, on a grid of `size`px.
+ *
+ * Use this — never `worldHash` — whenever a pattern's period is the cell
+ * size. `worldHash` quantises its own arguments to 8px, so handing it an
+ * already-divided cell index divides twice and makes every run of EIGHT
+ * neighbouring cells share one value: a 128px pattern comes out in 1024px
+ * blocks, and a 900px one in 7200px blocks (larger than the map).
+ */
+export function cellHash(seed: number, size: number, x: number, y: number): number {
+  return pixelVariant(seed + 71, Math.floor(x / size), Math.floor(y / size), 997);
+}
+
+/** Cell hash on the 8px grid — the default for per-speck world detail. */
 export function worldHash(seed: number, x: number, y: number): number {
-  return pixelVariant(seed + 71, Math.floor(x / 8), Math.floor(y / 8), 997);
+  return cellHash(seed, 8, x, y);
 }
 
 export function drawPlayerSprite(

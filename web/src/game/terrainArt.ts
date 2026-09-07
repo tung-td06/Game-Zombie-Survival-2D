@@ -17,7 +17,7 @@
 //   6. scattered litter decals
 // ─────────────────────────────────────────────────────────────────────────
 
-import { px, rect, worldHash } from "./pixelArt";
+import { cellHash, px, rect, worldHash } from "./pixelArt";
 import {
   GROUND,
   districtAt,
@@ -117,7 +117,7 @@ export function drawTerrainTile(
   rect(ctx, sx, sy, TILE, TILE, pal.base[th % 4]!);
 
   // 128px low-frequency wash — the "which part of the block am I on" layer.
-  const bh = worldHash(seed + 2029, Math.floor(wx / 128), Math.floor(wy / 128));
+  const bh = cellHash(seed + 2029, 128, wx, wy);
   const bk = bh % 10;
   if (bk < 4) {
     ctx.fillStyle = bk === 0 ? "rgba(0,0,0,0.13)" : pal.wash;
@@ -366,13 +366,22 @@ export function drawSidewalkBand(
 
   const span = vertical ? h : w;
   const SLAB = 46;
-  for (let p = 0; p < span; p += SLAB) {
+  // The paving steps on ONE world grid, and the band is clipped instead of
+  // the pattern being cut short: keying the grid off each band's own edge
+  // put a joint line exactly where two bands met and left a stub slab
+  // beside it, so every junction grew a line across its footway.
+  const along = vertical ? wy : wx;
+  const start = -(((along % SLAB) + SLAB) % SLAB);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(px0, py0, pw, ph);
+  ctx.clip();
+  for (let p = start; p < span; p += SLAB) {
     const hh = worldHash(
       seed + 313,
       Math.floor(vertical ? wx : wx + p),
       Math.floor(vertical ? wy + p : wy),
     );
-    const seg = Math.min(SLAB, span - p);
     // Per-slab tone: sun-bleached, grimy or cracked.
     const tone = hh % 5;
     if (tone === 0) ctx.fillStyle = "rgba(96,94,84,0.28)";
@@ -380,13 +389,13 @@ export function drawSidewalkBand(
     else if (tone === 2) ctx.fillStyle = "rgba(66,64,56,0.20)";
     else ctx.fillStyle = "rgba(0,0,0,0)";
     if (tone < 3) {
-      if (vertical) ctx.fillRect(px0, py0 + p, pw, seg);
-      else ctx.fillRect(px0 + p, py0, seg, ph);
+      if (vertical) ctx.fillRect(px0, py0 + p, pw, SLAB);
+      else ctx.fillRect(px0 + p, py0, SLAB, ph);
     }
     // Joint line between slabs.
     ctx.fillStyle = "rgba(10,10,8,0.42)";
-    if (vertical) ctx.fillRect(px0 + 1, py0 + p + seg - 1, pw - 2, 1);
-    else ctx.fillRect(px0 + p + seg - 1, py0 + 1, 1, ph - 2);
+    if (vertical) ctx.fillRect(px0 + 1, py0 + p + SLAB - 1, pw - 2, 1);
+    else ctx.fillRect(px0 + p + SLAB - 1, py0 + 1, 1, ph - 2);
     // Cracks / heaved slabs.
     if (hh % 11 === 0) {
       ctx.strokeStyle = "rgba(8,8,6,0.5)";
@@ -394,10 +403,10 @@ export function drawSidewalkBand(
       ctx.beginPath();
       if (vertical) {
         ctx.moveTo(px0 + 2, py0 + p + 6);
-        ctx.lineTo(px0 + pw - 3, py0 + p + seg - 8);
+        ctx.lineTo(px0 + pw - 3, py0 + p + SLAB - 8);
       } else {
         ctx.moveTo(px0 + p + 6, py0 + 2);
-        ctx.lineTo(px0 + p + seg - 8, py0 + ph - 3);
+        ctx.lineTo(px0 + p + SLAB - 8, py0 + ph - 3);
       }
       ctx.stroke();
     }
@@ -409,6 +418,7 @@ export function drawSidewalkBand(
       rect(ctx, gx + 3, gy + 1, 1, 4, "#4E6E36");
     }
   }
+  ctx.restore();
 
   // Kerb: pale top face + dark shadow lip against the asphalt.
   if (vertical) {
@@ -431,9 +441,92 @@ const ROAD_TONE: Record<RoadClass, [string, string, string]> = {
 };
 
 /**
- * Asphalt slab with aggregate texture, resurfacing patches, wheel-polished
- * lanes, cracks, drains and painted markings. `lanes` controls the marking
- * scheme: 2 = single dashed centre line, 4 = double centre + lane dashes.
+ * An along-axis interval of a slab, in slab-local pixels: [start, end).
+ * Everything a road paints ON ITSELF (grain, kerb paint, lane lines) is
+ * restricted to a list of these, so the stretch that another road crosses
+ * paints nothing there instead of stamping its own edge across that other
+ * carriageway. The runs come from world geometry and are computed once by
+ * GameMap, never per frame and never from camera state.
+ */
+export type RoadRun = readonly [number, number];
+
+/**
+ * Asphalt pass 1 — the kerb-dark ground of a slab, flat over the whole
+ * rect. EVERY visible slab gets this before ANY slab gets its carriageway
+ * (pass 2), which is what makes the network render as one connected
+ * surface: a slab can no longer stamp its dark rim on top of a carriageway
+ * that was already laid next to, or across, it.
+ */
+export function drawRoadBase(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  w: number,
+  h: number,
+  cls: RoadClass,
+): void {
+  rect(ctx, sx, sy, w, h, ROAD_TONE[cls][0]);
+}
+
+/**
+ * Asphalt pass 2 — the carriageway, inset by the 3px kerb shadow on the two
+ * LONG sides only. The ends are deliberately left open: capping them is
+ * what drew a dark bar straight across the road wherever one stretch ran
+ * into the next. Where two carriageways meet, the neighbour's deck now
+ * fills the joint exactly, leaving only a 3x3 kerb radius in each corner.
+ */
+export function drawRoadDeck(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  w: number,
+  h: number,
+  vertical: boolean,
+  cls: RoadClass,
+): void {
+  const tone = ROAD_TONE[cls][1];
+  if (vertical) rect(ctx, sx + 3, sy, w - 6, h, tone);
+  else rect(ctx, sx, sy + 3, w, h - 6, tone);
+}
+
+/** Clip to a slab's runs (disjoint, sorted) and run `draw` inside them. */
+function inRuns(
+  ctx: CanvasRenderingContext2D,
+  sx: number,
+  sy: number,
+  w: number,
+  h: number,
+  vertical: boolean,
+  runs: readonly RoadRun[],
+  draw: () => void,
+): void {
+  if (runs.length === 0) return;
+  ctx.save();
+  ctx.beginPath();
+  for (const [a, b] of runs) {
+    if (b <= a) continue;
+    if (vertical) ctx.rect(sx, sy + a, w, b - a);
+    else ctx.rect(sx + a, sy, b - a, h);
+  }
+  ctx.clip();
+  draw();
+  ctx.restore();
+}
+
+/**
+ * Asphalt pass 3 — everything painted on a slab: aggregate texture,
+ * resurfacing patches, wheel polish, drains and the road markings.
+ *
+ * `texRuns` are the stretches this slab still owns visually (a road that
+ * a more important road paints over yields its grain there, so patches
+ * never stack up and double-darken a junction). `paintRuns` are the
+ * stretches with no crossing road at all: road paint stops at a junction
+ * box, which is exactly where junction paint is drawn afterwards.
+ *
+ * Every marking is phased off the slab's WORLD coordinate and stepped in
+ * whole periods, so the dash rhythm carries straight through a joint — two
+ * stretches of the same road share one pattern instead of each restarting
+ * at its own edge.
  */
 export function drawRoadSlab(
   ctx: CanvasRenderingContext2D,
@@ -446,139 +539,172 @@ export function drawRoadSlab(
   wy: number,
   cls: RoadClass,
   seed: number,
+  texRuns: readonly RoadRun[],
+  paintRuns: readonly RoadRun[],
 ): void {
-  const tone = ROAD_TONE[cls];
-  rect(ctx, sx, sy, w, h, tone[0]);
-  rect(ctx, sx + 3, sy + 3, w - 6, h - 6, tone[1]);
-
   const span = vertical ? h : w;
   const across = vertical ? w : h;
   const alongW = vertical ? wy : wx;
 
-  // Resurfacing patches — darker rectangles of newer asphalt.
-  for (let p = 0; p < span; p += 88) {
-    const hh = worldHash(seed + 907, Math.floor((vertical ? wx : wx + p) / 88), Math.floor((vertical ? wy + p : wy) / 88));
-    if (hh % 4 === 0) {
-      const seg = Math.min(88, span - p);
-      ctx.fillStyle = "rgba(16,16,18,0.42)";
-      if (vertical) ctx.fillRect(sx + 8, sy + p, w - 16, seg);
-      else ctx.fillRect(sx + p, sy + 8, seg, h - 16);
-    } else if (hh % 9 === 0) {
-      const seg = Math.min(88, span - p);
-      ctx.fillStyle = "rgba(72,68,60,0.13)";
-      if (vertical) ctx.fillRect(sx + 12, sy + p, w - 24, seg);
-      else ctx.fillRect(sx + p, sy + 12, seg, h - 24);
+  /**
+   * Start offset for an along-axis pattern of period `P`. Every pattern on
+   * the asphalt steps from here, so its cells sit on ONE global world grid
+   * of that period instead of restarting at this slab's own edge — which is
+   * what put a hard edge in the texture exactly where one stretch of road
+   * ran into the next. Result is in (-P, 0]; cells that start before the
+   * slab are harmless, `inRuns` clips them away.
+   */
+  const phase = (P: number) => -(((alongW % P) + P) % P);
+  /** World coordinate along the road of the cell at slab-local `p`. */
+  const alongAt = (p: number) => alongW + p;
+  /** Hash of a cell, keyed on its WORLD position — never on the slab's. */
+  const cellHash = (salt: number, p: number) =>
+    worldHash(seed + salt, vertical ? wx : alongAt(p), vertical ? alongAt(p) : wy);
+
+  inRuns(ctx, sx, sy, w, h, vertical, texRuns, () => {
+    // Wheel-polished lanes: two lighter strips per direction. Part of the
+    // SURFACE, not the markings, so it follows `texRuns` and carries
+    // straight through a junction the road owns. Clipping it to the painted
+    // stretches instead left every junction box a shade darker than the
+    // carriageway either side of it — a tonal bar across the road.
+    ctx.fillStyle = "rgba(122,120,112,0.055)";
+    for (const t of [0.22, 0.35, 0.65, 0.78]) {
+      if (vertical) ctx.fillRect(sx + across * t - 6, sy, 12, h);
+      else ctx.fillRect(sx, sy + across * t - 6, w, 12);
     }
-  }
 
-  // Aggregate speckle — the thing that makes asphalt read as asphalt.
-  for (let p = 0; p < span; p += 16) {
-    const hh = worldHash(seed + 911, Math.floor(vertical ? wx : wx + p), Math.floor(vertical ? wy + p : wy));
-    const off = 6 + (hh % Math.max(1, across - 12));
-    const c = hh % 3 === 0 ? "rgba(96,94,88,0.22)" : "rgba(10,10,12,0.30)";
-    if (vertical) px(ctx, sx + off, sy + p + (hh % 13), c, 2);
-    else px(ctx, sx + p + (hh % 13), sy + off, c, 2);
-  }
-
-  // Wheel-polished lanes: two lighter strips per direction.
-  ctx.fillStyle = "rgba(122,120,112,0.055)";
-  const lanePos = [0.22, 0.35, 0.65, 0.78];
-  for (const t of lanePos) {
-    if (vertical) ctx.fillRect(sx + across * t - 6, sy, 12, h);
-    else ctx.fillRect(sx, sy + across * t - 6, w, 12);
-  }
-
-  // Long cracks + drain grates at the kerb line.
-  for (let p = 0; p < span; p += 220) {
-    const hh = worldHash(seed + 919, Math.floor(vertical ? wx : wx + p), Math.floor(vertical ? wy + p : wy));
-    if (hh % 3 === 0) {
-      ctx.strokeStyle = "rgba(8,8,10,0.55)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      const jitter = (hh % 17) - 8;
-      if (vertical) {
-        ctx.moveTo(sx + 10 + ((hh >> 4) % Math.max(1, across - 20)), sy + p);
-        ctx.lineTo(sx + 10 + ((hh >> 4) % Math.max(1, across - 20)) + jitter, sy + p + 160);
-      } else {
-        ctx.moveTo(sx + p, sy + 10 + ((hh >> 4) % Math.max(1, across - 20)));
-        ctx.lineTo(sx + p + 160, sy + 10 + ((hh >> 4) % Math.max(1, across - 20)) + jitter);
-      }
-      ctx.stroke();
-    }
-    if (hh % 5 === 0) {
-      // Storm drain hugging one kerb.
-      const near = hh % 2 === 0 ? 7 : across - 21;
-      const gx = vertical ? sx + near : sx + p + 20;
-      const gy = vertical ? sy + p + 20 : sy + near;
-      rect(ctx, gx, gy, vertical ? 14 : 22, vertical ? 22 : 14, "#141517");
-      ctx.fillStyle = "#3A3C3F";
-      for (let i = 0; i < 4; i++) {
-        if (vertical) rect(ctx, gx + 2, gy + 3 + i * 5, 10, 2, "#3A3C3F");
-        else rect(ctx, gx + 3 + i * 5, gy + 2, 2, 10, "#3A3C3F");
+    // Resurfacing patches — darker rectangles of newer asphalt. The hash
+    // takes the cell's raw world coordinate: pre-dividing it by the period
+    // hit `worldHash`'s own 8px quantisation and made every run of eight
+    // neighbouring cells share one value, so patches fused into 704px
+    // full-width blocks with a hard step across the road at each end.
+    for (let p = phase(88); p < span; p += 88) {
+      const hh = cellHash(907, p);
+      if (hh % 4 === 0) {
+        ctx.fillStyle = "rgba(16,16,18,0.42)";
+        if (vertical) ctx.fillRect(sx + 8, sy + p, w - 16, 88);
+        else ctx.fillRect(sx + p, sy + 8, 88, h - 16);
+      } else if (hh % 9 === 0) {
+        ctx.fillStyle = "rgba(72,68,60,0.13)";
+        if (vertical) ctx.fillRect(sx + 12, sy + p, w - 24, 88);
+        else ctx.fillRect(sx + p, sy + 12, 88, h - 24);
       }
     }
-    if (hh % 8 === 0) {
-      // Manhole.
-      const mx = vertical ? sx + across / 2 + ((hh % 3) - 1) * 22 : sx + p + 44;
-      const my = vertical ? sy + p + 44 : sy + across / 2 + ((hh % 3) - 1) * 22;
-      ctx.fillStyle = "#141517";
-      ctx.beginPath();
-      ctx.arc(mx, my, 11, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#33353A";
-      ctx.beginPath();
-      ctx.arc(mx, my, 8, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "#191A1D";
-      ctx.beginPath();
-      ctx.arc(mx, my, 4, 0, Math.PI * 2);
-      ctx.fill();
+
+    // Aggregate speckle — the thing that makes asphalt read as asphalt.
+    for (let p = phase(16); p < span; p += 16) {
+      const hh = cellHash(911, p);
+      const off = 6 + (hh % Math.max(1, across - 12));
+      const c = hh % 3 === 0 ? "rgba(96,94,88,0.22)" : "rgba(10,10,12,0.30)";
+      if (vertical) px(ctx, sx + off, sy + p + (hh % 13), c, 2);
+      else px(ctx, sx + p + (hh % 13), sy + off, c, 2);
     }
-  }
+
+    // Long cracks + drain grates at the kerb line.
+    for (let p = phase(220); p < span; p += 220) {
+      const hh = cellHash(919, p);
+      if (hh % 3 === 0) {
+        ctx.strokeStyle = "rgba(8,8,10,0.55)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        const jitter = (hh % 17) - 8;
+        if (vertical) {
+          ctx.moveTo(sx + 10 + ((hh >> 4) % Math.max(1, across - 20)), sy + p);
+          ctx.lineTo(sx + 10 + ((hh >> 4) % Math.max(1, across - 20)) + jitter, sy + p + 160);
+        } else {
+          ctx.moveTo(sx + p, sy + 10 + ((hh >> 4) % Math.max(1, across - 20)));
+          ctx.lineTo(sx + p + 160, sy + 10 + ((hh >> 4) % Math.max(1, across - 20)) + jitter);
+        }
+        ctx.stroke();
+      }
+      if (hh % 5 === 0) {
+        // Storm drain hugging one kerb.
+        const near = hh % 2 === 0 ? 7 : across - 21;
+        const gx = vertical ? sx + near : sx + p + 20;
+        const gy = vertical ? sy + p + 20 : sy + near;
+        rect(ctx, gx, gy, vertical ? 14 : 22, vertical ? 22 : 14, "#141517");
+        ctx.fillStyle = "#3A3C3F";
+        for (let i = 0; i < 4; i++) {
+          if (vertical) rect(ctx, gx + 2, gy + 3 + i * 5, 10, 2, "#3A3C3F");
+          else rect(ctx, gx + 3 + i * 5, gy + 2, 2, 10, "#3A3C3F");
+        }
+      }
+      if (hh % 8 === 0) {
+        // Manhole.
+        const mx = vertical ? sx + across / 2 + ((hh % 3) - 1) * 22 : sx + p + 44;
+        const my = vertical ? sy + p + 44 : sy + across / 2 + ((hh % 3) - 1) * 22;
+        ctx.fillStyle = "#141517";
+        ctx.beginPath();
+        ctx.arc(mx, my, 11, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#33353A";
+        ctx.beginPath();
+        ctx.arc(mx, my, 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#191A1D";
+        ctx.beginPath();
+        ctx.arc(mx, my, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  });
 
   // ── Painted markings ────────────────────────────────────────────────
-  const wide = cls === "avenue" || cls === "belt";
-  const edge = "rgba(216,214,204,0.42)";
-  const yellow = "#C8A544";
-  const yellowHi = "#E6C86A";
+  inRuns(ctx, sx, sy, w, h, vertical, paintRuns, () => {
+    const wide = cls === "avenue" || cls === "belt";
+    const edge = "rgba(216,214,204,0.42)";
+    const yellow = "#C8A544";
+    const yellowHi = "#E6C86A";
 
-  const drawDash = (aStart: number, offAcross: number, len: number, gap: number, color: string, thick: number) => {
-    for (let p = aStart; p < span - 8; p += len + gap) {
-      const seg = Math.min(len, span - 8 - p);
-      if (seg <= 2) break;
-      if (vertical) rect(ctx, sx + offAcross, sy + p, thick, seg, color);
-      else rect(ctx, sx + p, sy + offAcross, seg, thick, color);
-    }
-  };
+    // Dashes step in whole periods from a world-anchored origin and are
+    // trimmed by the run clip, never by the slab's own length — so the
+    // pattern never restarts, doubles up or leaves a short stub where two
+    // stretches of the same road meet.
+    const drawDash = (
+      aStart: number,
+      offAcross: number,
+      len: number,
+      gap: number,
+      color: string,
+      thick: number,
+    ) => {
+      for (let p = aStart; p < span; p += len + gap) {
+        if (vertical) rect(ctx, sx + offAcross, sy + p, thick, len, color);
+        else rect(ctx, sx + p, sy + offAcross, len, thick, color);
+      }
+    };
 
-  // Solid white edge lines just inside the kerbs.
-  if (vertical) {
-    rect(ctx, sx + 7, sy, 2, h, edge);
-    rect(ctx, sx + across - 9, sy, 2, h, edge);
-  } else {
-    rect(ctx, sx, sy + 7, w, 2, edge);
-    rect(ctx, sx, sy + across - 9, w, 2, edge);
-  }
-
-  // Centre line: double solid amber on wide roads, dashed on the rest.
-  const mid = across / 2;
-  const alongOff = ((alongW % 76) + 76) % 76;
-  if (wide) {
+    // Solid white edge lines just inside the kerbs.
     if (vertical) {
-      rect(ctx, sx + mid - 5, sy, 3, h, yellow);
-      rect(ctx, sx + mid + 2, sy, 3, h, yellow);
-      rect(ctx, sx + mid - 5, sy, 1, h, yellowHi);
+      rect(ctx, sx + 7, sy, 2, h, edge);
+      rect(ctx, sx + across - 9, sy, 2, h, edge);
     } else {
-      rect(ctx, sx, sy + mid - 5, w, 3, yellow);
-      rect(ctx, sx, sy + mid + 2, w, 3, yellow);
-      rect(ctx, sx, sy + mid - 5, w, 1, yellowHi);
+      rect(ctx, sx, sy + 7, w, 2, edge);
+      rect(ctx, sx, sy + across - 9, w, 2, edge);
     }
-    // Inner lane dashes between the centre and each edge.
-    drawDash(-alongOff, Math.round(across * 0.26) - 1, 30, 46, "rgba(214,212,202,0.34)", 3);
-    drawDash(-alongOff, Math.round(across * 0.74) - 1, 30, 46, "rgba(214,212,202,0.34)", 3);
-  } else {
-    drawDash(-alongOff, Math.round(mid) - 2, 34, 42, yellow, 4);
-  }
+
+    // Centre line: double solid amber on wide roads, dashed on the rest.
+    const mid = across / 2;
+    // Both dash rhythms below have a 76px period, so one world grid keeps
+    // them in step no matter which stretch of road is being drawn.
+    const dashStart = phase(76);
+    if (wide) {
+      if (vertical) {
+        rect(ctx, sx + mid - 5, sy, 3, h, yellow);
+        rect(ctx, sx + mid + 2, sy, 3, h, yellow);
+        rect(ctx, sx + mid - 5, sy, 1, h, yellowHi);
+      } else {
+        rect(ctx, sx, sy + mid - 5, w, 3, yellow);
+        rect(ctx, sx, sy + mid + 2, w, 3, yellow);
+        rect(ctx, sx, sy + mid - 5, w, 1, yellowHi);
+      }
+      // Inner lane dashes between the centre and each edge.
+      drawDash(dashStart, Math.round(across * 0.26) - 1, 30, 46, "rgba(214,212,202,0.34)", 3);
+      drawDash(dashStart, Math.round(across * 0.74) - 1, 30, 46, "rgba(214,212,202,0.34)", 3);
+    } else {
+      drawDash(dashStart, Math.round(mid) - 2, 34, 42, yellow, 4);
+    }
+  });
 }
 
 /**
@@ -631,19 +757,29 @@ export function drawRailSegment(
   seed: number,
 ): void {
   rect(ctx, sx, sy, w, h, "#3A362C");
-  // Ballast chips.
   const span = vertical ? h : w;
-  for (let p = 0; p < span; p += 9) {
-    const hh = worldHash(seed + 733, Math.floor(vertical ? wx : wx + p), Math.floor(vertical ? wy + p : wy));
+  // Ballast and sleepers step on one world grid and the bed is clipped, so
+  // two stretches of line that meet keep a single run of sleepers instead
+  // of each restarting its own rhythm at the joint.
+  const along = vertical ? wy : wx;
+  const phase = (P: number) => -(((along % P) + P) % P);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(sx, sy, w, h);
+  ctx.clip();
+  // Ballast chips.
+  for (let p = phase(9); p < span; p += 9) {
+    const hh = worldHash(seed + 733, vertical ? wx : wx + p, vertical ? wy + p : wy);
     const off = 2 + (hh % Math.max(1, (vertical ? w : h) - 4));
     if (vertical) px(ctx, sx + off, sy + p, hh % 3 === 0 ? "#5A5446" : "#2A271F", 3);
     else px(ctx, sx + p, sy + off, hh % 3 === 0 ? "#5A5446" : "#2A271F", 3);
   }
   // Sleepers every 26px.
-  for (let p = 0; p < span; p += 26) {
+  for (let p = phase(26); p < span; p += 26) {
     if (vertical) rect(ctx, sx + 6, sy + p, w - 12, 9, "#392C1F");
     else rect(ctx, sx + p, sy + 6, 9, h - 12, "#392C1F");
   }
+  ctx.restore();
   // Rails.
   const a = vertical ? w : h;
   const r1 = Math.round(a * 0.3);
@@ -676,12 +812,19 @@ export function drawPathSegment(
   ctx.fillRect(sx + 3, sy + 3, Math.max(0, w - 6), Math.max(0, h - 6));
   const vertical = h > w;
   const span = vertical ? h : w;
-  for (let p = 0; p < span; p += 11) {
-    const hh = worldHash(seed + 811, Math.floor(vertical ? wx : wx + p), Math.floor(vertical ? wy + p : wy));
+  // Same world grid + clip as the rails, for the same reason.
+  const along = vertical ? wy : wx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(sx, sy, w, h);
+  ctx.clip();
+  for (let p = -(((along % 11) + 11) % 11); p < span; p += 11) {
+    const hh = worldHash(seed + 811, vertical ? wx : wx + p, vertical ? wy + p : wy);
     const off = hh % Math.max(1, (vertical ? w : h) - 3);
     if (vertical) px(ctx, sx + off, sy + p, hh % 4 === 0 ? "rgba(176,160,124,0.5)" : "rgba(84,72,52,0.5)", 2);
     else px(ctx, sx + p, sy + off, hh % 4 === 0 ? "rgba(176,160,124,0.5)" : "rgba(84,72,52,0.5)", 2);
   }
+  ctx.restore();
 }
 
 // ── 5. street furniture that lives on the ground layer ─────────────────

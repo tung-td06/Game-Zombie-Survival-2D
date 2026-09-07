@@ -47,7 +47,7 @@ import type { GameState, ToastEntry, WaveBanner, Stats } from "./types";
 import { Button, drawCrosshair, drawHud, drawMinimap, drawToasts } from "./ui";
 import { hitTest } from "./menu";
 import type { Vec } from "./vec";
-import { drawPixelLight, type PixelLight } from "./pixelArt";
+import { drawPixelLight, renderScale, type PixelLight } from "./pixelArt";
 
 export const MENU = "MENU";
 export const PLAYING = "PLAYING";
@@ -727,7 +727,7 @@ export class Game {
   private draw() {
     const ctx = this.ctx;
     const canvas = ctx.canvas;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = renderScale();
     const targetW = Math.floor(this.viewW * dpr);
     const targetH = Math.floor(this.viewH * dpr);
     if (canvas.width !== targetW || canvas.height !== targetH) {

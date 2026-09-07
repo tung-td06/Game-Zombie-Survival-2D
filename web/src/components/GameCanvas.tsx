@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Game } from "@/game/game";
+import { renderScale } from "@/game/pixelArt";
 import { useIsMobile } from "@/lib/device";
 import TouchHUD from "./touch/TouchHUD";
 
@@ -28,7 +29,7 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = renderScale();
 
     const resize = () => {
       const w = window.innerWidth;

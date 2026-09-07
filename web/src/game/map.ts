@@ -51,14 +51,17 @@ import {
   drawJunctionPaint,
   drawPathSegment,
   drawRailSegment,
+  drawRoadBase,
+  drawRoadDeck,
   drawRoadSlab,
   drawSidewalkBand,
   drawStreetLamp,
   drawSurfacePatch,
   drawTerrainTile,
   type PatchKind,
+  type RoadRun,
 } from "./terrainArt";
-import { worldHash } from "./pixelArt";
+import { cellHash, worldHash } from "./pixelArt";
 import { drawPropSprite, type PropKind } from "./propArt";
 import { drawPond } from "./propArtExtra";
 
@@ -99,6 +102,20 @@ interface RoadSlab {
   rect: Rect;
   vertical: boolean;
   cls: RoadClass;
+  /**
+   * Along-axis stretches (slab-local px) this slab still owns visually:
+   * everything except the boxes where a road drawn AFTER it takes over.
+   * Keeps asphalt grain and resurfacing patches from stacking at a
+   * crossing.
+   */
+  texRuns: RoadRun[];
+  /**
+   * Along-axis stretches with no crossing road at all. Road markings are
+   * confined to these, so no kerb line, edge line or centre line is ever
+   * painted across another carriageway — that stray bar reading as a cut
+   * through the road was the seam.
+   */
+  paintRuns: RoadRun[];
 }
 
 interface Junction {
@@ -359,7 +376,7 @@ export class GameMap {
   // ───────────────────────────────────────────────────────────── roads ──
   private slab(cls: RoadClass, x: number, y: number, w: number, h: number): void {
     const r: Rect = { x, y, w, h };
-    this.slabs.push({ rect: r, vertical: h > w, cls });
+    this.slabs.push({ rect: r, vertical: h > w, cls, texRuns: [], paintRuns: [] });
     this.roads.push(r);
   }
 
@@ -413,7 +430,55 @@ export class GameMap {
     }
 
     this.findJunctions();
+    this.computeSlabRuns();
     this.placeStreetLamps();
+  }
+
+  /**
+   * Work out, once, which stretches of each slab are free of a crossing
+   * road. Purely world geometry — no camera, no time — so the answer is the
+   * same on every frame and the markings can never shift under the camera.
+   *
+   * Two lists per slab, because "who owns this box" differs by layer:
+   *   texRuns   — yields only to slabs painted LATER (the more important
+   *               road owns the junction surface, exactly as before).
+   *   paintRuns — yields to every crossing road, so painted lines stop at
+   *               a junction and drawJunctionPaint owns the box instead.
+   */
+  private computeSlabRuns(): void {
+    const order = this.drawOrder();
+    order.forEach((s, i) => {
+      const span = s.vertical ? s.rect.h : s.rect.w;
+      const all: Array<[number, number]> = [];
+      const later: Array<[number, number]> = [];
+      for (let j = 0; j < order.length; j++) {
+        const o = order[j]!;
+        // Only a perpendicular road crosses; a parallel one would be the
+        // same carriageway and must not blank its own markings.
+        if (j === i || o.vertical === s.vertical) continue;
+        const ax = Math.max(s.rect.x, o.rect.x);
+        const ay = Math.max(s.rect.y, o.rect.y);
+        const bx = Math.min(s.rect.x + s.rect.w, o.rect.x + o.rect.w);
+        const by = Math.min(s.rect.y + s.rect.h, o.rect.y + o.rect.h);
+        if (bx <= ax || by <= ay) continue;
+        const cut: [number, number] = s.vertical
+          ? [ay - s.rect.y, by - s.rect.y]
+          : [ax - s.rect.x, bx - s.rect.x];
+        all.push(cut);
+        if (j > i) later.push(cut);
+      }
+      s.texRuns = gapsBetween(span, later);
+      s.paintRuns = gapsBetween(span, all);
+    });
+  }
+
+  /**
+   * Slabs in paint order: narrow roads first so the wide avenues own the
+   * junctions they run through. Stable, so the ring roads keep the order
+   * they were built in.
+   */
+  private drawOrder(): RoadSlab[] {
+    return [...this.slabs].sort((a, b) => rank(a.cls) - rank(b.cls));
   }
 
   /**
@@ -1364,13 +1429,28 @@ export class GameMap {
       }
     }
 
-    // 5. Asphalt. Narrow roads first so the wide avenues paint over their
-    //    junctions and the markings stay continuous along the main routes.
-    const byWidth = [...this.slabs].sort((a, b) => rank(a.cls) - rank(b.cls));
+    // 5. Asphalt, in three whole-network passes rather than slab by slab.
+    //    Laying every base first and every carriageway second is what makes
+    //    the roads join seamlessly: a slab can no longer stamp its own dark
+    //    kerb rim over a carriageway that is already there, which is what
+    //    produced the bar across the road at each joint. Narrow roads first
+    //    so the wide avenues still own the junctions they run through.
+    const byWidth = this.drawOrder().filter((s) => rectsIntersect(view, s.rect));
     for (const slab of byWidth) {
-      if (!rectsIntersect(view, slab.rect)) continue;
       const s = applyRect(cam, slab.rect);
-      drawRoadSlab(ctx, s.x, s.y, s.w, s.h, slab.vertical, slab.rect.x, slab.rect.y, slab.cls, this.seed);
+      drawRoadBase(ctx, s.x, s.y, s.w, s.h, slab.cls);
+    }
+    for (const slab of byWidth) {
+      const s = applyRect(cam, slab.rect);
+      drawRoadDeck(ctx, s.x, s.y, s.w, s.h, slab.vertical, slab.cls);
+    }
+    for (const slab of byWidth) {
+      const s = applyRect(cam, slab.rect);
+      drawRoadSlab(
+        ctx, s.x, s.y, s.w, s.h, slab.vertical,
+        slab.rect.x, slab.rect.y, slab.cls, this.seed,
+        slab.texRuns, slab.paintRuns,
+      );
     }
 
     // 6. Junction paint.
@@ -1456,7 +1536,10 @@ export class GameMap {
     const cx = rect.x + rect.w / 2;
     const cy = rect.y + rect.h / 2;
     const d = districtAt(cx, cy);
-    const zone = worldHash(this.seed + 811, Math.floor(cx / 900), Math.floor(cy / 900));
+    // 900px neighbourhoods. Dividing by 900 before `worldHash` (which
+    // quantises to 8px again) gave 7200px zones — bigger than the 4000px
+    // map, so every structure on it shared one style.
+    const zone = cellHash(this.seed + 811, 900, cx, cy);
     const perProp = worldHash(this.seed + 823, rect.x, rect.y);
     const structure = kind === "building" || kind === "house" || kind === "tower" || kind === "warehouse";
     const styleVariant = structure ? (zone + DISTRICT_STYLE[d]) % 8 : (zone + perProp) % 8;
@@ -1681,6 +1764,26 @@ function sideBands(s: RoadSlab): Rect[] {
 
 function applyRect(cam: Camera, r: Rect): Rect {
   return { x: r.x - cam.renderOffset.x, y: r.y - cam.renderOffset.y, w: r.w, h: r.h };
+}
+
+/**
+ * The stretches of [0, span) left over once the cuts are removed. Cuts may
+ * arrive unsorted and overlapping; the result is sorted and disjoint, which
+ * is what makes it safe to hand straight to a canvas clip path.
+ */
+function gapsBetween(span: number, cuts: Array<[number, number]>): RoadRun[] {
+  const clipped = cuts
+    .map(([a, b]) => [Math.max(0, a), Math.min(span, b)] as [number, number])
+    .filter(([a, b]) => b > a)
+    .sort((p, q) => p[0] - q[0]);
+  const out: RoadRun[] = [];
+  let cur = 0;
+  for (const [a, b] of clipped) {
+    if (a > cur) out.push([cur, a]);
+    if (b > cur) cur = b;
+  }
+  if (cur < span) out.push([cur, span]);
+  return out;
 }
 
 function rectsIntersect(a: Rect, b: Rect): boolean {

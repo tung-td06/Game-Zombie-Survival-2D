@@ -6,6 +6,7 @@ import { AchievementSystem } from "./achievement";
 import { formatTime } from "./utils";
 import { drawText, Button, roundRect, drawShopIcon } from "./ui";
 import { color } from "./colors";
+import { renderScale } from "./pixelArt";
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
 import { SKILL_BRANCHES, branchForSkill, LEVELUP_PICK_LOCK } from "./upgrade";
 import { MOD_CATALOG } from "./mods";
@@ -76,8 +77,8 @@ export class MenuSystem {
   }
 
   private drawBackground(ctx: CanvasRenderingContext2D, dt: number): void {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
 
     ctx.fillStyle = color("ui_bg");
     ctx.fillRect(0, 0, width, height);
@@ -114,7 +115,7 @@ export class MenuSystem {
   }
 
   private drawTitle(ctx: CanvasRenderingContext2D, t: number): void {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
     const bob = Math.sin(t * 1.6) * 3;
     drawText(
       ctx,
@@ -141,8 +142,8 @@ export class MenuSystem {
     game: IGame,
     t: number,
   ): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
     const dt = game.dt;
 
     this.drawBackground(ctx, dt);
@@ -172,8 +173,8 @@ export class MenuSystem {
   }
 
   drawPause(ctx: CanvasRenderingContext2D, game: IGame): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
     const dt = game.dt;
     const mx = game.input.mouseX;
     const my = game.input.mouseY;
@@ -307,8 +308,8 @@ export class MenuSystem {
     ctx: CanvasRenderingContext2D,
     game: IGame,
   ): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
     const dt = game.dt;
     const mx = game.input.mouseX;
     const my = game.input.mouseY;
@@ -495,8 +496,8 @@ export class MenuSystem {
   }
 
   drawPauseControls(ctx: CanvasRenderingContext2D, game: IGame): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
     const dt = game.dt;
     const mx = game.input.mouseX;
     const my = game.input.mouseY;
@@ -573,8 +574,8 @@ export class MenuSystem {
   }
 
   drawPauseLeaveConfirm(ctx: CanvasRenderingContext2D, game: IGame): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
     const dt = game.dt;
     const mx = game.input.mouseX;
     const my = game.input.mouseY;
@@ -630,8 +631,8 @@ export class MenuSystem {
   }
 
   drawPauseShop(ctx: CanvasRenderingContext2D, game: IGame): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
     const dt = game.dt;
     const mx = game.input.mouseX;
     const my = game.input.mouseY;
@@ -1142,7 +1143,7 @@ export class MenuSystem {
   }
 
   drawSettings(ctx: CanvasRenderingContext2D, game: IGame): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
 
     this.drawBackground(ctx, game.dt);
     drawText(ctx, "SETTINGS", width / 2, 90, 46, undefined, "center");
@@ -1228,7 +1229,7 @@ export class MenuSystem {
     game: IGame,
     entries: { key: string; label: string; detail: string; price: number; owned: boolean }[],
   ): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
     const leftOffset = (width - SCREEN_WIDTH) / 2;
 
     this.drawBackground(ctx, game.dt);
@@ -1526,8 +1527,8 @@ export class MenuSystem {
     game: IGame,
     choices: string[],
   ): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
 
     this.drawBackground(ctx, game.dt);
 
@@ -1688,8 +1689,8 @@ export class MenuSystem {
     ctx: CanvasRenderingContext2D,
     game: IGame,
   ): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
 
     this.drawBackground(ctx, game.dt);
     drawText(ctx, "UPGRADES & ACHIEVEMENTS", width / 2, 70, 34, undefined, "center");
@@ -1750,8 +1751,8 @@ export class MenuSystem {
     stats: { score?: number; kills?: number; wave?: number; level?: number; survival_time?: number; coins?: number },
     newHigh: boolean,
   ): { action: string | null; buttons: Button[] } {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
-    const height = ctx.canvas.height / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
+    const height = ctx.canvas.height / renderScale();
 
     // Dark background — less opaque so grid shows through slightly
     ctx.fillStyle = "#14060A";
@@ -1803,7 +1804,7 @@ export class MenuSystem {
     timer: number,
     boss: boolean,
   ): void {
-    const width = ctx.canvas.width / (window.devicePixelRatio || 1);
+    const width = ctx.canvas.width / renderScale();
     const alpha = Math.min(1, timer / 0.5);
     const scaleIn = Math.max(0.6, Math.min(1, (2.5 - timer) * 2));
     const size = Math.floor((boss ? 54 : 44) * scaleIn);

@@ -67,6 +67,8 @@ class FakeCtx {
   clearRect() {}
   fillRect() {}
   beginPath() {}
+  rect() {}
+  clip() {}
   moveTo() {}
   lineTo() {}
   quadraticCurveTo() {}
