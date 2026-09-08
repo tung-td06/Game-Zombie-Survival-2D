@@ -138,7 +138,21 @@ function check(name, cond, extra) {
   await page.goto(BASE + "/");
 
   console.log("\n== 1. Defaults (no saved settings yet) ==");
-  await clickWhenAvailable(/CHƠI ĐƠN/);
+  // CHƠI MỚI (NEW GAME) opens an in-game confirmation modal (no native
+  // dialog) — confirm through the modal to start the fresh run.
+  await clickWhenAvailable(/CHƠI MỚI/);
+  await page.waitForSelector('[role="dialog"][aria-label="XÁC NHẬN GAME MỚI"]', {
+    timeout: 10000,
+  });
+  await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"][aria-label="XÁC NHẬN GAME MỚI"]');
+    const btn =
+      dlg &&
+      Array.from(dlg.querySelectorAll("button")).find(
+        (b) => (b.textContent || "").trim() === "CHƠI MỚI"
+      );
+    if (btn) btn.click();
+  });
   await page.waitForURL(/\/play/, { timeout: 15000 });
   await waitGame();
   await settle();

@@ -252,15 +252,6 @@ export default function Home() {
     setHasSave(false);
   };
 
-  const startSinglePlayer = () => {
-    if (!isLoggedIn || !currentUser) return;
-    router.push(
-      `/play?mode=single&name=${encodeURIComponent(
-        currentUser.display_name || currentUser.username
-      )}`
-    );
-  };
-
   const continueSinglePlayer = () => {
     if (!isLoggedIn || !currentUser) return;
     router.push(
@@ -982,14 +973,14 @@ export default function Home() {
                       </div>
                     ) : (
                       <button
-                        onClick={startSinglePlayer}
-                        onMouseEnter={() => setHovered("single")}
+                        onClick={requestNewGame}
+                        onMouseEnter={() => setHovered("new_game")}
                         onMouseLeave={() => setHovered(null)}
                         style={{
                           width: "100%",
                           padding: "12px 16px",
                           backgroundColor:
-                            hovered === "single" ? C.redHover : C.red,
+                            hovered === "new_game" ? C.redHover : C.red,
                           color: C.bgDeep,
                           fontSize: "1.05rem",
                           fontWeight: 800,
@@ -998,16 +989,18 @@ export default function Home() {
                           cursor: "pointer",
                           letterSpacing: 2,
                           boxShadow:
-                            hovered === "single"
+                            hovered === "new_game"
                               ? "0 4px 18px rgba(255, 90, 99, 0.45)"
                               : "0 2px 12px rgba(255, 60, 70, 0.25)",
                           transition:
                             "background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease",
                           transform:
-                            hovered === "single" ? "translateY(-1px)" : "none",
+                            hovered === "new_game"
+                              ? "translateY(-1px)"
+                              : "none",
                         }}
                       >
-                        ▶ CHƠI ĐƠN (SINGLE PLAYER)
+                        🎮 CHƠI MỚI (NEW GAME)
                       </button>
                     )}
 
@@ -1572,6 +1565,7 @@ export default function Home() {
           confirm() dialog. It never starts a run until the player confirms. */}
       {showNewGame && (
         <NewGameModal
+          hasSave={hasSave}
           onCancel={() => setShowNewGame(false)}
           onConfirm={startNewSinglePlayer}
         />
@@ -2214,9 +2208,11 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
  * overlay; only CHƠI MỚI starts the fresh run. No game logic changes here.
  */
 function NewGameModal({
+  hasSave,
   onCancel,
   onConfirm,
 }: {
+  hasSave: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -2286,7 +2282,7 @@ function NewGameModal({
           }}
         />
 
-        {/* Body */}
+        {/* Body — wording depends on whether a save already exists. */}
         <div
           style={{
             fontSize: "0.9rem",
@@ -2295,16 +2291,17 @@ function NewGameModal({
             textAlign: "center",
           }}
         >
-          <p style={{ margin: "0 0 10px" }}>
-            Ván mới sẽ bắt đầu từ đầu: <strong style={{ color: C.text }}>Level 1</strong>,{" "}
-            <strong style={{ color: C.text }}>$0</strong>, chỉ có súng{" "}
-            <strong style={{ color: C.text }}>PISTOL</strong>, UFO khóa, kỹ năng được đặt lại.
-          </p>
-          <p style={{ margin: "0 0 10px", color: C.dim, fontSize: "0.82rem" }}>
-            Lưu ý: save cũ (nếu có) vẫn được giữ nguyên — nút Continue sẽ tiếp tục
-            từ save cũ. Chỉ khi bấm Save Game trong lúc chơi thì save mới được cập
-            nhật.
-          </p>
+          {hasSave ? (
+            <>
+              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
+                Bạn đang có một save game hiện tại.
+              </p>
+              <p style={{ margin: "0 0 10px", color: C.dim, fontSize: "0.82rem" }}>
+                Save game hiện tại sẽ được giữ nguyên cho đến khi bạn thực hiện
+                Save Game từ game mới.
+              </p>
+            </>
+          ) : null}
           <p style={{ margin: 0, fontWeight: 700 }}>
             Bạn có chắc chắn muốn bắt đầu game mới không?
           </p>

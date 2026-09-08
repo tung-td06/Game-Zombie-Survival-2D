@@ -97,6 +97,31 @@ function check(name, cond, extra) {
     body: JSON.stringify({ username: USER, password: PASS }),
   });
 
+  // Test 1 (no save): NEW GAME opens the custom modal — HỦY changes nothing.
+  await page.goto(BASE + "/");
+  await page.waitForSelector("button", { timeout: 15000 });
+  await page.waitForTimeout(800);
+  console.log("\n== 0. No save -> NEW GAME modal -> HỦY (nothing changes) ==");
+  const noSaveLb = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("button")).map((b) =>
+      (b.textContent || "").replace(/\s+/g, " ").trim()
+    )
+  );
+  check(
+    "lobby shows CHƠI MỚI (NEW GAME), no Continue",
+    noSaveLb.some((t) => t.includes("CHƠI MỚI")) &&
+      !noSaveLb.some((t) => t.includes("TIẾP TỤC CHƠI")),
+    noSaveLb
+  );
+  check("no save in DB yet", !(await hasSave()));
+  await clickWhenAvailable(/CHƠI MỚI/);
+  await page.waitForTimeout(300);
+  check("custom modal visible (no-save variant)", await modalVisible());
+  await clickWhenAvailable(/HỦY/);
+  await page.waitForTimeout(300);
+  check("modal closed after HỦY", !(await modalVisible()));
+  check("opening + cancelling created no save", !(await hasSave()));
+
   // Create a save so the lobby shows CONTINUE + CHƠI MỚI (NEW GAME).
   await page.goto(BASE + "/play?mode=single&name=SeedSave");
   for (let i = 0; i < 120; i++) {

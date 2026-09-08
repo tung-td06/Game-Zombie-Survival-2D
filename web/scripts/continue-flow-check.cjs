@@ -51,7 +51,6 @@ function check(name, cond, extra) {
       return {
         continueBtn: btns.some((t) => t.includes("TIẾP TỤC CHƠI")),
         newGameBtn: btns.some((t) => t.includes("CHƠI MỚI")),
-        singleBtn: btns.some((t) => t.includes("CHƠI ĐƠN")),
         all: btns,
       };
     });
@@ -84,6 +83,24 @@ function check(name, cond, extra) {
   const clickButton = async (nameRe) => {
     const btn = page.locator("button").filter({ hasText: nameRe }).first();
     await btn.click();
+  };
+
+  // NEW GAME now opens an in-game modal — click CHƠI MỚI in the lobby, then
+  // confirm through the modal to actually start the run.
+  const startNewGameViaModal = async () => {
+    await clickButton(/CHƠI MỚI/);
+    await page.waitForTimeout(400);
+    const ok = await page.evaluate(() => {
+      const dlg = document.querySelector('[role="dialog"][aria-label="XÁC NHẬN GAME MỚI"]');
+      if (!dlg) return false;
+      const btn = Array.from(dlg.querySelectorAll("button")).find((b) =>
+        (b.textContent || "").trim() === "CHƠI MỚI"
+      );
+      if (btn) btn.click();
+      return !!btn;
+    });
+    if (!ok) throw new Error("New Game modal did not open");
+    await page.waitForURL(/\/play/, { timeout: 15000 });
   };
 
   const goLobby = async (viaMenu) => {
@@ -120,11 +137,11 @@ function check(name, cond, extra) {
   // -------------------------------------------- Test 1 + Test 4 (no save) --
   console.log("\n== Test 1 + 4: fresh account, New Game without Save ==");
   let lb = await lobbyButtons();
-  check("lobby shows SINGLE PLAYER (no save)", lb.singleBtn && !lb.continueBtn, lb.all);
+  check("lobby shows CHƠI MỚI (NEW GAME), no Continue (no save)", lb.newGameBtn && !lb.continueBtn, lb.all);
   const save0 = await api("/api/game/save");
   check("DB has no save yet", save0.body?.save == null);
 
-  await clickButton(/CHƠI ĐƠN/);
+  await startNewGameViaModal();
   await page.waitForURL(/\/play/, { timeout: 15000 });
   let g = await waitGame();
   // Wave 1 starts after the 3s intermission — wait for it.
@@ -148,7 +165,7 @@ function check(name, cond, extra) {
 
   // ---------------------------------------------- Test 2 (explicit save) --
   console.log("\n== Test 2: New Game -> play -> Save Game -> Continue restores ==");
-  await clickButton(/CHƠI ĐƠN/);
+  await startNewGameViaModal();
   await page.waitForURL(/\/play/, { timeout: 15000 });
   await waitGame();
 
