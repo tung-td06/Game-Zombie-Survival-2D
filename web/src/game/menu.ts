@@ -909,12 +909,47 @@ export class MenuSystem {
       });
 
       // ── Featured: UFO DRONE (one-time unlock, persists across runs) ────
+      // Layout = three independent zones left-to-right:
+      //   [ item info / description ]  [ status button ]  [ icon ]
+      // The icon keeps its current size and sits flush on the right edge; the
+      // status button is sized to fit its own label (measured at the standard
+      // button font); the description auto-wraps inside the remaining width,
+      // so no text can ever overlap the button, the icon, or the card border.
       const dX = gridX;
       const dY = gridY + 2 * (sCardH + sGapY);
       const dW = cardW * 2 + cardGapX;
       const dH = 76;
+      const dPad = 14;
       const droneOwned = p.hasDrone;
       const droneAfford = p.coins >= DRONE_PRICE;
+
+      // Icon zone (right edge, unchanged size/effect).
+      const droneIconW = 84;
+      const droneIconH = 60;
+      const droneIconX = dX + dW - dPad - droneIconW;
+      const droneIconY = dY + (dH - droneIconH) / 2;
+
+      let droneText = `$${DRONE_PRICE} [BUY]`;
+      let droneAccent = color("ui_blue");
+      if (droneOwned) {
+        droneText = "OWNED / ACTIVE";
+        droneAccent = color("ui_green");
+      } else if (!droneAfford) {
+        droneText = "NOT ENOUGH CASH";
+        droneAccent = "#787882";
+      }
+
+      // Status button zone — width measured so the label always fits at the
+      // standard 22px button font (same size every other shop button uses).
+      const droneBtnH = 30;
+      ctx.font = "bold 22px ui-monospace, monospace";
+      const droneBtnW = Math.ceil(ctx.measureText(droneText).width) + 26;
+      const droneBtnX = droneIconX - 10 - droneBtnW;
+      const droneBtnY = dY + (dH - droneBtnH) / 2;
+
+      // Text zone — everything to the left of the button (minus a small gap),
+      // which is exactly the space the description is allowed to use.
+      const droneDescMaxW = Math.max(60, droneBtnX - 6 - (dX + dPad));
 
       ctx.fillStyle = droneOwned ? "#16242A" : "#1E1E24";
       roundRect(ctx, dX, dY, dW, dH, 8);
@@ -928,56 +963,51 @@ export class MenuSystem {
       roundRect(ctx, dX, dY, dW, dH, 8);
       ctx.stroke();
 
-      drawShopIcon(ctx, "drone", dX + dW - 96, dY + 8, 84, 60, droneOwned);
+      drawShopIcon(ctx, "drone", droneIconX, droneIconY, droneIconW, droneIconH, droneOwned);
 
       drawText(
         ctx,
         "UFO DRONE",
-        dX + 14,
+        dX + dPad,
         dY + 12,
         17,
         droneOwned ? color("ui_green") : color("ui_blue"),
         "left",
         "top",
       );
-      drawText(
+
+      // Description auto-wraps inside the text zone instead of being drawn
+      // with a fixed width that could run under the status button.
+      const droneDescLines = wrapLines(
         ctx,
         droneOwned
           ? "Combat saucer active — auto-fires at nearby zombies."
           : "Orbiting saucer that auto-fires at nearby zombies.",
-        dX + 14,
-        dY + 36,
         10,
-        color("ui_dim"),
-        "left",
-        "top",
+        droneDescMaxW,
       );
+      let droneDescY = dY + 36;
+      for (const line of droneDescLines) {
+        drawText(ctx, line, dX + dPad, droneDescY, 10, color("ui_dim"), "left", "top");
+        droneDescY += 11;
+      }
       drawText(
         ctx,
         "One-time unlock — kept across runs.",
-        dX + 14,
-        dY + 50,
+        dX + dPad,
+        droneDescY,
         10,
         color("ui_dim"),
         "left",
         "top",
       );
 
-      let droneText = `$${DRONE_PRICE} [BUY]`;
-      let droneAccent = color("ui_blue");
-      if (droneOwned) {
-        droneText = "OWNED / ACTIVE";
-        droneAccent = color("ui_green");
-      } else if (!droneAfford) {
-        droneText = "NOT ENOUGH CASH";
-        droneAccent = "#787882";
-      }
       const droneBtn = new Button(
         droneText,
-        dX + 296,
-        dY + 24,
-        150,
-        30,
+        droneBtnX,
+        droneBtnY,
+        droneBtnW,
+        droneBtnH,
         !droneOwned && droneAfford ? "ps_buy:drone" : "",
         droneAccent,
       );
