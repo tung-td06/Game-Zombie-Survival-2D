@@ -103,6 +103,27 @@ npm run build:cf   # next build + @cloudflare/next-on-pages
 npm run pages:deploy
 ```
 
+> The production Pages project is `game-zombie-survival-2d` (Git-integrated,
+> auto-deploys from `main`). The `pages:deploy` script targets the same
+> project, so `--project-name` stays `game-zombie-survival-2d`.
+
+### Auth & D1 notes
+
+- The login identifier is `username` (normalized to lowercase, validated as
+  `[a-zA-Z0-9_]+`) — the app does not use e-mail addresses.
+- Passwords are PBKDF2-SHA256 hashed (per-user salt, 10k iterations); only
+  the `$pbkdf2$salt$hash` string is stored in `players.password_hash`.
+- Sessions are stateless HMAC-SHA256 tokens in an HttpOnly, Secure,
+  SameSite=Lax, Path=/ cookie (`zs_session`, 30-day max age).
+- Set a per-deployment `SESSION_SECRET` env var in the Cloudflare dashboard
+  to sign sessions with your own key; the repo default is used as a
+  fallback to keep existing sessions valid.
+- `createPlayer` throws (and rolls back) if the D1 write fails, so the
+  register endpoint can never report success for an account that was not
+  persisted — DB errors surface as 500s, not fake 200s.
+- If the D1 binding is missing on a deployed environment, register fails
+  loudly (500) instead of silently no-op'ing.
+
 **Running locally without Cloudflare:** `npm run dev` serves the game and
 keeps per-player settings/profile in `localStorage` (`zs.save.v1`), but the
 API routes run in Next's Edge sandbox there, so account/leaderboard/save

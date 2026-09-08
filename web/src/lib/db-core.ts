@@ -247,7 +247,12 @@ export async function verifyPassword(
 // Security: Session Tokens (HMAC-SHA256 Cookie Token)
 // ---------------------------------------------------------------------------
 
-const SECRET_KEY = "zs-cloudflare-secret-key-change-in-prod";
+// Session signing secret. Prefer a per-deployment secret via the
+// `SESSION_SECRET` env var (set in the Cloudflare dashboard / [vars]);
+// the fallback keeps previously issued sessions valid and matches the
+// value used by every deployment so far.
+const SECRET_KEY =
+  process.env.SESSION_SECRET || "zs-cloudflare-secret-key-change-in-prod";
 
 async function getHmacKey(): Promise<CryptoKey> {
   const enc = new TextEncoder();
@@ -365,6 +370,10 @@ export async function createPlayer(
   };
 
   if (db) {
+    // Persist the account. A failed write MUST surface as an error (the
+    // caller turns it into a 500) instead of being swallowed — otherwise the
+    // API would report success while no row exists in D1 and the account
+    // could never log in afterwards.
     try {
       await db
         .prepare(
@@ -374,32 +383,49 @@ export async function createPlayer(
         .bind(id, cleanUsername, dispName, passwordHash, now, now)
         .run();
 
-      await db
-        .prepare(
-          `INSERT INTO player_stats (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
-           VALUES (?, 0, 0, 0, 0, 0, ?)`
-        )
-        .bind(id, now)
-        .run();
+      try {
+        await db
+          .prepare(
+            `INSERT INTO player_stats (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
+             VALUES (?, 0, 0, 0, 0, 0, ?)`
+          )
+          .bind(id, now)
+          .run();
+      } catch (err) {
+        // Roll back the player row so a half-created account (a player
+        // without its stats row) never lingers in the database.
+        await db
+          .prepare("DELETE FROM players WHERE id = ?")
+          .bind(id)
+          .run()
+          .catch(() => undefined);
+        throw err;
+      }
     } catch (err) {
-      console.warn("D1 createPlayer write warning:", err);
+      console.error("D1 createPlayer write failed:", err);
+      throw new Error("Failed to persist player in D1");
     }
   } else {
     // No D1 binding (Node dev / tests): persist through the JSON store and
     // seed an empty stats row, mirroring the D1 inserts above.
     const m = await loadPersistent();
-    if (m) {
-      await m.psUpsertPlayer(playerRecord);
-      await m.psUpsertStats({
-        player_id: id,
-        total_games: 0,
-        best_score: 0,
-        best_wave: 0,
-        total_zombies_killed: 0,
-        best_survival_time: 0,
-        updated_at: now,
-      });
+    if (!m) {
+      // No D1 binding AND no Node fallback store (e.g. deployed on
+      // Cloudflare with the DB binding missing): fail loudly instead of
+      // returning a fake "success".
+      console.error("createPlayer: no database binding available");
+      throw new Error("No database binding available");
     }
+    await m.psUpsertPlayer(playerRecord);
+    await m.psUpsertStats({
+      player_id: id,
+      total_games: 0,
+      best_score: 0,
+      best_wave: 0,
+      total_zombies_killed: 0,
+      best_survival_time: 0,
+      updated_at: now,
+    });
   }
 
   return playerRecord;
@@ -415,25 +441,22 @@ export async function getPlayerByUsername(
     if (!m) return null;
     return m.psGetPlayer(clean);
   }
-  try {
-    const row = await db
-      .prepare("SELECT * FROM players WHERE username = ?")
-      .bind(clean)
-      .first<Record<string, any>>();
+  // DB read errors intentionally propagate to the caller (which returns a
+  // 500) instead of being swallowed and reported as "user not found".
+  const row = await db
+    .prepare("SELECT * FROM players WHERE username = ?")
+    .bind(clean)
+    .first<Record<string, any>>();
 
-    if (!row) return null;
-    return {
-      id: row.id as string,
-      username: row.username as string,
-      display_name: (row.display_name as string) || (row.username as string),
-      password_hash: row.password_hash as string,
-      created_at: row.created_at as number,
-      updated_at: row.updated_at as number,
-    };
-  } catch (err) {
-    console.warn("D1 getPlayerByUsername read error:", err);
-    return null;
-  }
+  if (!row) return null;
+  return {
+    id: row.id as string,
+    username: row.username as string,
+    display_name: (row.display_name as string) || (row.username as string),
+    password_hash: row.password_hash as string,
+    created_at: row.created_at as number,
+    updated_at: row.updated_at as number,
+  };
 }
 
 export async function getPlayerById(
@@ -445,25 +468,22 @@ export async function getPlayerById(
     if (!m) return null;
     return m.psGetPlayerById(playerId);
   }
-  try {
-    const row = await db
-      .prepare("SELECT * FROM players WHERE id = ?")
-      .bind(playerId)
-      .first<Record<string, any>>();
+  // DB read errors intentionally propagate to the caller (which returns a
+  // 500) instead of being swallowed and reported as "player not found".
+  const row = await db
+    .prepare("SELECT * FROM players WHERE id = ?")
+    .bind(playerId)
+    .first<Record<string, any>>();
 
-    if (!row) return null;
-    return {
-      id: row.id as string,
-      username: row.username as string,
-      display_name: (row.display_name as string) || (row.username as string),
-      password_hash: row.password_hash as string,
-      created_at: row.created_at as number,
-      updated_at: row.updated_at as number,
-    };
-  } catch (err) {
-    console.warn("D1 getPlayerById read error:", err);
-    return null;
-  }
+  if (!row) return null;
+  return {
+    id: row.id as string,
+    username: row.username as string,
+    display_name: (row.display_name as string) || (row.username as string),
+    password_hash: row.password_hash as string,
+    created_at: row.created_at as number,
+    updated_at: row.updated_at as number,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@
     "d1:migrate:local": "wrangler d1 migrations apply zombie-survival-db --local",
     "d1:migrate:remote": "wrangler d1 migrations apply zombie-survival-db --remote",
     "pages:dev": "wrangler pages dev .vercel/output/static --d1=DB",
-    "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=zombie-survival-2d"
+    "pages:deploy": "wrangler pages deploy .vercel/output/static --project-name=game-zombie-survival-2d"
   },
   "dependencies": {
     "@cloudflare/next-on-pages": "^1.13.16",

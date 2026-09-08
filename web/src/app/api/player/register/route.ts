@@ -52,6 +52,9 @@ export async function POST(req: NextRequest) {
     }
 
     const passwordHash = await hashPassword(password);
+    // createPlayer throws (and rolls back) if the account cannot be
+    // persisted, so a "success" response below always means the account
+    // really exists in the database.
     const player = await createPlayer(db, cleanUsername, passwordHash, display_name);
     const token = await createSessionToken(player.id, player.username);
 
@@ -83,9 +86,10 @@ export async function POST(req: NextRequest) {
     return res;
   } catch (err) {
     console.error("Register error:", err);
-    return NextResponse.json(
-      { success: false, error: "Không thể tạo tài khoản" },
-      { status: 500 }
-    );
+    const message =
+      err instanceof Error && err.message === "No database binding available"
+        ? "Máy chủ chưa cấu hình cơ sở dữ liệu (D1 binding)"
+        : "Không thể tạo tài khoản";
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

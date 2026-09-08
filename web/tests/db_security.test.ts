@@ -9,6 +9,18 @@ import {
   getPlayerByUsername,
 } from "../src/lib/db";
 
+// Minimal stand-in for the D1 API surface used by the auth paths, so we can
+// assert how db-core behaves when a database statement fails. This is a test
+// double only — production always talks to the real D1 binding.
+function failingDb(): D1Database {
+  const fail = async () => {
+    throw new Error("no such table: players");
+  };
+  return {
+    prepare: () => ({ bind: () => ({ run: fail, first: fail }) }),
+  } as unknown as D1Database;
+}
+
 describe("Cloudflare D1 Security & Anti-Cheat Utilities", () => {
   it("hashes and verifies password using Web Crypto PBKDF2", async () => {
     const password = "SuperSecretPassword123!";
@@ -68,6 +80,24 @@ describe("Cloudflare D1 Security & Anti-Cheat Utilities", () => {
     expect(
       validateScoreInput({ ...validRun, wave: 300 }).valid
     ).toBe(false);
+  });
+
+  it("createPlayer throws when the D1 INSERT fails (no fake success)", async () => {
+    // Regression guard: register must never report success when the row
+    // could not be written to D1 (this was the production bug — the SQL
+    // error was swallowed and the API returned success while no account
+    // existed, so login always failed afterwards).
+    await expect(
+      createPlayer(failingDb(), "ghostuser", "$pbkdf2$salt$hash")
+    ).rejects.toThrow("Failed to persist player in D1");
+  });
+
+  it("getPlayerByUsername surfaces D1 read errors instead of returning null", async () => {
+    // A broken/missing table must surface as an error (route returns 500),
+    // never be misreported as "user not found" (route returns 401).
+    await expect(
+      getPlayerByUsername(failingDb(), "ghostuser")
+    ).rejects.toThrow("no such table: players");
   });
 
   it("registers account and retrieves player with fallback DB", async () => {
