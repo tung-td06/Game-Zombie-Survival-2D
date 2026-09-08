@@ -24,6 +24,13 @@ export class WaveManager {
   wave = 0;
   state: "intermission" | "active" = "intermission";
   timer = 3;
+  /**
+   * Fixed per-wave enemy total, decided ONCE when the wave starts and never
+   * recomputed/randomised afterwards. `spawned_this_wave + to_spawn` always
+   * equals this value for the whole wave. On boss waves the boss consumes one
+   * of these slots, so the actual spawn count never exceeds the total.
+   */
+  waveTotalEnemies = 0;
   to_spawn = 0;
   spawned_this_wave = 0;
   spawnTimer = 0;
@@ -83,11 +90,18 @@ export class WaveManager {
       Math.floor(this.wave / BIOME_EVERY_WAVES) % BIOMES.length
     ]!;
     this.applyScaling();
-    this.to_spawn = this.waveSize;
+    // Decide the wave total exactly once, right here. The modifier is rolled
+    // above, so the swarm multiplier is baked in a single time; nothing
+    // downstream ever recomputes or re-rolls the count.
+    this.waveTotalEnemies = this.waveSize;
+    this.to_spawn = this.waveTotalEnemies;
     this.spawned_this_wave = 0;
     this.spawnTimer = 0.5;
     this.bossAlive = false;
     this.bossSpawnedThisWave = false;
+    console.log(
+      `[WAVE] Started Wave ${this.wave} — Total enemies: ${this.waveTotalEnemies}`,
+    );
     let banner = `WAVE ${this.wave}`;
     if (this.biome !== "city") banner += ` — ${this.biome.toUpperCase()}`;
     if (this.modifier !== "none") {
@@ -113,6 +127,12 @@ export class WaveManager {
     const data = (game as unknown as { zombieData: Record<string, ZombieData> })
       .zombieData;
     while (this.spawnTimer <= 0 && this.to_spawn > 0 && aliveOk && data) {
+      // Boss waves: keep the last slot free for the boss until it has
+      // spawned, so the boss is counted inside the wave total instead of
+      // being an extra zombie beyond the limit.
+      if (this.isBossWave && !this.bossSpawnedThisWave && this.to_spawn === 1) {
+        break;
+      }
       const kind = game.spawner.pickType(this.wave, this.modifier);
       // Validate the spawn spot against the KIND's real body radius (+margin)
       // so big zombies (Brute r25) never materialise clipped into a wall.
@@ -130,6 +150,9 @@ export class WaveManager {
         game.zombies.push(z);
         this.to_spawn -= 1;
         this.spawned_this_wave += 1;
+        console.log(
+          `[SPAWN] ${this.spawned_this_wave}/${this.waveTotalEnemies} ${kind}`,
+        );
         this.spawnTimer += this.spawnInterval;
       } else {
         this.spawnTimer += 0.4;
@@ -138,6 +161,7 @@ export class WaveManager {
     if (
       this.isBossWave &&
       !this.bossSpawnedThisWave &&
+      this.to_spawn > 0 &&
       game.zombies.length < MAX_ALIVE_ZOMBIES &&
       data
     ) {
@@ -158,6 +182,13 @@ export class WaveManager {
           this.modifier,
         );
         game.zombies.push(boss);
+        // The boss consumes one of the wave's fixed slots (it was reserved by
+        // the spawn loop above), so spawned + to_spawn still equals the total.
+        this.to_spawn -= 1;
+        this.spawned_this_wave += 1;
+        console.log(
+          `[SPAWN] ${this.spawned_this_wave}/${this.waveTotalEnemies} BOSS ${bossKind}`,
+        );
         this.bossAlive = true;
         this.bossSpawnedThisWave = true;
         game.audio.playSFX("enemy.boss_spawn", pos);
@@ -169,6 +200,11 @@ export class WaveManager {
       }
     }
     if (this.to_spawn === 0 && game.zombies.length === 0) {
+      console.log(
+        `[WAVE] Spawn complete: ${this.spawned_this_wave}/${this.waveTotalEnemies}`,
+      );
+      console.log(`[WAVE] Alive enemies: ${game.zombies.length}`);
+      console.log(`[WAVE] Wave ${this.wave} completed`);
       this.bossAlive = false;
       let rewardCoins = 50 + this.wave * 15;
       let rewardXp = 40 + this.wave * 20;

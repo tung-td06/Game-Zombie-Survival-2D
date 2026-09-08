@@ -1712,11 +1712,6 @@ export class Game {
     this.waveManager.wave = Math.max(0, Math.floor(num(dbSave.wave, 0)));
     this.waveManager.state = wm.state === "active" ? "active" : "intermission";
     this.waveManager.timer = num(wm.timer, 3);
-    this.waveManager.to_spawn = Math.max(0, Math.floor(num(wm.to_spawn, 0)));
-    this.waveManager.spawned_this_wave = Math.max(
-      0,
-      Math.floor(num(wm.spawned_this_wave, 0)),
-    );
     this.waveManager.spawnTimer = num(wm.spawnTimer, 0);
     this.waveManager.spawnInterval = Math.max(0.1, num(wm.spawnInterval, 1.5));
     this.waveManager.hpMult = Math.max(0.01, num(wm.hpMult, 1));
@@ -1727,6 +1722,32 @@ export class Game {
     this.waveManager.modifier = typeof wm.modifier === "string" ? wm.modifier : "none";
     this.waveManager.biome = typeof wm.biome === "string" ? wm.biome : "city";
     this.waveManager.bossSpawnedThisWave = !!wm.bossSpawnedThisWave;
+    // Re-derive the wave's spawn accounting from the deterministic total
+    // (wave + modifier) instead of trusting the stored counters blindly.
+    // This keeps the invariant `spawned_this_wave + to_spawn ==
+    // waveTotalEnemies` true after Continue, self-heals saves written before
+    // the boss counted inside the wave total, and guarantees a boss wave
+    // always still summons its boss exactly once (no duplicates, no
+    // deadlocked wave that can never complete).
+    const waveTotal = this.waveManager.waveSize;
+    const spawned = Math.min(
+      waveTotal,
+      Math.max(0, Math.floor(num(wm.spawned_this_wave, 0))),
+    );
+    let remaining = waveTotal - spawned;
+    if (this.waveManager.isBossWave) {
+      if (this.waveManager.bossSpawnedThisWave) {
+        // The boss already consumed one slot; older saves didn't count it.
+        remaining = Math.max(0, waveTotal - 1 - spawned);
+      } else if (remaining <= 0) {
+        // Old save that spawned every regular before the boss block ran:
+        // reserve the final slot so the boss still spawns.
+        remaining = 1;
+      }
+    }
+    this.waveManager.waveTotalEnemies = waveTotal;
+    this.waveManager.spawned_this_wave = spawned;
+    this.waveManager.to_spawn = Math.max(0, remaining);
 
     // 5. Clear dynamic arrays
     this.particles.clear();

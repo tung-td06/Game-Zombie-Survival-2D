@@ -154,7 +154,9 @@ export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, h
   const wm = game.waveManager;
   const sub =
     wm.state === "active"
-      ? `${wm.to_spawn + game.zombies.length} LEFT`
+      ? // Fixed per-wave total in the denominator so the counter can never
+        // drift mid-wave; the numerator is what's left (to spawn + alive).
+        `${wm.to_spawn + game.zombies.length} / ${wm.waveTotalEnemies} LEFT`
       : `NEXT IN ${Math.max(0, Math.floor(wm.timer))}s`;
   drawText(ctx, `WAVE ${Math.max(1, wm.wave)}`, w / 2, 18, 26, undefined, "center");
   drawText(ctx, sub, w / 2, 48, 14, color("ui_dim"), "center");
