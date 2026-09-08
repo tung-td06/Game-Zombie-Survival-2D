@@ -641,6 +641,25 @@ export class MenuSystem {
 
     const cx = width / 2;
     const cy = height / 2;
+
+    // Responsive: the shop is designed for a 600x480 panel centred on the
+    // screen. On smaller viewports (short laptop windows, tablet or mobile
+    // landscape) the whole shop scales about its centre so no card, text or
+    // the BACK row ever clips or overlaps. K === 1 on every normal desktop
+    // size, so desktop rendering stays pixel-identical.
+    const K = Math.max(
+      0.5,
+      Math.min(1, (width - 48) / 660, (height - 48) / 540),
+    );
+    if (K < 1) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.scale(K, K);
+      ctx.translate(-cx, -cy);
+    }
+    // Pointer mapped into the shop's logical space (used for hover feedback).
+    const hx = cx + (mx - cx) / K;
+    const hy = cy + (my - cy) / K;
     
     // Panel container
     const PANEL_W = 600;
@@ -701,14 +720,16 @@ export class MenuSystem {
         `shop_tab:${cat}`,
         active ? color("ui_gold") : color("ui_dim")
       );
-      btn.update(dt, mx, my, false);
+      btn.update(dt, hx, hy, false);
       btn.draw(ctx);
       buttons.push(btn);
     });
 
-    // Content Grid based on active tab
+    // Content Grid based on active tab. Every tab lays out inside
+    // [gridTop, gridBottom], a fixed slot that ends well above the BACK
+    // footer row — no tab's cards can ever run under the BACK button.
     const gridX = cx - 275;
-    const gridY = PANEL_Y + 130;
+    const gridY = PANEL_Y + 120; // content slot: gridY..(PANEL_Y+420)
     const cardW = 270;
     const cardH = 110;
     const cardGapX = 10;
@@ -725,12 +746,18 @@ export class MenuSystem {
         { id: "crossbow", name: "CROSSBOW", desc: "Bolt pierces through crowds." },
       ];
 
-      // Weapons tab uses a compact 3-column grid so all 8 guns fit.
+      // Weapons tab: compact 3-column grid. Cards are sized so all three
+      // rows fit inside the fixed content slot [gridY, gridBottom] above the
+      // BACK footer — nothing can overlap the footer or the neighbouring
+      // cards. Names, descriptions and the status label all stay inside the
+      // card's text zone (to the left of the icon / button area).
       const wCardW = 176;
-      const wCardH = 104;
+      const wCardH = 92;
       const wGapX = 8;
-      const wGapY = 10;
+      const wGapY = 8;
       const wGridX = cx - (wCardW * 3 + wGapX * 2) / 2;
+      const wTextRight = wCardW - 62; // icon zone starts here (52px wide)
+      const wNameMaxW = wTextRight - 8 - 6; // room for the name before the icon
       items.forEach((item, idx) => {
         const col = idx % 3;
         const row = Math.floor(idx / 3);
@@ -750,11 +777,18 @@ export class MenuSystem {
         roundRect(ctx, cX, cY, wCardW, wCardH, 8);
         ctx.stroke();
 
-        // Draw weapon icon
-        drawShopIcon(ctx, `weapon:${item.id}`, cX + wCardW - 62, cY + 8, 52, 36, owned);
+        // Draw weapon icon (top-right, clear of the title text zone)
+        drawShopIcon(ctx, `weapon:${item.id}`, cX + wTextRight, cY + 5, 52, 34, owned);
 
-        // Text Info (Left aligned, vertically adjusted)
-        drawText(ctx, item.name, cX + 10, cY + 10, 12, owned ? color("ui_green") : "#FFFFFF", "left", "top");
+        // Weapon name — shrink to fit the zone left of the icon so a long
+        // name can never slide under the icon or over the card border.
+        let nameSize = 11;
+        ctx.font = `bold ${nameSize}px ui-monospace, monospace`;
+        if (ctx.measureText(item.name).width > wNameMaxW) {
+          const fitted = Math.floor((nameSize * wNameMaxW) / Math.max(1, ctx.measureText(item.name).width));
+          nameSize = Math.max(8, fitted);
+        }
+        drawText(ctx, item.name, cX + 8, cY + 7, nameSize, owned ? color("ui_green") : "#FFFFFF", "left", "top");
 
         // Split description into two lines
         let desc1 = item.desc;
@@ -781,9 +815,12 @@ export class MenuSystem {
           desc1 = "Bolt pierces";
           desc2 = "through crowds.";
         }
-        drawText(ctx, desc1, cX + 12, cY + 36, 10, color("ui_dim"), "left", "top");
+        // Description stays inside the card's left text zone (never runs
+        // under the icon or past the card edge).
+        const descCol = color("ui_dim");
+        drawText(ctx, desc1, cX + 9, cY + 27, 9, descCol, "left", "top");
         if (desc2) {
-          drawText(ctx, desc2, cX + 12, cY + 48, 10, color("ui_dim"), "left", "top");
+          drawText(ctx, desc2, cX + 9, cY + 38, 9, descCol, "left", "top");
         }
 
         let btnText = `$${price} [BUY]`;
@@ -800,16 +837,20 @@ export class MenuSystem {
           enabled = false;
         }
 
+        // Status / buy button spans the card bottom. Its 12px label always
+        // fits on one line inside the card (Button auto-shrinks if ever
+        // needed), so it can't spill onto neighbouring cards.
         const buyBtn = new Button(
           btnText,
-          cX + 10,
-          cY + wCardH - 30,
-          wCardW - 20,
+          cX + 8,
+          cY + wCardH - 26,
+          wCardW - 16,
           22,
           enabled ? `ps_buy:weapon:${item.id}` : "",
-          btnAccent
+          btnAccent,
+          12
         );
-        buyBtn.update(dt, mx, my, false);
+        buyBtn.update(dt, hx, hy, false);
         buyBtn.draw(ctx);
         if (enabled) buttons.push(buyBtn);
       });
@@ -903,7 +944,7 @@ export class MenuSystem {
           available ? `ps_buy:${item.id}` : "",
           btnAccent
         );
-        buyBtn.update(dt, mx, my, false);
+        buyBtn.update(dt, hx, hy, false);
         buyBtn.draw(ctx);
         if (available) buttons.push(buyBtn);
       });
@@ -1011,7 +1052,7 @@ export class MenuSystem {
         !droneOwned && droneAfford ? "ps_buy:drone" : "",
         droneAccent,
       );
-      droneBtn.update(dt, mx, my, false);
+      droneBtn.update(dt, hx, hy, false);
       droneBtn.draw(ctx);
       if (!droneOwned && droneAfford) buttons.push(droneBtn);
     } else if (this.activeShopTab === "upgrades") {
@@ -1084,7 +1125,7 @@ export class MenuSystem {
           available ? `ps_buy:upgrade:${item.id}` : "",
           btnAccent
         );
-        buyBtn.update(dt, mx, my, false);
+        buyBtn.update(dt, hx, hy, false);
         buyBtn.draw(ctx);
         if (available) buttons.push(buyBtn);
       });
@@ -1157,17 +1198,31 @@ export class MenuSystem {
           available ? `ps_buy:mod:${wid}:${mod.id}` : "",
           btnAccent,
         );
-        buyBtn.update(dt, mx, my, false);
+        buyBtn.update(dt, hx, hy, false);
         buyBtn.draw(ctx);
         if (available) buttons.push(buyBtn);
       });
     }
 
-    // BACK button
-    const backBtn = new Button("BACK", cx - 110, PANEL_Y + PANEL_H - 58, 220, 42, "pause_back");
-    backBtn.update(dt, mx, my, false);
+    // BACK button — sits in its own footer row below the content slot, so it
+    // always has clear space above (the grid) and never covers any card.
+    const backBtn = new Button("BACK", cx - 100, PANEL_Y + PANEL_H - 48, 200, 34, "pause_back");
+    backBtn.update(dt, hx, hy, false);
     backBtn.draw(ctx);
     buttons.push(backBtn);
+
+    // Undo the responsive scale, then map every button back into real screen
+    // coordinates so the global hit-test (raw pointer vs button rect) still
+    // works on small viewports. No-op when K === 1 (normal desktop sizes).
+    if (K < 1) ctx.restore();
+    if (K !== 1) {
+      for (const b of buttons) {
+        b.x = cx + (b.x - cx) * K;
+        b.y = cy + (b.y - cy) * K;
+        b.w *= K;
+        b.h *= K;
+      }
+    }
 
     return { action: null, buttons };
   }

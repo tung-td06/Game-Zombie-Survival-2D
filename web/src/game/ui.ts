@@ -394,6 +394,7 @@ export class Button {
   h: number;
   action: string;
   accent: string;
+  fontSize: number;
   hover = 0;
   pressed = 0;
 
@@ -405,6 +406,7 @@ export class Button {
     h: number,
     action: string,
     accent?: string,
+    fontSize = 22,
   ) {
     this.text = text;
     this.x = x;
@@ -413,6 +415,7 @@ export class Button {
     this.h = h;
     this.action = action;
     this.accent = accent ?? color("ui_accent");
+    this.fontSize = fontSize;
   }
 
   contains(px: number, py: number): boolean {
@@ -455,7 +458,18 @@ export class Button {
     ctx.restore(); // globalAlpha = 1 restored here
 
     if (this.text) {
-      drawText(ctx, this.text, r.x + r.w / 2, r.y + r.h / 2, 22, this.hover < 0.4 ? "#DEDED6" : "#FFFFFF", "center", "middle");
+      // Fit the label inside the button: if the text at the requested size
+      // is wider than the button, shrink it (down to a readable floor) so it
+      // can never spill past the button / card edges. Centred, single line.
+      const maxW = Math.max(16, r.w - 8);
+      ctx.font = `bold ${this.fontSize}px ui-monospace, monospace`;
+      const measured = ctx.measureText(this.text).width;
+      let size = this.fontSize;
+      if (measured > maxW) {
+        const fitted = Math.floor((this.fontSize * maxW) / measured);
+        size = Math.max(9, Math.min(this.fontSize, fitted));
+      }
+      drawText(ctx, this.text, r.x + r.w / 2, r.y + r.h / 2, size, this.hover < 0.4 ? "#DEDED6" : "#FFFFFF", "center", "middle");
     }
   }
 }
