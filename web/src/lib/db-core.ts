@@ -884,7 +884,17 @@ export async function getGameSave(
       updated_at: row.updated_at as number,
       // Skill Tree columns (migration 0005). Falls back to the values stored
       // inside player_data for saves written before the migration.
-      xp: row.xp ?? (JSON.parse(row.player_data as string).xp ?? 0),
+      //
+      // NOTE: migration 0005 added `xp` with `DEFAULT 0`, so rows saved
+      // before that migration carry a *backfilled* 0 in the column while the
+      // real XP still lives in player_data.xp. `row.xp ?? player_data.xp`
+      // would therefore return 0 for those rows and silently lose XP, so we
+      // only trust the column when it is non-zero (or player_data has no xp
+      // at all); otherwise player_data.xp is authoritative.
+      xp: (() => {
+        const pdXp = JSON.parse(row.player_data as string).xp;
+        return (row.xp ?? 0) > 0 ? row.xp : Number(pdXp) || 0;
+      })(),
       skill_points:
         row.skill_points ??
         (JSON.parse(row.player_data as string).skillPoints ?? 0),

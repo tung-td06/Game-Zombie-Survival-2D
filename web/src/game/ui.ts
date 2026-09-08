@@ -103,6 +103,18 @@ export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, h
     roundRect(ctx, 78, 86, 256 * xpFrac, 12, 4);
     ctx.fill();
   }
+  // Exact XP readout (restored 1:1 from the save on Continue) so the player
+  // can verify the progress bar matches the persisted value.
+  drawText(
+    ctx,
+    `XP ${Math.floor(p.xp)} / ${Math.floor(p.xpNeeded)}`,
+    78 + 256 - 4,
+    92,
+    10,
+    color("ui_dim"),
+    "right",
+    "middle",
+  );
 
   // Right panel
   const px = w - 179;
