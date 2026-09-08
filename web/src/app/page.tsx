@@ -117,6 +117,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("play");
   const [hovered, setHovered] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showNewGame, setShowNewGame] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -269,24 +270,25 @@ export default function Home() {
     );
   };
 
+  // NEW GAME opens an in-game confirmation modal instead of a native
+  // browser confirm() dialog (no more "domain cho biết" popup).
+  const requestNewGame = () => {
+    if (!isLoggedIn || !currentUser) return;
+    setShowNewGame(true);
+  };
+
+  // Runs only after the player confirms inside the custom modal.
   const startNewSinglePlayer = () => {
     if (!isLoggedIn || !currentUser) return;
-    if (
-      confirm(
-        "Bắt đầu chơi mới?\n\nLưu ý: save cũ (nếu có) vẫn được giữ nguyên — " +
-          "nút Continue sẽ tiếp tục từ save cũ. Chỉ khi bạn chủ động bấm " +
-          "Save Game trong lúc chơi thì save mới được cập nhật."
-      )
-    ) {
-      // A New Game is a fresh in-game run; it must NOT touch the game save
-      // (database / Continue slot). Only an explicit "Save Game" action
-      // creates or updates the Continue save.
-      router.push(
-        `/play?mode=single&name=${encodeURIComponent(
-          currentUser.display_name || currentUser.username
-        )}`
-      );
-    }
+    setShowNewGame(false);
+    // A New Game is a fresh in-game run; it must NOT touch the game save
+    // (database / Continue slot). Only an explicit "Save Game" action
+    // creates or updates the Continue save.
+    router.push(
+      `/play?mode=single&name=${encodeURIComponent(
+        currentUser.display_name || currentUser.username
+      )}`
+    );
   };
 
   const hostRoom = () => {
@@ -951,7 +953,7 @@ export default function Home() {
                           ▶ TIẾP TỤC CHƠI (CONTINUE)
                         </button>
                         <button
-                          onClick={startNewSinglePlayer}
+                          onClick={requestNewGame}
                           onMouseEnter={() => setHovered("new_game")}
                           onMouseLeave={() => setHovered(null)}
                           style={{
@@ -1565,6 +1567,15 @@ export default function Home() {
 
       {/* Settings modal — reuses the game's localStorage settings (zs.save.v1). */}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+
+      {/* New Game confirmation — in-game modal instead of a browser native
+          confirm() dialog. It never starts a run until the player confirms. */}
+      {showNewGame && (
+        <NewGameModal
+          onCancel={() => setShowNewGame(false)}
+          onConfirm={startNewSinglePlayer}
+        />
+      )}
     </main>
   );
 }
@@ -2193,5 +2204,185 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         <ModalBackButton onClose={onClose} />
       </div>
     </div>
+  );
+}
+
+/**
+ * In-game NEW GAME confirmation. Replaces the browser-native confirm()
+ * dialog (which the browser titles with the site domain) with a modal styled
+ * like the rest of the lobby. Closes via HỦY, ESC, or a click on the dark
+ * overlay; only CHƠI MỚI starts the fresh run. No game logic changes here.
+ */
+function NewGameModal({
+  onCancel,
+  onConfirm,
+}: {
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  return (
+    <div
+      onClick={onCancel}
+      role="presentation"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 110,
+        backgroundColor: "rgba(8, 8, 10, 0.72)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        animation: "zs-settings-fade 0.15s ease-out",
+        boxSizing: "border-box",
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="XÁC NHẬN GAME MỚI"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 420,
+          boxSizing: "border-box",
+          backgroundColor: C.panel,
+          border: `2px solid ${C.red}`,
+          borderRadius: 12,
+          boxShadow:
+            "0 0 34px rgba(255, 60, 70, 0.3), 0 10px 44px rgba(0, 0, 0, 0.7)",
+          padding: "22px 24px 20px",
+          animation: "zs-settings-pop 0.18s ease-out",
+        }}
+      >
+        {/* Title */}
+        <div style={{ textAlign: "center", marginBottom: 14 }}>
+          <div
+            style={{
+              fontSize: "1.25rem",
+              fontWeight: 900,
+              color: C.red,
+              letterSpacing: 2,
+              textShadow: "0 0 14px rgba(255, 60, 70, 0.45)",
+            }}
+          >
+            ⚠️ BẮT ĐẦU GAME MỚI
+          </div>
+        </div>
+        <div
+          style={{
+            height: 1,
+            margin: "0 0 16px",
+            background:
+              "linear-gradient(90deg, rgba(255,60,70,0), rgba(255,60,70,0.6), rgba(255,60,70,0))",
+          }}
+        />
+
+        {/* Body */}
+        <div
+          style={{
+            fontSize: "0.9rem",
+            lineHeight: 1.55,
+            color: C.textSoft,
+            textAlign: "center",
+          }}
+        >
+          <p style={{ margin: "0 0 10px" }}>
+            Ván mới sẽ bắt đầu từ đầu: <strong style={{ color: C.text }}>Level 1</strong>,{" "}
+            <strong style={{ color: C.text }}>$0</strong>, chỉ có súng{" "}
+            <strong style={{ color: C.text }}>PISTOL</strong>, UFO khóa, kỹ năng được đặt lại.
+          </p>
+          <p style={{ margin: "0 0 10px", color: C.dim, fontSize: "0.82rem" }}>
+            Lưu ý: save cũ (nếu có) vẫn được giữ nguyên — nút Continue sẽ tiếp tục
+            từ save cũ. Chỉ khi bấm Save Game trong lúc chơi thì save mới được cập
+            nhật.
+          </p>
+          <p style={{ margin: 0, fontWeight: 700 }}>
+            Bạn có chắc chắn muốn bắt đầu game mới không?
+          </p>
+        </div>
+
+        {/* Actions */}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            marginTop: 20,
+          }}
+        >
+          <NewGameActionButton label="HỦY" danger={false} onClick={onCancel} />
+          <NewGameActionButton label="CHƠI MỚI" danger onClick={onConfirm} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewGameActionButton({
+  label,
+  danger,
+  onClick,
+}: {
+  label: string;
+  danger: boolean;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        flex: 1,
+        padding: "11px 12px",
+        borderRadius: 6,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        fontWeight: 800,
+        letterSpacing: 1.5,
+        fontSize: "0.85rem",
+        textTransform: "uppercase",
+        color: danger ? C.bgDeep : hover ? "#FFFFFF" : C.textSoft,
+        backgroundColor: pressed
+          ? danger
+            ? "#A31220"
+            : "#0A0B08"
+          : danger
+            ? hover
+              ? C.redHover
+              : C.red
+            : hover
+              ? "#26262E"
+              : C.panelDeep,
+        border: `1px solid ${danger ? C.redHover : hover ? C.redHover : C.border}`,
+        transition:
+          "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease",
+        boxShadow: danger
+          ? hover
+            ? "0 0 16px rgba(255, 60, 70, 0.5)"
+            : "0 2px 10px rgba(255, 60, 70, 0.25)"
+          : hover
+            ? "0 0 12px rgba(255, 90, 99, 0.25)"
+            : "none",
+      }}
+    >
+      {label}
+    </button>
   );
 }

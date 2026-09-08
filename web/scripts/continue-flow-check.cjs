@@ -190,8 +190,20 @@ function check(name, cond, extra) {
   lb = await lobbyButtons();
   check("lobby shows CONTINUE + NEW GAME (old save exists)", lb.continueBtn && lb.newGameBtn, lb.all);
 
-  page.once("dialog", (d) => d.accept());
+  // NEW GAME now opens an in-game modal (no native confirm dialog) —
+  // click its CHƠI MỚI button to confirm.
   await clickButton(/CHƠI MỚI/);
+  await page.waitForTimeout(400);
+  const confirmed = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"][aria-label="XÁC NHẬN GAME MỚI"]');
+    if (!dlg) return false;
+    const btn = Array.from(dlg.querySelectorAll("button")).find((b) =>
+      (b.textContent || "").trim() === "CHƠI MỚI"
+    );
+    if (btn) btn.click();
+    return !!btn;
+  });
+  if (!confirmed) throw new Error("New Game modal did not open");
   await page.waitForURL(/\/play/, { timeout: 15000 });
   g = await waitGame();
   check("New Game boots fresh despite old save (level 1, $0, pistol)", 
