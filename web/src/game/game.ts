@@ -36,6 +36,7 @@ import {
   MAP_SEED,
   NIGHT_LENGTH,
   NIGHT_TRANSITION,
+  PLAYER_BASE_MAX_HP,
   RESOLUTIONS,
   SCREEN_HEIGHT,
   SCREEN_WIDTH,
@@ -165,6 +166,8 @@ export class Game {
   lastSnapshotTime = 0;
   saveButtonState: "idle" | "saving" | "success" | "error" = "idle";
   shouldContinue = false;
+  /** Guards against double-clicking a skill (server also enforces atomically). */
+  skillUpgradeInFlight = false;
 
   constructor(
     ctx: CanvasRenderingContext2D,
@@ -1158,7 +1161,9 @@ export class Game {
     else if (action.startsWith("buy:")) {
       if (!this.shop.buy(action.slice(4), this)) this.toast("NOT ENOUGH COINS!");
     } else if (action.startsWith("upgrade:")) {
-      // Skill tree purchase: costs one skill point.
+      // Skill tree purchase: costs one skill point, spent ATOMICALLY on the
+      // server (identity, available points and max level are all resolved
+      // there — the client only sends the skill id).
       const uid = action.slice("upgrade:".length);
       const p = this.player!;
       const picking = this.isLevelUpPick();
@@ -1171,28 +1176,52 @@ export class Game {
       const limit = this.upgrades.limitFor(uid);
       if ((p.upgradeLevels[uid] ?? 0) >= limit) {
         this.toast("MAXED OUT");
-      } else if (!picking && p.skillPoints <= 0) {
-        this.toast("NO SKILL POINTS — LEVEL UP TO EARN ONE");
-      } else {
-        this.upgrades.apply(uid, p as unknown as Parameters<UpgradeSystem["apply"]>[1], this);
-        p.skillPoints = Math.max(0, p.skillPoints - 1);
-        this.save.data["player_level"] = p.level;
-        this.save.data["xp"] = p.xp;
-        this.save.coins = p.coins;
-        this.save.save();
-        this.audio.play("buy");
-        this.toast(`LEARNED ${uid.toUpperCase().replace(/_/g, " ")}`);
-        if (picking) {
-          p.pendingLevels = Math.max(0, p.pendingLevels - 1);
-          if (p.pendingLevels > 0) {
-            // Stacked level-ups: roll a fresh offer and re-arm the lock.
-            this.rollUpgradeChoices();
-            if (this.upgradeChoices.length > 0) return;
-            p.pendingLevels = 0;
-          }
-          this.closeUpgradeScreen();
-        }
+        return;
       }
+      if (!picking && p.skillPoints <= 0) {
+        this.toast("NO SKILL POINTS — LEVEL UP TO EARN ONE");
+        return;
+      }
+      // Local anti-double-click; the server's atomic UPDATE is the real guard.
+      if (this.skillUpgradeInFlight) return;
+      this.skillUpgradeInFlight = true;
+      fetch("/api/game/skill-upgrade", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skill: uid }),
+      })
+        .then(async (res) => {
+          const data = (await res.json().catch(() => ({}))) as {
+            success?: boolean;
+            state?: { level: number; xp: number; skill_points: number; skills: Record<string, number> };
+            error?: string;
+          };
+          if (res.ok && data.success && data.state) {
+            this.adoptSkillState(data.state);
+            this.audio.play("buy");
+            this.toast(`LEARNED ${uid.toUpperCase().replace(/_/g, " ")}`);
+            if (picking) {
+              p.pendingLevels = Math.max(0, p.pendingLevels - 1);
+              if (p.pendingLevels > 0) {
+                // Stacked level-ups: roll a fresh offer and re-arm the lock.
+                this.rollUpgradeChoices();
+                if (this.upgradeChoices.length > 0) return;
+                p.pendingLevels = 0;
+              }
+              this.closeUpgradeScreen();
+            }
+          } else {
+            const msg: string = data.error || "UPGRADE FAILED";
+            if (/max/i.test(msg)) this.toast("MAXED OUT");
+            else if (/point/i.test(msg))
+              this.toast("NO SKILL POINTS — LEVEL UP TO EARN ONE");
+            else this.toast(msg.toUpperCase());
+          }
+        })
+        .catch(() => this.toast("UPGRADE FAILED"))
+        .finally(() => {
+          this.skillUpgradeInFlight = false;
+        });
     } else if (action === "upgrade_done") {
       // Leave the skill tree. During a level-up pick there is no way out but
       // choosing a skill, so the overlay can't be dismissed by a stray click.
@@ -1342,16 +1371,27 @@ export class Game {
       }
     }
     const unlocked = ["pistol", ...this.save.unlocked_weapons.filter((w) => w !== "pistol")];
+    // A NEW GAME always starts fresh: level 1, no XP, no skill points and an
+    // empty skill tree. It never inherits level/skills from a previous save.
     this.player = new Player(start, {
       unlocked,
       coins: this.save.coins,
-      level: this.save.data["player_level"] ?? 1,
-      xp: this.save.data["xp"] ?? 0,
+      level: 1,
+      xp: 0,
       weaponData: this.weaponData,
       weaponMods: this.save.data.weapon_upgrades,
       username: this.username,
     });
+    this.player.skillPoints = 0;
+    this.player.upgradeLevels = {};
+    this.recomputeSkillBonuses();
     this.player.hasDrone = !!this.save.data["has_drone"];
+    // One save slot per user: starting a new game replaces the previous save.
+    if (typeof window !== "undefined") {
+      fetch("/api/game/save", { method: "DELETE" }).catch((err) =>
+        console.error("Failed to clear old save on new game:", err)
+      );
+    }
     this.camera = new Camera(this.viewW, this.viewH);
     this.camera.offset.x = Math.max(0, start.x - this.camera.viewW / 2);
     this.camera.offset.y = Math.max(0, start.y - this.camera.viewH / 2);
@@ -1422,7 +1462,7 @@ export class Game {
       unlocked,
       coins: dbSave.money,
       level: dbSave.level,
-      xp: pData.xp ?? 0,
+      xp: dbSave.xp ?? pData.xp ?? 0,
       weaponData: this.weaponData,
       username: this.username,
     });
@@ -1434,19 +1474,20 @@ export class Game {
       Math.max(0, Math.floor(pData.bombs ?? BOMB_START_COUNT)),
     );
 
-    // Restore upgrades
-    this.player.upgradeLevels = {};
-    for (const [uid, level] of Object.entries(pData.upgradeLevels || {})) {
-      for (let i = 0; i < (level as number); i++) {
-        this.upgrades.apply(uid, this.player as any);
-      }
-    }
+    // Restore the Skill Tree. The per-user game_saves columns are the
+    // server-authoritative copy (they are kept in sync by every level-up and
+    // skill spend); older saves written before the columns existed fall back
+    // to the values stored inside player_data.
+    this.player.upgradeLevels = {
+      ...(dbSave.skills ?? pData.upgradeLevels ?? {}),
+    };
     // Restore unspent skill points earned before the save
-    this.player.skillPoints = pData.skillPoints ?? 0;
-    
+    this.player.skillPoints = dbSave.skill_points ?? pData.skillPoints ?? 0;
+    this.recomputeSkillBonuses();
+
     // Explicitly restore hp/armor/maxHp in case it was modified
     this.player.maxHp = pData.maxHp;
-    this.player.hp = pData.hp;
+    this.player.hp = Math.min(pData.hp, this.player.maxHp);
     this.player.armor = pData.armor;
 
     // Restore weapons ammo/reserve
@@ -1743,9 +1784,85 @@ export class Game {
     }).catch((err) => console.error("Failed to submit score to Cloudflare D1:", err));
   }
 
+  /**
+   * Recompute every skill-derived stat from the current `upgradeLevels`.
+   * Idempotent: safe to call after restoring a save, after the server
+   * confirms an upgrade, and on a fresh run. Mirrors the arithmetic in
+   * UpgradeSystem.apply() (armor is excluded — it is a spent resource, not a
+   * stat, and is restored from the save explicitly).
+   */
+  recomputeSkillBonuses(): void {
+    const p = this.player!;
+    const lv = p.upgradeLevels ?? {};
+    p.maxHp = PLAYER_BASE_MAX_HP + 20 * (lv.max_hp ?? 0);
+    p.damageMult = Math.pow(1.1, lv.damage ?? 0);
+    p.fireRateMult = Math.pow(1.08, lv.fire_rate ?? 0);
+    p.reloadMult = Math.pow(0.9, lv.reload ?? 0);
+    p.speedMult = Math.pow(1.08, lv.speed ?? 0);
+    p.critBonus = 0.05 * (lv.crit_ch ?? 0);
+    p.critMultBonus = 0.25 * (lv.crit_dmg ?? 0);
+    p.regen = 1 * (lv.regen ?? 0);
+    p.magnetMult = Math.pow(1.3, lv.magnet ?? 0);
+    p.lifeSteal = 0.02 * (lv.vampire ?? 0);
+    p.pierceBonus = 1 * (lv.pierce ?? 0);
+    if (p.hp > p.maxHp) p.hp = p.maxHp;
+  }
+
+  /**
+   * Adopt a server-returned Skill Tree state as authoritative: updates the
+   * player's level/xp/points/skills, recomputes bonuses and mirrors the
+   * level/xp back into the local profile save.
+   */
+  adoptSkillState(state: {
+    level: number;
+    xp: number;
+    skill_points: number;
+    skills: Record<string, number>;
+  }): void {
+    const p = this.player!;
+    p.level = Math.max(1, Math.floor(Number(state.level) || 1));
+    p.xp = Math.max(0, Math.floor(Number(state.xp) || 0));
+    p.skillPoints = Math.max(0, Math.floor(Number(state.skill_points) || 0));
+    p.upgradeLevels = { ...(state.skills ?? {}) };
+    this.recomputeSkillBonuses();
+    this.save.data["player_level"] = p.level;
+    this.save.data["xp"] = p.xp;
+    this.save.coins = p.coins;
+    this.save.save();
+  }
+
+  /**
+   * Push the current Skill Tree state to the server so level-ups (and their
+   * skill point) persist to the database immediately, not only on SAVE GAME.
+   */
+  private syncSkillState(): void {
+    if (typeof window === "undefined" || !this.player) return;
+    const p = this.player;
+    fetch("/api/game/skill-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        level: p.level,
+        xp: p.xp,
+        skill_points: p.skillPoints,
+        skills: p.upgradeLevels,
+      }),
+    })
+      .then((r) => {
+        if (!r.ok) {
+          console.error("Skill state sync rejected:", r.status);
+        }
+      })
+      .catch((err) =>
+        console.error("Failed to sync skill state to server:", err)
+      );
+  }
+
   onLevelUp(): void {
     this.particles.heal(this.player!.pos);
     this.toast(`LEVEL UP!  LV ${this.player!.level}  ·  +1 SKILL POINT`);
+    // The new skill point is persisted immediately (server-side validated).
+    this.syncSkillState();
   }
 
   onZombieKilled(z: import("./zombie").Zombie): void {

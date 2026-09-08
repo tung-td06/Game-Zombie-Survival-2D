@@ -14,12 +14,45 @@ const weaponsData = readJSON("data/weapons.json");
 const zombiesData = readJSON("data/zombies.json");
 const upgradesData = readJSON("data/upgrades.json");
 
-(globalThis as any).fetch = vi.fn(async (url: string) => {
+// The game now spends skill points through the server API (atomic, validated
+// server-side). The mock below simulates the server for the level-up flow:
+// it reads the live game state and answers with the post-spend state, exactly
+// like the real D1-backed endpoint does for legitimate play.
+let mockGame: any = null;
+
+(globalThis as any).fetch = vi.fn(async (url: string, opts?: any) => {
   if (url.includes("weapons.json")) return { ok: true, json: async () => weaponsData } as any;
   if (url.includes("zombies.json")) return { ok: true, json: async () => zombiesData } as any;
   if (url.includes("upgrades.json")) return { ok: true, json: async () => upgradesData } as any;
+  if (url.includes("/api/game/skill-upgrade")) {
+    const body = JSON.parse((opts as any).body);
+    const uid = body.skill as string;
+    const p = mockGame.player;
+    const state = {
+      level: p.level,
+      xp: p.xp,
+      skill_points: Math.max(0, p.skillPoints - 1),
+      skills: { ...p.upgradeLevels, [uid]: (p.upgradeLevels[uid] ?? 0) + 1 },
+    };
+    return { ok: true, status: 200, json: async () => ({ success: true, state }) } as any;
+  }
+  if (url.includes("/api/game/skill-state")) {
+    const p = mockGame.player;
+    const state = {
+      level: p.level,
+      xp: p.xp,
+      skill_points: p.skillPoints,
+      skills: { ...p.upgradeLevels },
+    };
+    return { ok: true, status: 200, json: async () => ({ success: true, state }) } as any;
+  }
   return { ok: false, status: 404, json: async () => ({}) } as any;
 });
+
+/** Let the mocked fetch promise chain settle (one microtask flush). */
+async function flush() {
+  await new Promise((r) => setTimeout(r, 0));
+}
 
 class FakeCtx {
   width = 1280;
@@ -88,6 +121,14 @@ beforeAll(async () => {
     removeItem(k: string) { delete this._[k]; },
   };
   (globalThis as any).performance = { now: () => Date.now() };
+  // The game drives itself with a requestAnimationFrame loop. These tests
+  // advance time manually (tick), and jsdom's rAF timestamp comes from a
+  // different clock than the fake `performance.now` above — the resulting
+  // negative dt would corrupt the level-up lock timer while the async
+  // skill-upgrade fetch settles. Disable the background loop so every
+  // frame is driven deterministically by the tests.
+  (globalThis as any).requestAnimationFrame = () => 0;
+  (globalThis as any).cancelAnimationFrame = () => {};
   GameCtor = (await import("../src/game/game")).Game;
 });
 
@@ -101,6 +142,7 @@ async function newGame() {
   await g.start();
   g["newRun"]();
   g.state = "PLAYING";
+  mockGame = g;
   return g;
 }
 
@@ -161,6 +203,7 @@ describe("level-up skill choice", () => {
     );
 
     g["doAction"](`upgrade:${uid}`);
+    await flush();
     expect(g.player.upgradeLevels[uid]).toBe(1);
     expect(g.state).toBe("PLAYING");
     expect(g.player.pendingLevels).toBe(0);
@@ -179,6 +222,7 @@ describe("level-up skill choice", () => {
     expect(g.state).toBe("UPGRADE");
 
     g["doAction"](`upgrade:${g.upgradeChoices[1]}`);
+    await flush();
     expect(g.state).toBe("PLAYING");
   });
 
@@ -202,6 +246,7 @@ describe("level-up skill choice", () => {
     tick(g, LEVELUP_PICK_LOCK + 0.2);
 
     g["doAction"](`upgrade:${g.upgradeChoices[0]}`);
+    await flush();
     // Still choosing: one level remains, and the lock is armed again.
     expect(g.state).toBe("UPGRADE");
     expect(g.player.pendingLevels).toBe(1);
@@ -209,7 +254,9 @@ describe("level-up skill choice", () => {
     expect(g.upgradeChoices).toHaveLength(SKILL_BRANCHES.length);
 
     tick(g, LEVELUP_PICK_LOCK + 0.2);
-    g["doAction"](`upgrade:${g.upgradeChoices[0]}`);
+    const nextUid = g.upgradeChoices[0];
+    g["doAction"](`upgrade:${nextUid}`);
+    await flush();
     expect(g.state).toBe("PLAYING");
     expect(g.player.pendingLevels).toBe(0);
   });

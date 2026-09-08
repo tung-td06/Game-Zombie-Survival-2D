@@ -13,6 +13,9 @@ import {
   getLeaderboardTop100,
   getPlayerStats,
   deleteGameSave,
+  syncSkillState,
+  getSkillState,
+  upgradeSkill,
 } from "../src/lib/db";
 import {
   _resetCacheForTests,
@@ -209,5 +212,168 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       (r) => r.username.toLowerCase() === username
     );
     expect(daveRows2).toHaveLength(2);
+  });
+
+  it("persists the Skill Tree state and clamps invalid input", async () => {
+    const username = "erin";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    // Level 6 -> 5 points earned. Attempt to store 99 points: the server must
+    // clamp to the earned-points invariant
+    // skill_points + sum(skills) <= level - 1.
+    const synced = await syncSkillState(null, created.id, {
+      level: 6,
+      xp: 50,
+      skill_points: 99,
+      skills: { damage: 1, max_hp: 3, invalid_skill: 7 },
+    });
+    expect(synced.level).toBe(6);
+    expect(synced.skill_points).toBe(1); // 5 earned - 1 damage - 3 max_hp = 1
+    expect(synced.skills.damage).toBe(1);
+    expect(synced.skills.max_hp).toBe(3); // under the 10 cap, stays
+    expect(synced.skills.invalid_skill).toBeUndefined();
+
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const fetched = await getSkillState(null, created.id);
+    expect(fetched).not.toBeNull();
+    expect(fetched?.level).toBe(6);
+    expect(fetched?.xp).toBe(50);
+    expect(fetched?.skills.damage).toBe(1);
+    expect(fetched?.skill_points).toBe(1);
+  });
+
+  it("spends one skill point atomically via the server, then rejects when dry", async () => {
+    const username = "frank";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    // Level 3 -> 2 points.
+    await syncSkillState(null, created.id, {
+      level: 3,
+      xp: 0,
+      skill_points: 2,
+      skills: {},
+    });
+
+    const first = await upgradeSkill(null, created.id, "damage");
+    expect(first.ok).toBe(true);
+    if (first.ok) {
+      expect(first.state.skill_points).toBe(1);
+      expect(first.state.skills.damage).toBe(1);
+    }
+
+    const second = await upgradeSkill(null, created.id, "damage");
+    expect(second.ok).toBe(true);
+    if (second.ok) {
+      expect(second.state.skill_points).toBe(0);
+      expect(second.state.skills.damage).toBe(2);
+    }
+
+    // No points left -> rejected, no state change.
+    const third = await upgradeSkill(null, created.id, "damage");
+    expect(third.ok).toBe(false);
+    if (!third.ok) {
+      expect(third.error).toMatch(/point/i);
+      expect(third.state?.skills.damage).toBe(2);
+      expect(third.state?.skill_points).toBe(0);
+    }
+
+    // Unknown skill id -> rejected before touching the row.
+    const unknown = await upgradeSkill(null, created.id, "hack_skill");
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) expect(unknown.error).toMatch(/unknown/i);
+
+    // Persisted across a "reload".
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const fetched = await getSkillState(null, created.id);
+    expect(fetched?.skills.damage).toBe(2);
+    expect(fetched?.skill_points).toBe(0);
+  });
+
+  it("enforces the max level cap and isolates players from each other", async () => {
+    const userA = "grace";
+    const userB = "heidi";
+    const hash = await hashPassword("Password123!");
+    const a = await createPlayer(null, userA, hash);
+    const b = await createPlayer(null, userB, hash);
+
+    // User A: max out damage (5) and armor (10) — level 17 grants 16 points,
+    // 15 spent, 1 left over.
+    await syncSkillState(null, a.id, {
+      level: 17,
+      xp: 0,
+      skill_points: 1,
+      skills: { damage: 5, armor: 10 },
+    });
+    // Maxed skill -> rejected even with a point available.
+    const maxed = await upgradeSkill(null, a.id, "damage");
+    expect(maxed.ok).toBe(false);
+    if (!maxed.ok) expect(maxed.error).toMatch(/max/i);
+    // The remaining point can still be spent elsewhere.
+    const ok = await upgradeSkill(null, a.id, "speed");
+    expect(ok.ok).toBe(true);
+
+    // User B's tree is untouched and independent.
+    const bState = await getSkillState(null, b.id);
+    expect(bState).toBeNull();
+
+    // B starts their own tree; A's skills must not leak into it.
+    await syncSkillState(null, b.id, { level: 2, xp: 10, skill_points: 1, skills: {} });
+    const bAfter = await getSkillState(null, b.id);
+    expect(bAfter?.skills.damage ?? 0).toBe(0);
+    expect(bAfter?.skills.armor ?? 0).toBe(0);
+    expect(bAfter?.skill_points).toBe(1);
+
+    const aAfter = await getSkillState(null, a.id);
+    expect(aAfter?.skills.damage).toBe(5);
+  });
+
+  it("round-trips the Skill Tree through SAVE GAME / LOAD GAME", async () => {
+    const username = "ivan";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    await saveGameSave(null, created.id, {
+      save_version: 1,
+      level: 7,
+      wave: 5,
+      score: 2500,
+      money: 120,
+      player: {
+        x: 100,
+        y: 100,
+        hp: 90,
+        maxHp: 140,
+        armor: 20,
+        xp: 300,
+        skillPoints: 2,
+        upgradeLevels: { damage: 2, max_hp: 2, speed: 1 },
+      },
+      weapons: {},
+      inventory: {},
+      progression: {},
+      world: {},
+    });
+
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const save = await getGameSave(null, created.id);
+    expect(save).not.toBeNull();
+    expect(save?.level).toBe(7);
+    expect(save?.xp).toBe(300);
+    expect(save?.skill_points).toBe(2);
+    expect(save?.skills).toMatchObject({ damage: 2, max_hp: 2, speed: 1 });
+
+    // The skill columns also drive getSkillState after the save.
+    const state = await getSkillState(null, created.id);
+    expect(state?.level).toBe(7);
+    expect(state?.skill_points).toBe(2);
+    expect(state?.skills.damage).toBe(2);
   });
 });

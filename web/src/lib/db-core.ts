@@ -141,6 +141,99 @@ export interface GameSaveRecord {
   world_data: any;
   created_at: number;
   updated_at: number;
+  /** Skill Tree state (columns added by migration 0005). */
+  xp?: number;
+  skill_points?: number;
+  /** skill id -> level, e.g. { damage: 4, max_hp: 7 }. */
+  skills?: Record<string, number>;
+}
+
+/**
+ * Server-validated Skill Tree state for one player. `level`/`xp` come from
+ * the run, `skill_points` are the unspent points, `skills` maps skill id to
+ * learned level. The server enforces the invariant
+ * `skill_points + sum(skills) <= level - 1` (every level-up grants one
+ * point) so a client can never fabricate points.
+ */
+export interface SkillState {
+  level: number;
+  xp: number;
+  skill_points: number;
+  skills: Record<string, number>;
+}
+
+/**
+ * Skill catalog shared by the upgrade API. `column` is the game_saves column
+ * that stores the learned level; `max` is the level cap. Must stay in sync
+ * with `web/public/data/upgrades.json` and `src/game/upgrade.ts`.
+ */
+export const SKILL_CATALOG: Record<
+  string,
+  { column: string; max: number }
+> = {
+  damage:      { column: "skill_damage",        max: 5 },
+  fire_rate:   { column: "skill_fire_rate",     max: 5 },
+  reload:      { column: "skill_reload_speed",  max: 5 },
+  crit_ch:     { column: "skill_crit_chance",   max: 5 },
+  crit_dmg:    { column: "skill_crit_damage",   max: 5 },
+  max_hp:      { column: "skill_max_hp",        max: 10 },
+  armor:       { column: "skill_armor",         max: 10 },
+  regen:       { column: "skill_hp_regen",      max: 5 },
+  vampire:     { column: "skill_life_steal",    max: 5 },
+  speed:       { column: "skill_move_speed",    max: 5 },
+  magnet:      { column: "skill_pickup_range",  max: 5 },
+  pierce:      { column: "skill_pierce_bolt",   max: 5 },
+};
+
+/** Column list used by the skill-state SQL statements. */
+const SKILL_COLUMNS = Object.values(SKILL_CATALOG).map((s) => s.column);
+
+/**
+ * Normalize (and clamp) a client-provided skill state into a valid one.
+ * Every number is floored to a safe integer; skills are clamped to their
+ * catalog cap; skill_points are clamped so the earned-points invariant
+ * `skill_points + sum(skills) <= level - 1` always holds.
+ */
+export function normalizeSkillState(input: Partial<SkillState>): SkillState {
+  const level = Math.max(1, Math.min(9999, Math.floor(Number(input.level) || 1)));
+  const xp = Math.max(0, Math.floor(Number(input.xp) || 0));
+  const skills: Record<string, number> = {};
+  let sum = 0;
+  for (const uid of Object.keys(SKILL_CATALOG)) {
+    const v = Math.max(
+      0,
+      Math.min(
+        SKILL_CATALOG[uid]!.max,
+        Math.floor(Number(input.skills?.[uid]) || 0)
+      )
+    );
+    skills[uid] = v;
+    sum += v;
+  }
+  const maxPoints = Math.max(0, level - 1 - sum);
+  const skill_points = Math.max(
+    0,
+    Math.min(maxPoints, Math.floor(Number(input.skill_points) || 0))
+  );
+  return { level, xp, skill_points, skills };
+}
+
+/** Build a SkillState from a game_saves row (or a partial row). */
+function rowToSkillState(row: Record<string, any>): SkillState {
+  return normalizeSkillState({
+    level: row.level,
+    xp: row.xp,
+    skill_points: row.skill_points,
+    skills: SKILL_COLUMNS.reduce((acc, col) => {
+      // col is one of the hardcoded catalog columns (skill_*), so the reverse
+      // lookup is always safe here.
+      const uid = Object.keys(SKILL_CATALOG).find(
+        (k) => SKILL_CATALOG[k]!.column === col
+      )!;
+      acc[uid] = Math.max(0, Math.floor(Number(row[col]) || 0));
+      return acc;
+    }, {} as Record<string, number>),
+  });
 }
 
 export interface SubmitScoreInput {
@@ -763,6 +856,9 @@ export async function getGameSave(
       world_data: rec.world_data,
       created_at: rec.created_at,
       updated_at: rec.updated_at,
+      xp: rec.xp,
+      skill_points: rec.skill_points,
+      skills: rec.skills,
     };
   }
   try {
@@ -786,6 +882,13 @@ export async function getGameSave(
       world_data: JSON.parse(row.world_data as string),
       created_at: row.created_at as number,
       updated_at: row.updated_at as number,
+      // Skill Tree columns (migration 0005). Falls back to the values stored
+      // inside player_data for saves written before the migration.
+      xp: row.xp ?? (JSON.parse(row.player_data as string).xp ?? 0),
+      skill_points:
+        row.skill_points ??
+        (JSON.parse(row.player_data as string).skillPoints ?? 0),
+      skills: row.skill_points !== undefined ? rowToSkillState(row).skills : undefined,
     };
   } catch (err) {
     console.warn("D1 getGameSave error:", err);
@@ -821,6 +924,10 @@ export async function saveGameSave(
       world_data: savePayload.world ?? savePayload.world_data ?? {},
       created_at: existing?.created_at ?? now,
       updated_at: now,
+      // Skill Tree columns (mirrors the D1 INSERT below).
+      xp: savePayload.player?.xp ?? 0,
+      skill_points: savePayload.player?.skillPoints ?? 0,
+      skills: { ...(savePayload.player?.upgradeLevels ?? {}) },
     });
     return;
   }
@@ -841,32 +948,52 @@ export async function saveGameSave(
   }
 
   try {
+    const skillCols = SKILL_COLUMNS;
+    const skillVals = skillCols.map((col) => {
+      const uid = Object.keys(SKILL_CATALOG).find(
+        (k) => SKILL_CATALOG[k]!.column === col
+      )!;
+      return Math.max(0, Math.floor(Number(savePayload.player?.upgradeLevels?.[uid]) || 0));
+    });
+    const cols = [
+      "player_id",
+      "save_version",
+      "level",
+      "xp",
+      "wave",
+      "score",
+      "money",
+      "skill_points",
+      ...skillCols,
+      "player_data",
+      "weapon_data",
+      "inventory_data",
+      "progression_data",
+      "world_data",
+      "created_at",
+      "updated_at",
+    ];
+    const placeholders = cols.map(() => "?").join(", ");
+    const setClauses = cols
+      .filter((c) => c !== "player_id" && c !== "created_at")
+      .map((c) => `${c} = excluded.${c}`)
+      .join(", ");
     await db
       .prepare(
-        `INSERT INTO game_saves
-           (player_id, save_version, level, wave, score, money,
-            player_data, weapon_data, inventory_data, progression_data, world_data, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(player_id) DO UPDATE SET
-           save_version     = excluded.save_version,
-           level            = excluded.level,
-           wave             = excluded.wave,
-           score            = excluded.score,
-           money            = excluded.money,
-           player_data      = excluded.player_data,
-           weapon_data      = excluded.weapon_data,
-           inventory_data   = excluded.inventory_data,
-           progression_data = excluded.progression_data,
-           world_data       = excluded.world_data,
-           updated_at       = excluded.updated_at`
+        `INSERT INTO game_saves (${cols.join(", ")})
+         VALUES (${placeholders})
+         ON CONFLICT(player_id) DO UPDATE SET ${setClauses}`
       )
       .bind(
         playerId,
         savePayload.save_version || 1,
         savePayload.level || 1,
+        Math.max(0, Math.floor(Number(savePayload.player?.xp) || 0)),
         savePayload.wave || 1,
         savePayload.score || 0,
         savePayload.money || 0,
+        Math.max(0, Math.floor(Number(savePayload.player?.skillPoints) || 0)),
+        ...skillVals,
         JSON.stringify(savePayload.player || {}),
         savePayload.weapons ? JSON.stringify(savePayload.weapons) : null,
         JSON.stringify(savePayload.inventory || {}),
@@ -898,5 +1025,159 @@ export async function deleteGameSave(
       .run();
   } catch (err) {
     console.warn("D1 deleteGameSave error:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// D1 Database Operations: Skill Tree
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a player's current Skill Tree state from game_saves (or null when
+ * they have no save row yet, which is the "fresh" state: level 1, 0 points,
+ * all skills 0).
+ */
+export async function getSkillState(
+  db: D1Database | null | undefined,
+  playerId: string
+): Promise<SkillState | null> {
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return null;
+    return m.psGetSkillState(playerId);
+  }
+  try {
+    const cols = ["level", "xp", "skill_points", ...SKILL_COLUMNS].join(", ");
+    const row = await db
+      .prepare(`SELECT ${cols} FROM game_saves WHERE player_id = ?`)
+      .bind(playerId)
+      .first<Record<string, any>>();
+    if (!row) return null;
+    return rowToSkillState(row);
+  } catch (err) {
+    console.warn("D1 getSkillState error:", err);
+    return null;
+  }
+}
+
+/**
+ * Server-side upsert of a player's Skill Tree state. The input is
+ * normalized/clamped (see normalizeSkillState) before it is written, so a
+ * client can never store an invalid level, negative points, a skill above
+ * its cap, or more points than level-ups actually granted. Creates the
+ * game_saves row when the player has not saved the run yet (level-ups
+ * persist immediately, before the first explicit SAVE GAME).
+ *
+ * Returns the normalized state that was persisted.
+ */
+export async function syncSkillState(
+  db: D1Database | null | undefined,
+  playerId: string,
+  input: Partial<SkillState>
+): Promise<SkillState> {
+  const state = normalizeSkillState(input);
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return state;
+    await m.psSyncSkillState(playerId, state);
+    return state;
+  }
+  const now = Date.now();
+  const skillVals = SKILL_COLUMNS.map((col) => {
+    const uid = Object.keys(SKILL_CATALOG).find(
+      (k) => SKILL_CATALOG[k]!.column === col
+    )!;
+    return state.skills[uid] ?? 0;
+  });
+  const cols = [
+    "player_id",
+    "level",
+    "xp",
+    "skill_points",
+    ...SKILL_COLUMNS,
+    "created_at",
+    "updated_at",
+  ];
+  const placeholders = cols.map(() => "?").join(", ");
+  const setClauses = cols
+    .filter((c) => c !== "player_id" && c !== "created_at")
+    .map((c) => `${c} = excluded.${c}`)
+    .join(", ");
+  try {
+    await db
+      .prepare(
+        `INSERT INTO game_saves (${cols.join(", ")})
+         VALUES (${placeholders})
+         ON CONFLICT(player_id) DO UPDATE SET ${setClauses}`
+      )
+      .bind(
+        playerId,
+        state.level,
+        state.xp,
+        state.skill_points,
+        ...skillVals,
+        now,
+        now
+      )
+      .run();
+  } catch (err) {
+    console.warn("D1 syncSkillState error:", err);
+    throw new Error("Failed to persist skill state");
+  }
+  return state;
+}
+
+export type SkillUpgradeResult =
+  | { ok: true; state: SkillState }
+  | { ok: false; error: string; state: SkillState | null };
+
+/**
+ * Spend one skill point on `uid`. The spend is a single atomic UPDATE whose
+ * WHERE clause enforces `skill_points > 0` and `skill_<uid> < max` inside
+ * the database, so two racing requests can never double-spend one point.
+ * On success the new state is returned; on failure the reason
+ * ("no save" / "not enough points" / "maxed") plus the current state.
+ */
+export async function upgradeSkill(
+  db: D1Database | null | undefined,
+  playerId: string,
+  uid: string
+): Promise<SkillUpgradeResult> {
+  const skill = SKILL_CATALOG[uid];
+  if (!skill) return { ok: false, error: "Unknown skill", state: null };
+  if (!db) {
+    const m = await loadPersistent();
+    if (!m) return { ok: false, error: "No database available", state: null };
+    return m.psUpgradeSkill(playerId, uid, skill.max);
+  }
+  const col = skill.column;
+  const now = Date.now();
+  try {
+    const res = await db
+      .prepare(
+        `UPDATE game_saves
+           SET skill_points = skill_points - 1,
+               ${col} = ${col} + 1,
+               updated_at = ?
+         WHERE player_id = ? AND skill_points > 0 AND ${col} < ?`
+      )
+      .bind(now, playerId, skill.max)
+      .run();
+    if (!res.meta?.changes) {
+      const st = await getSkillState(db, playerId);
+      if (!st) return { ok: false, error: "No save found", state: null };
+      if (st.skill_points <= 0) {
+        return { ok: false, error: "Not enough skill points", state: st };
+      }
+      if ((st.skills[uid] ?? 0) >= skill.max) {
+        return { ok: false, error: "Skill already maxed", state: st };
+      }
+      return { ok: false, error: "Upgrade failed", state: st };
+    }
+    const st = await getSkillState(db, playerId);
+    return { ok: true, state: st ?? (await syncSkillState(db, playerId, {})) };
+  } catch (err) {
+    console.warn("D1 upgradeSkill error:", err);
+    return { ok: false, error: "Database error", state: null };
   }
 }

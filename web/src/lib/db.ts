@@ -51,6 +51,10 @@ export {
   saveGameSave,
   deleteGameSave,
   validateScoreInput,
+  getSkillState,
+  syncSkillState,
+  upgradeSkill,
+  normalizeSkillState,
 } from "./db-core";
 
 export type {
@@ -60,6 +64,8 @@ export type {
   LeaderboardEntry,
   SubmitScoreInput,
   PersistentScoreEntry,
+  SkillState,
+  SkillUpgradeResult,
 } from "./db-core";
 
 // ---------------------------------------------------------------------------

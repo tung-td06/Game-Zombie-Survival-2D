@@ -90,6 +90,17 @@ export interface GameSaveRecord {
   world_data: any;
   created_at: number;
   updated_at: number;
+  /** Skill Tree state (mirrors db-core GameSaveRecord). */
+  xp?: number;
+  skill_points?: number;
+  skills?: Record<string, number>;
+}
+
+export interface SkillState {
+  level: number;
+  xp: number;
+  skill_points: number;
+  skills: Record<string, number>;
 }
 
 // Resolved per call so tests can redirect the store to a sandbox directory
@@ -299,6 +310,97 @@ export async function psDeleteSave(playerId: string): Promise<void> {
   if (!isNodeRuntime()) return;
   await mutate((data) => {
     delete data.game_saves[playerId];
+  });
+}
+
+// --- Skill Tree CRUD ---------------------------------------------------------
+
+function skillStateFromSave(save: GameSaveRecord): SkillState {
+  return {
+    level: Math.max(1, Math.floor(Number(save.level) || 1)),
+    xp: Math.max(0, Math.floor(Number(save.xp) || 0)),
+    skill_points: Math.max(0, Math.floor(Number(save.skill_points) || 0)),
+    skills: { ...(save.skills ?? {}) },
+  };
+}
+
+export async function psGetSkillState(
+  playerId: string
+): Promise<SkillState | null> {
+  if (!isNodeRuntime()) return null;
+  const data = await loadAll();
+  const save = data.game_saves[playerId];
+  if (!save) return null;
+  return skillStateFromSave(save);
+}
+
+export async function psSyncSkillState(
+  playerId: string,
+  state: SkillState
+): Promise<SkillState> {
+  await mutate((data) => {
+    const now = Date.now();
+    const existing = data.game_saves[playerId];
+    const save: GameSaveRecord = existing ?? {
+      player_id: playerId,
+      save_version: 1,
+      level: 1,
+      wave: 1,
+      score: 0,
+      money: 0,
+      player_data: {},
+      weapon_data: null,
+      inventory_data: {},
+      progression_data: {},
+      world_data: {},
+      created_at: now,
+      updated_at: now,
+    };
+    save.level = state.level;
+    save.xp = state.xp;
+    save.skill_points = state.skill_points;
+    save.skills = { ...state.skills };
+    save.updated_at = now;
+    data.game_saves[playerId] = save;
+  });
+  return state;
+}
+
+/**
+ * Atomic (within this process's write queue) skill-point spend on the JSON
+ * fallback. Returns the same shape as db-core's upgradeSkill.
+ */
+export async function psUpgradeSkill(
+  playerId: string,
+  uid: string,
+  max: number
+): Promise<
+  | { ok: true; state: SkillState }
+  | { ok: false; error: string; state: SkillState | null }
+> {
+  return mutate((data) => {
+    const save = data.game_saves[playerId];
+    if (!save) return { ok: false as const, error: "No save found", state: null };
+    const cur = Math.max(0, Math.floor(Number(save.skills?.[uid]) || 0));
+    const points = Math.max(0, Math.floor(Number(save.skill_points) || 0));
+    if (cur >= max) {
+      return {
+        ok: false as const,
+        error: "Skill already maxed",
+        state: skillStateFromSave(save),
+      };
+    }
+    if (points <= 0) {
+      return {
+        ok: false as const,
+        error: "Not enough skill points",
+        state: skillStateFromSave(save),
+      };
+    }
+    save.skill_points = points - 1;
+    save.skills = { ...(save.skills ?? {}), [uid]: cur + 1 };
+    save.updated_at = Date.now();
+    return { ok: true as const, state: skillStateFromSave(save) };
   });
 }
 
