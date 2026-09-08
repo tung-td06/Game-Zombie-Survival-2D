@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { DEFAULT_SAVE, SaveManager, type SaveData } from "@/game/save";
+import { AudioManager } from "@/game/audio";
 
 interface LeaderboardEntry {
   rank: number;
@@ -38,6 +40,7 @@ const C = {
   redHover: "#FF5A63",
   redDeep: "#C82832",
   gold: "#FFC850",
+  green: "#6EDC82",
   bronze: "#C88C50",
   silver: "#C8C8C2",
   cyan: "#5ADCFF",
@@ -113,6 +116,7 @@ export default function Home() {
   // UI state
   const [activeTab, setActiveTab] = useState<Tab>("play");
   const [hovered, setHovered] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -999,6 +1003,11 @@ export default function Home() {
                       </button>
                     )}
 
+                    {/* Settings entry point — opens the same persisted settings
+                        (AUDIO / GAMEPLAY / DISPLAY) the in-game settings screens
+                        read and write via localStorage (zs.save.v1). */}
+                    <SettingsButton onClick={() => setShowSettings(true)} />
+
                     {/* Co-op divider */}
                     <div
                       style={{
@@ -1524,7 +1533,32 @@ export default function Home() {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
         }
+        @keyframes zs-settings-fade {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes zs-settings-pop {
+          from { opacity: 0; transform: translateY(10px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .zs-settings-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 6px 0;
+        }
+        .zs-settings-row .zs-set-label {
+          width: 132px;
+          flex-shrink: 0;
+        }
+        @media (max-width: 560px) {
+          .zs-settings-row { flex-wrap: wrap; row-gap: 4px; }
+          .zs-settings-row .zs-set-label { width: 100%; }
+        }
       `}</style>
+
+      {/* Settings modal — reuses the game's localStorage settings (zs.save.v1). */}
+      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </main>
   );
 }
@@ -1604,3 +1638,554 @@ const controlDesc: React.CSSProperties = {
   color: C.textSoft,
   fontSize: "0.82rem",
 };
+
+// ---- Settings -------------------------------------------------------------
+
+type BoolSettingKey =
+  | "muted"
+  | "fullscreen"
+  | "show_fps"
+  | "screen_shake"
+  | "damage_numbers"
+  | "hit_effects"
+  | "footstep_dust"
+  | "window_lights";
+
+const settingsLabelStyle: React.CSSProperties = {
+  fontSize: "0.72rem",
+  fontWeight: 700,
+  letterSpacing: 1.5,
+  color: C.textSoft,
+  whiteSpace: "nowrap",
+};
+
+const settingsBarStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 70,
+  height: 12,
+  backgroundColor: "#1E1E26",
+  borderRadius: 3,
+  position: "relative",
+};
+
+const settingsValueStyle: React.CSSProperties = {
+  width: 46,
+  flexShrink: 0,
+  textAlign: "right",
+  color: C.gold,
+  fontWeight: 800,
+  fontSize: "0.8rem",
+  fontVariantNumeric: "tabular-nums",
+};
+
+function SettingsButton({ onClick }: { onClick: () => void }) {
+  const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        width: "100%",
+        padding: "10px 16px",
+        backgroundColor: pressed ? C.bgDeep : hover ? "#26262E" : C.panelDeep,
+        color: hover ? "#FFFFFF" : C.textSoft,
+        fontSize: "0.95rem",
+        fontWeight: 700,
+        border: `1px solid ${hover ? C.redHover : C.red}`,
+        borderRadius: 6,
+        cursor: "pointer",
+        letterSpacing: 2,
+        textTransform: "uppercase",
+        fontFamily: "inherit",
+        transition:
+          "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease",
+        boxShadow: hover ? "0 0 14px rgba(255, 60, 70, 0.22)" : "none",
+      }}
+    >
+      <span style={{ color: C.gold, marginRight: 8 }}>⚙</span>
+      SETTINGS
+    </button>
+  );
+}
+
+function SettingsSectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        margin: "16px 0 6px",
+      }}
+    >
+      <span
+        style={{
+          color: C.gold,
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: 2,
+          textTransform: "uppercase",
+        }}
+      >
+        {children}
+      </span>
+      <div style={{ flex: 1, height: 1, backgroundColor: C.border }} />
+    </div>
+  );
+}
+
+function StepBtn({
+  label,
+  ariaLabel,
+  onClick,
+}: {
+  label: string;
+  ariaLabel: string;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        width: 30,
+        height: 30,
+        flexShrink: 0,
+        borderRadius: 4,
+        border: `1px solid ${hover ? C.redHover : C.red}`,
+        backgroundColor: pressed ? C.bgDeep : hover ? "#2E2E3A" : "#22222A",
+        color: hover ? "#FFFFFF" : C.textSoft,
+        fontWeight: 800,
+        fontSize: "0.95rem",
+        lineHeight: 1,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        transition:
+          "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease",
+        boxShadow: hover ? "0 0 10px rgba(255, 60, 70, 0.3)" : "none",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function PillBtn({
+  on,
+  label,
+  onClick,
+}: {
+  on: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        width: 78,
+        padding: "7px 0",
+        flexShrink: 0,
+        borderRadius: 4,
+        border: "none",
+        backgroundColor: pressed
+          ? "#0A0B08"
+          : hover
+          ? on
+            ? "#7BE88F"
+            : "#5A5A62"
+          : on
+          ? C.green
+          : "#4A4A52",
+        color: on ? "#0E0E10" : C.textSoft,
+        fontWeight: 800,
+        fontSize: "0.72rem",
+        letterSpacing: 1.5,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        transition: "background-color 0.15s ease",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function ModalBackButton({ onClose }: { onClose: () => void }) {
+  const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => {
+        setHover(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        width: "100%",
+        marginTop: 20,
+        padding: "11px 16px",
+        backgroundColor: pressed ? C.bgDeep : hover ? "#26262E" : C.panelDeep,
+        color: hover ? "#FFFFFF" : C.textSoft,
+        fontSize: "0.9rem",
+        fontWeight: 800,
+        border: `1px solid ${hover ? C.redHover : C.red}`,
+        borderRadius: 6,
+        cursor: "pointer",
+        letterSpacing: 2,
+        textTransform: "uppercase",
+        fontFamily: "inherit",
+        transition:
+          "background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease",
+        boxShadow: hover ? "0 0 14px rgba(255, 60, 70, 0.25)" : "none",
+      }}
+    >
+      ← BACK
+    </button>
+  );
+}
+
+/**
+ * Lobby settings panel. This is a DOM counterpart of the canvas settings
+ * screens (menu.ts drawPauseSettings / drawSettings) but shares the exact
+ * same persisted store — SaveManager / localStorage "zs.save.v1" — so
+ * nothing here can drift from what the game reads on Continue / New Game.
+ */
+function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [st, setSt] = useState<SaveData["settings"]>(() => {
+    try {
+      return new SaveManager().settings;
+    } catch {
+      return JSON.parse(JSON.stringify(DEFAULT_SAVE.settings));
+    }
+  });
+  const audioRef = useRef<AudioManager | null>(null);
+
+  // Lazy audio mirroring the game's AudioManager, so volume/mute changes are
+  // audible immediately and still land in the same persisted settings store.
+  const getAudio = (): AudioManager | null => {
+    if (!audioRef.current) {
+      try {
+        audioRef.current = new AudioManager();
+        audioRef.current.load(st.master_volume, st.music_volume, st.sfx_volume);
+        audioRef.current.setSfxMuted(st.muted);
+      } catch {
+        audioRef.current = null;
+      }
+    }
+    return audioRef.current;
+  };
+
+  // Persist every change to the SAME localStorage key the game uses, so
+  // Continue / New Game / the in-game pause menu all pick up these values.
+  // Settings are never reset — every open re-reads the stored state.
+  const persist = (next: SaveData["settings"]) => {
+    setSt(next);
+    try {
+      const sm = new SaveManager();
+      Object.assign(sm.data.settings, next);
+      sm.save();
+    } catch {
+      // localStorage unavailable — keep the in-memory copy for this session.
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const changeVolume = (
+    key: "master_volume" | "music_volume" | "sfx_volume",
+    delta: number,
+  ) => {
+    const val = Math.max(0, Math.min(1, Math.round((st[key] + delta) * 100) / 100));
+    const next = { ...st, [key]: val };
+    persist(next);
+    try {
+      const a = getAudio();
+      a?.setVolumes(next.master_volume, next.music_volume, next.sfx_volume);
+      if (key !== "music_volume") a?.play("click");
+    } catch {
+      // Audio unavailable — settings still persist.
+    }
+  };
+
+  const toggleBool = (key: BoolSettingKey) => {
+    const next = { ...st, [key]: !st[key] };
+    persist(next);
+    try {
+      const a = getAudio();
+      if (key === "muted") {
+        a?.setSfxMuted(next.muted);
+        if (!next.muted) a?.play("click");
+      } else {
+        a?.play("click");
+      }
+      if (key === "fullscreen") {
+        if (document.fullscreenElement) {
+          void document.exitFullscreen().catch(() => {});
+        } else {
+          document.documentElement.requestFullscreen?.().catch?.(() => {});
+        }
+      }
+    } catch {
+      // Fullscreen/audio failures must never break the settings toggle.
+    }
+  };
+
+  const volumeRows: Array<
+    ["master_volume" | "music_volume" | "sfx_volume", string]
+  > = [
+    ["master_volume", "MASTER VOLUME"],
+    ["music_volume", "MUSIC VOLUME"],
+    ["sfx_volume", "SFX VOLUME"],
+  ];
+  const toggleRows: Array<[BoolSettingKey, string]> = [
+    ["screen_shake", "SCREEN SHAKE"],
+    ["damage_numbers", "DAMAGE NUMBERS"],
+    ["hit_effects", "HIT EFFECTS"],
+    ["footstep_dust", "FOOTSTEP DUST"],
+    ["window_lights", "WINDOW LIGHTS"],
+    ["show_fps", "SHOW FPS"],
+  ];
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        backgroundColor: "rgba(8, 8, 10, 0.65)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        animation: "zs-settings-fade 0.15s ease-out",
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="SETTINGS"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 560,
+          maxHeight: "min(88vh, 680px)",
+          overflowY: "auto",
+          boxSizing: "border-box",
+          backgroundColor: C.panel,
+          border: `2px solid ${C.red}`,
+          borderRadius: 12,
+          boxShadow:
+            "0 0 34px rgba(255, 60, 70, 0.28), 0 10px 44px rgba(0, 0, 0, 0.65)",
+          padding: "22px 24px 24px",
+          animation: "zs-settings-pop 0.18s ease-out",
+        }}
+      >
+        {/* Title */}
+        <div style={{ textAlign: "center" }}>
+          <div
+            style={{
+              fontSize: "1.45rem",
+              fontWeight: 900,
+              color: C.red,
+              letterSpacing: 4,
+              textShadow: "0 0 14px rgba(255, 60, 70, 0.4)",
+            }}
+          >
+            ⚙ SETTINGS
+          </div>
+        </div>
+        <div
+          style={{
+            height: 1,
+            margin: "10px 0 2px",
+            background:
+              "linear-gradient(90deg, rgba(255,60,70,0), rgba(255,60,70,0.6), rgba(255,60,70,0))",
+          }}
+        />
+
+        {/* AUDIO */}
+        <SettingsSectionTitle>AUDIO</SettingsSectionTitle>
+        {volumeRows.map(([key, label]) => (
+          <div key={key} className="zs-settings-row">
+            <div className="zs-set-label" style={settingsLabelStyle}>
+              {label}
+            </div>
+            <StepBtn
+              label="−"
+              ariaLabel={`Giảm ${label}`}
+              onClick={() => changeVolume(key, -0.05)}
+            />
+            <div style={settingsBarStyle}>
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: `${Math.round(st[key] * 100)}%`,
+                  background: "linear-gradient(90deg, #992030, #FF3C46)",
+                  borderRadius: 3,
+                }}
+              />
+            </div>
+            <StepBtn
+              label="+"
+              ariaLabel={`Tăng ${label}`}
+              onClick={() => changeVolume(key, 0.05)}
+            />
+            <div className="zs-set-value" style={settingsValueStyle}>
+              {Math.round(st[key] * 100)}%
+            </div>
+          </div>
+        ))}
+
+        <div className="zs-settings-row">
+          <div className="zs-set-label" style={settingsLabelStyle}>
+            MUTE ALL
+          </div>
+          <div style={{ flex: 1 }} />
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              flexShrink: 0,
+              backgroundColor: st.muted ? C.green : "#4A4A52",
+            }}
+          />
+          <PillBtn
+            on={st.muted}
+            label={st.muted ? "MUTED" : "UNMUTE"}
+            onClick={() => toggleBool("muted")}
+          />
+        </div>
+
+        {/* GAMEPLAY */}
+        <SettingsSectionTitle>GAMEPLAY</SettingsSectionTitle>
+        {toggleRows.map(([key, label]) => (
+          <div key={key} className="zs-settings-row">
+            <div className="zs-set-label" style={settingsLabelStyle}>
+              {label}
+            </div>
+            <div style={{ flex: 1 }} />
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                flexShrink: 0,
+                backgroundColor: st[key] ? C.green : "#4A4A52",
+              }}
+            />
+            <PillBtn
+              on={st[key]}
+              label={st[key] ? "ON" : "OFF"}
+              onClick={() => toggleBool(key)}
+            />
+          </div>
+        ))}
+
+        {/* DISPLAY */}
+        <SettingsSectionTitle>DISPLAY</SettingsSectionTitle>
+        <div className="zs-settings-row">
+          <div className="zs-set-label" style={settingsLabelStyle}>
+            FULLSCREEN
+          </div>
+          <div style={{ flex: 1 }} />
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              flexShrink: 0,
+              backgroundColor: st.fullscreen ? C.green : "#4A4A52",
+            }}
+          />
+          <PillBtn
+            on={st.fullscreen}
+            label={st.fullscreen ? "ON" : "OFF"}
+            onClick={() => toggleBool("fullscreen")}
+          />
+        </div>
+
+        {/* BRIGHTNESS — locked at 100%, read-only (same as in-game). */}
+        <div className="zs-settings-row">
+          <div className="zs-set-label" style={settingsLabelStyle}>
+            BRIGHTNESS
+          </div>
+          <span
+            style={{
+              fontSize: "0.62rem",
+              color: C.dim,
+              letterSpacing: 1.5,
+              border: `1px solid ${C.border}`,
+              borderRadius: 3,
+              padding: "2px 7px",
+              flexShrink: 0,
+            }}
+          >
+            LOCKED
+          </span>
+          <div style={settingsBarStyle}>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                bottom: 0,
+                right: 0,
+                background: "linear-gradient(90deg, #8A6000, #FFC850)",
+                borderRadius: 3,
+              }}
+            />
+          </div>
+          <div className="zs-set-value" style={settingsValueStyle}>
+            100%
+          </div>
+        </div>
+
+        <ModalBackButton onClose={onClose} />
+      </div>
+    </div>
+  );
+}
