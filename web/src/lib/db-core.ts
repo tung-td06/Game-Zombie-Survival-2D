@@ -558,13 +558,20 @@ export async function submitScore(
       game_status: input.game_status,
     });
     const prev = await m.psGetStats(playerId);
+    // Totals are derived from the actual run rows so repeated submissions of
+    // the same run (save + game over upserts) never double-count.
+    const runs = (await m.psListScores()).filter(
+      (r) => r.player_id === playerId
+    );
     await m.psUpsertStats({
       player_id: playerId,
-      total_games: (prev?.total_games || 0) + 1,
+      total_games: runs.length,
       best_score: Math.max(prev?.best_score || 0, input.score),
       best_wave: Math.max(prev?.best_wave || 0, input.wave),
-      total_zombies_killed:
-        (prev?.total_zombies_killed || 0) + input.zombies_killed,
+      total_zombies_killed: runs.reduce(
+        (sum, r) => sum + (r.zombies_killed || 0),
+        0
+      ),
       best_survival_time: Math.max(
         prev?.best_survival_time || 0,
         input.survival_time
@@ -619,10 +626,10 @@ export async function submitScore(
          (player_id, total_games, best_score, best_wave, total_zombies_killed, best_survival_time, updated_at)
          VALUES (?, 1, ?, ?, ?, ?, ?)
          ON CONFLICT(player_id) DO UPDATE SET
-           total_games          = total_games + 1,
+           total_games          = (SELECT COUNT(*) FROM game_scores gs WHERE gs.player_id = excluded.player_id),
            best_score           = MAX(best_score, excluded.best_score),
            best_wave            = MAX(best_wave, excluded.best_wave),
-           total_zombies_killed = total_zombies_killed + excluded.total_zombies_killed,
+           total_zombies_killed = (SELECT COALESCE(SUM(gs.zombies_killed), 0) FROM game_scores gs WHERE gs.player_id = excluded.player_id),
            best_survival_time   = MAX(best_survival_time, excluded.best_survival_time),
            updated_at           = excluded.updated_at`
       )

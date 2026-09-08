@@ -184,6 +184,13 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(daveRows[0].zombies_killed).toBe(120);
     expect(daveRows[0].survival_time).toBe(420);
 
+    // Stats count RUNS, not submissions: two upserts of the same run must
+    // not inflate total_games or total kills.
+    const stats = await getPlayerStats(null, created.id);
+    expect(stats?.total_games).toBe(1);
+    expect(stats?.total_zombies_killed).toBe(120);
+    expect(stats?.best_score).toBe(8000);
+
     // A different run creates a separate, independent row.
     await submitScore(null, created.id, {
       score: 3000,
