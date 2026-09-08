@@ -81,6 +81,8 @@ export class InputManager {
   pausePressed = false;
   /** Touch bomb button — one-shot, cleared in endFrame() like keysPressed. */
   bombPressed = false;
+  /** Touch reload button — one-shot, cleared in endFrame() like keysPressed. */
+  reloadPressed = false;
   /** World-space aim override (auto-aim) or null to fall back to mouse. */
   aimOverride: Vec | null = null;
 
@@ -146,6 +148,7 @@ export class InputManager {
     this.weaponPressed.clear();
     this.pausePressed = false;
     this.bombPressed = false;
+    this.reloadPressed = false;
   }
 
   isDown(action: Action): boolean {

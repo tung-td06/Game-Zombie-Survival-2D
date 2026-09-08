@@ -4,20 +4,29 @@
 // InputManager — no game-core changes. Twin-stick layout:
 //
 //   • LEFT joystick  → movement (moveVec → WASD key surface)
+//   • RELOAD button  → one-shot reloadPressed (existing R-key surface)
 //   • RIGHT joystick → aim + fire (aimOverride + fireHeld → existing weapon)
 //   • WEAPON button  → cycles owned weapons (next_weapon binding)
 //   • BOMB button    → one-shot bombPressed (existing F-key surface)
 //   • PAUSE button   → real Escape keydown (existing pause manager)
 //
+// Controls only react during real gameplay: joysticks / fire / weapon / bomb
+// / reload are hidden whenever the game is not PLAYING (pause menus, upgrade
+// picks, game over, boot), so they never sit over the canvas menus. They stay
+// MOUNTED (display:none), which preserves the last aim direction and joystick
+// state across a pause — returning to the game never auto-fires or auto-moves.
+// The PAUSE button stays available while paused so the player can resume.
+//
 // Sizes scale with the viewport (clamped touch targets); safe-area insets
 // keep everything clear of notches and gesture bars.
 
 import type { RefObject } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { InputManager } from "@/game/input";
 import type { Game } from "@/game/game";
 import VirtualJoystick from "./VirtualJoystick";
 import RightJoystick from "./RightJoystick";
+import ReloadButton from "./ReloadButton";
 import BombButton from "./BombButton";
 import WeaponSwitchButton from "./WeaponSwitchButton";
 import PauseButton from "./PauseButton";
@@ -55,6 +64,14 @@ function useControlSizes() {
   return sizes;
 }
 
+const PAUSE_STATES = [
+  "PAUSED",
+  "PAUSE_SETTINGS",
+  "PAUSE_CONTROLS",
+  "PAUSE_LEAVE_CONFIRM",
+  "PAUSE_SHOP",
+];
+
 export default function TouchHUD({ input, gameRef }: Props) {
   // Mirror joystick → WASD keys so player.ts:97-98 keeps working.
   const left = useMemo(() => input.bindings["left"], [input]);
@@ -84,8 +101,6 @@ export default function TouchHUD({ input, gameRef }: Props) {
       if (input.fireHeld) input.mouseDown.add(0);
       else input.mouseDown.delete(0);
 
-      // Tap fire area + hold reload to reload (auto when empty is already
-      // handled; no extra wiring needed).
       void reload;
       raf = requestAnimationFrame(tick);
     };
@@ -98,6 +113,38 @@ export default function TouchHUD({ input, gameRef }: Props) {
   const safeRight = "max(16px, env(safe-area-inset-right))";
   const safeBottom = "max(16px, env(safe-area-inset-bottom))";
   const safeLeft = "max(16px, env(safe-area-inset-left))";
+
+  // Game-state gating (see header comment). Polled cheaply; state only ever
+  // changes between a small set of values, so re-renders are rare.
+  const [gameState, setGameState] = useState("");
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const s = gameRef.current?.state ?? "";
+      setGameState((prev) => (prev === s ? prev : s));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [gameRef]);
+
+  const inPlay = gameState === "PLAYING";
+  const showPause = inPlay || PAUSE_STATES.includes(gameState);
+
+  // Leaving real gameplay (pause, upgrade, game over…) releases any held
+  // touch state so nothing lingers into a menu. aimOverride is deliberately
+  // kept — the last aim direction stays until the player aims again.
+  const wasPlayingRef = useRef(false);
+  useEffect(() => {
+    if (wasPlayingRef.current && !inPlay) {
+      input.moveVec = { x: 0, y: 0 };
+      input.fireHeld = false;
+      input.bombPressed = false;
+      input.reloadPressed = false;
+      for (const k of [left, right, up, down]) input.keysDown.delete(k);
+    }
+    wasPlayingRef.current = inPlay;
+  }, [inPlay, input, left, right, up, down]);
 
   return (
     <div
@@ -116,13 +163,15 @@ export default function TouchHUD({ input, gameRef }: Props) {
         WebkitTapHighlightColor: "transparent",
       }}
     >
-      {/* Pause — top-right */}
+      {/* Pause — top-right. Stays mounted while paused so it doubles as
+          RESUME (its Escape keydown toggles PAUSED → PLAYING). */}
       <div
         style={{
           position: "absolute",
           top: safeTop,
           right: safeRight,
           pointerEvents: "auto",
+          display: showPause ? undefined : "none",
         }}
       >
         <PauseButton input={input} size={button} />
@@ -135,6 +184,7 @@ export default function TouchHUD({ input, gameRef }: Props) {
           bottom: safeBottom,
           left: safeLeft,
           pointerEvents: "auto",
+          display: inPlay ? undefined : "none",
         }}
       >
         <VirtualJoystick
@@ -146,6 +196,20 @@ export default function TouchHUD({ input, gameRef }: Props) {
         />
       </div>
 
+      {/* Reload — just right of the movement joystick, still under the left
+          thumb. Hidden unless actively playing. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: safeBottom,
+          left: `calc(${safeLeft} + ${joystick}px + 14px)`,
+          pointerEvents: "auto",
+          display: inPlay ? undefined : "none",
+        }}
+      >
+        <ReloadButton input={input} gameRef={gameRef} size={button} />
+      </div>
+
       {/* Right joystick — aim + fire (bottom-right) */}
       <div
         style={{
@@ -153,19 +217,20 @@ export default function TouchHUD({ input, gameRef }: Props) {
           bottom: safeBottom,
           right: safeRight,
           pointerEvents: "auto",
+          display: inPlay ? undefined : "none",
         }}
       >
         <RightJoystick input={input} gameRef={gameRef} size={joystick} thumbSize={thumb} />
       </div>
 
-      {/* Action buttons — Bomb above Weapon, just left of the right joystick
+      {/* Action buttons — Weapon above Bomb, just left of the right joystick
           so they never overlap it and stay reachable mid-combat. */}
       <div
         style={{
           position: "absolute",
           bottom: safeBottom,
           right: `calc(${safeRight} + ${joystick}px + 14px)`,
-          display: "flex",
+          display: inPlay ? "flex" : "none",
           flexDirection: "column",
           gap: 12,
           alignItems: "center",

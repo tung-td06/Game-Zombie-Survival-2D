@@ -236,6 +236,7 @@ export class Player {
     const wantFire = inp.mouseHeld;
     if (
       inp.isPressed("reload") ||
+      inp.reloadPressed ||
       (wantFire && !w.reloading && w.ammo === 0 && w.reserve > 0)
     ) {
       if (w.startReload(this.reloadMult)) {

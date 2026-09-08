@@ -5,7 +5,7 @@
 //   → rotate back to portrait (overlay + pause) → landscape (resume).
 const { chromium, devices } = require("playwright");
 
-const BASE = "http://localhost:3213";
+const BASE = `http://localhost:${process.env.PORT || 3213}`;
 
 (async () => {
   const browser = await chromium.launch();
@@ -19,6 +19,20 @@ const BASE = "http://localhost:3213";
   page.on("console", (m) => {
     if (m.type() === "error") errors.push(m.text());
   });
+  let failures = 0;
+  const must = (name, cond, extra) => {
+    if (cond) {
+      console.log(`  ok: ${name}`);
+    } else {
+      failures++;
+      console.log(`  FAIL: ${name}${extra ? "  -> " + JSON.stringify(extra) : ""}`);
+    }
+  };
+  const vis = (sel) =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s);
+      return !!el && el.getClientRects().length > 0;
+    }, sel);
 
   const user = "mobile" + Date.now();
   await page.goto(BASE + "/");
@@ -107,14 +121,41 @@ const BASE = "http://localhost:3213";
   const w2 = await page.evaluate(() => window.__game.player.weapons.currentId);
   console.log("6) weapon cycle:", w0, "->", w1, "->", w2);
 
-  // 7) Pause button → pause menu, tap again → resume
+  // 7) Pause → controls hidden except pause; resume → fresh controls.
   await page.locator('[data-testid="pause-button"]').click();
-  await page.waitForTimeout(120);
+  await page.waitForTimeout(150);
   const ps1 = await page.evaluate(() => window.__game.state);
+  must("pause tap -> PAUSED", ps1 === "PAUSED", ps1);
+  must(
+    "combat controls hidden while paused",
+    !(await vis('[data-testid="virtual-joystick"]')) &&
+      !(await vis('[data-testid="right-joystick"]')) &&
+      !(await vis('[data-testid="weapon-switch-button"]')) &&
+      !(await vis('[data-testid="bomb-button"]')) &&
+      !(await vis('[data-testid="reload-button"]')) &&
+      (await vis('[data-testid="pause-button"]'))
+  );
+  const pausedInput = await page.evaluate(() => ({
+    move: window.__game.input.moveVec,
+    fire: window.__game.input.fireHeld,
+  }));
+  must(
+    "no lingering movement/fire while paused",
+    pausedInput.move.x === 0 && pausedInput.move.y === 0 && pausedInput.fire === false,
+    pausedInput
+  );
   await page.locator('[data-testid="pause-button"]').click();
-  await page.waitForTimeout(120);
+  await page.waitForTimeout(150);
   const ps2 = await page.evaluate(() => window.__game.state);
-  console.log("7) pause tap:", ps1, "| resume tap:", ps2);
+  must("pause tap again -> PLAYING", ps2 === "PLAYING", ps2);
+  must(
+    "combat controls visible again after resume",
+    (await vis('[data-testid="virtual-joystick"]')) &&
+      (await vis('[data-testid="right-joystick"]')) &&
+      (await vis('[data-testid="weapon-switch-button"]')) &&
+      (await vis('[data-testid="bomb-button"]')) &&
+      (await vis('[data-testid="reload-button"]'))
+  );
 
   // 8) Back to portrait → overlay + auto-pause; landscape → resume
   await page.setViewportSize({ width: 390, height: 844 });
@@ -142,17 +183,75 @@ const BASE = "http://localhost:3213";
   await page.locator('[data-testid="virtual-joystick"]').dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch", clientX: joyCx + 40, clientY: joyCy, bubbles: true });
   await page.locator('[data-testid="right-joystick"]').dispatchEvent("pointerup", { pointerId: 2, pointerType: "touch", clientX: rjCx - 45, clientY: rjCy, bubbles: true });
 
-  // 10) No page scroll / overflow on the game screen
+  // 11) Reload button → existing Weapon.startReload flow, then no-op when full.
+  for (let i = 0; i < 40; i++) {
+    if ((await page.evaluate(() => window.__game.state)) === "PLAYING") break;
+    await page.waitForTimeout(150);
+  }
+  must("state PLAYING before reload test", (await page.evaluate(() => window.__game.state)) === "PLAYING");
+  must("reload button visible while PLAYING", await vis('[data-testid="reload-button"]'));
+  await page.evaluate(() => {
+    const w = window.__game.player.weapons.current;
+    w.reloading = false;
+    w.ammo = 1;
+    w.reserve = 25;
+    w.cooldown = 0;
+  });
+  await page.waitForTimeout(150);
+  const rbtn = page.locator('[data-testid="reload-button"]');
+  await rbtn.dispatchEvent("pointerdown", { pointerId: 7, pointerType: "touch", bubbles: true });
+  await rbtn.dispatchEvent("pointerup", { pointerId: 7, pointerType: "touch", bubbles: true });
+  await page.waitForTimeout(120);
+  const reloadStarted = await page.evaluate(() => window.__game.player.weapons.current.reloading);
+  must("reload tap starts reload (reloading === true)", reloadStarted === true, reloadStarted);
+  let reloadDone = false;
+  for (let i = 0; i < 40; i++) {
+    const st = await page.evaluate(() => {
+      const w = window.__game.player.weapons.current;
+      return { reloading: w.reloading, ammo: w.ammo, mag: w.magazineSize };
+    });
+    if (!st.reloading && st.ammo === st.mag) {
+      reloadDone = true;
+      break;
+    }
+    await page.waitForTimeout(150);
+  }
+  must("reload completes: ammo refilled to magazine", reloadDone);
+  const beforeFull = await page.evaluate(() => {
+    const w = window.__game.player.weapons.current;
+    return { reloading: w.reloading, ammo: w.ammo, reserve: w.reserve };
+  });
+  await rbtn.dispatchEvent("pointerdown", { pointerId: 8, pointerType: "touch", bubbles: true });
+  await rbtn.dispatchEvent("pointerup", { pointerId: 8, pointerType: "touch", bubbles: true });
+  await page.waitForTimeout(120);
+  const afterFull = await page.evaluate(() => {
+    const w = window.__game.player.weapons.current;
+    return { reloading: w.reloading, ammo: w.ammo, reserve: w.reserve };
+  });
+  must(
+    "reload tap while magazine full is a no-op",
+    !afterFull.reloading &&
+      afterFull.ammo === beforeFull.ammo &&
+      afterFull.reserve === beforeFull.reserve,
+    { beforeFull, afterFull }
+  );
+
+  // 12) No page scroll / overflow on the game screen
   const layout = await page.evaluate(() => ({
     scrollW: document.documentElement.scrollWidth,
     clientW: document.documentElement.clientWidth,
     scrollH: document.documentElement.scrollHeight,
     clientH: document.documentElement.clientHeight,
   }));
-  console.log("10) layout:", JSON.stringify(layout));
+  console.log("12) layout:", JSON.stringify(layout));
+  must("no horizontal or vertical page scroll", layout.scrollW <= layout.clientW && layout.scrollH <= layout.clientH, layout);
 
   console.log("ERRORS:", errors.length ? JSON.stringify(errors) : "none");
   await browser.close();
+  console.log(failures === 0 ? "ALL MOBILE CHECKS PASSED ✅" : `${failures} FAILURES ❌`);
+  // Console noise above (Turbopack HMR websocket + unauthenticated 401) is
+  // pre-existing and environmental; only real check failures fail the run.
+  process.exit(failures === 0 ? 0 : 1);
 })().catch((e) => {
   console.error("FAILED:", e);
   process.exit(1);
