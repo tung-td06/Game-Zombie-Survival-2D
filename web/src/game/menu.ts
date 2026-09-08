@@ -205,17 +205,8 @@ export class MenuSystem {
     roundRect(ctx, panelX, panelY, panelW, panelH, 12);
     ctx.stroke();
 
-    // Corner accents — top-left
-    const ca = 18;
-    ctx.strokeStyle = color("ui_gold");
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(panelX, panelY + ca); ctx.lineTo(panelX, panelY); ctx.lineTo(panelX + ca, panelY); ctx.stroke();
-    // top-right
-    ctx.beginPath(); ctx.moveTo(panelX + panelW - ca, panelY); ctx.lineTo(panelX + panelW, panelY); ctx.lineTo(panelX + panelW, panelY + ca); ctx.stroke();
-    // bottom-left
-    ctx.beginPath(); ctx.moveTo(panelX, panelY + panelH - ca); ctx.lineTo(panelX, panelY + panelH); ctx.lineTo(panelX + ca, panelY + panelH); ctx.stroke();
-    // bottom-right
-    ctx.beginPath(); ctx.moveTo(panelX + panelW - ca, panelY + panelH); ctx.lineTo(panelX + panelW, panelY + panelH); ctx.lineTo(panelX + panelW, panelY + panelH - ca); ctx.stroke();
+    // Corner accents were removed: the 4 gold corner brackets on the panel
+    // border are no longer drawn (clean centered panel only).
 
     // ── Title ─────────────────────────────────────────────────────────────
     const titleY = panelY + 38;

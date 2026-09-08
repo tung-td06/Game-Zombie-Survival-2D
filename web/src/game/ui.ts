@@ -69,6 +69,88 @@ export function roundRect(
   ctx.closePath();
 }
 
+/** Commas a non-negative integer (27,750 / 999,999,999) for the HUD. */
+function fmtInt(n: number): string {
+  return Math.max(0, Math.floor(n)).toLocaleString("en-US");
+}
+
+/**
+ * Geometry of the top-right HUD block: a SCORE / MONEY panel with the
+ * minimap panel directly below it, sharing the same width and left edge so
+ * the whole block reads as one HUD unit.
+ *
+ * Both cells (SCORE, MONEY) are measured from the ACTUAL rendered glyphs, so
+ * the panel width grows with the number of digits and the two values can
+ * never collide, no matter how large the numbers get. On narrow screens the
+ * cells stack vertically (SCORE row above MONEY row).
+ */
+export function computeHudBlock(game: IGame, w: number): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  stacked: boolean;
+  mapY: number;
+  /** Measured width of the SCORE cell (content only). */
+  cell1: number;
+  /** Measured width of the MONEY cell (content only). */
+  cell2: number;
+} {
+  const scoreStr = fmtInt(game.score);
+  const moneyStr = "$" + fmtInt(game.player!.coins);
+
+  // Fonts: labels stay compact, values are the hierarchy anchor. Values
+  // shrink slightly on small screens but never below a readable floor.
+  const labelFont = w < 760 ? 11 : 12;
+  const valueFont = w < 560 ? 14 : w < 900 ? 15 : 17;
+
+  const padX = 12;
+  const padY = 10;
+  const gapX = 14;
+  const gapY = 8;
+  const stacked = w < 760;
+
+  // The panel is laid out by a pure width model (no canvas needed) so that
+  // drawHud and drawMinimap agree on the geometry without sharing a context.
+  // ui-monospace advance is ~0.6em per glyph, exact for every glyph we
+  // render here (digits, commas, $ and the labels are all monospace).
+  const widthOf = (fontSize: number, text: string): number => text.length * fontSize * 0.6;
+
+  const cell1 = Math.max(
+    widthOf(labelFont, "SCORE"),
+    widthOf(valueFont, scoreStr),
+  ) + padX * 2;
+  const cell2 = Math.max(
+    widthOf(labelFont, "MONEY"),
+    widthOf(valueFont, moneyStr),
+  ) + padX * 2;
+  const contentW = stacked ? Math.max(cell1, cell2) : cell1 + gapX + cell2;
+  // Never narrower than the minimap panel underneath, so the block lines up.
+  const hudW = Math.max(contentW, MINIMAP_SIZE + 6, 120);
+  const x = w - 16 - hudW;
+  const y = 14;
+  const rowH = labelFont + 4 + valueFont + 4;
+  const h = stacked ? padY + rowH + gapY + rowH + padY : padY + rowH + padY;
+  return { x, y, w: hudW, h, stacked, mapY: y + h + 8, cell1, cell2 };
+}
+
+/** Panel with a soft drop shadow — used for the top-right HUD block. */
+function drawHudPanel(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  col = color("ui_panel"),
+): void {
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = 12;
+  ctx.shadowOffsetY = 4;
+  drawPanel(ctx, x, y, w, h, col);
+  ctx.restore();
+}
+
 export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, hgt: number): void {
   const p = game.player!;
   drawPanel(ctx, 16, 14, 330, 118);
@@ -117,22 +199,57 @@ export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, h
     "middle",
   );
 
-  // Right panel
-  const px = w - 179;
-  const py = 14;
-  const pw = 166;
-  const ph = 40;
-  const cy = py + ph / 2;
+  // ── Top-right: SCORE / MONEY HUD panel ──────────────────────────────
+  // Two independent cells (label above, value below). Cell widths are
+  // derived from the actual glyph counts, so the panel grows with the number
+  // of digits and SCORE can never collide with MONEY — the values live in
+  // separate measured regions instead of sharing a fixed 166px strip.
+  const block = computeHudBlock(game, w);
+  const hudX = block.x;
+  const hudY = block.y;
+  const hudW = block.w;
+  const hudH = block.h;
+  const stacked = block.stacked;
+  const labelFont = w < 760 ? 11 : 12;
+  const valueFont = w < 560 ? 14 : w < 900 ? 15 : 17;
+  const padX = 12;
+  const padY = 10;
+  const gapX = 14;
+  const gapY = 8;
+  const rowH = labelFont + 4 + valueFont + 4;
 
-  drawPanel(ctx, px, py, pw, ph);
+  drawHudPanel(ctx, hudX, hudY, hudW, hudH);
 
-  // Measure text width to position score value correctly next to SCORE
-  ctx.font = "bold 12px ui-monospace, monospace";
-  const lblW = ctx.measureText("SCORE").width;
+  const labelY = hudY + padY;
+  const valueY = labelY + labelFont + 4;
+  // Cells sit at their MEASURED widths (same model as computeHudBlock), so
+  // the MONEY cell always starts after the SCORE value ends — by construction
+  // they can never overlap, regardless of digit count.
+  const cellX1 = hudX + padX;
+  const cellX2 = stacked ? hudX + padX : hudX + padX + block.cell1 + gapX;
 
-  drawText(ctx, "SCORE", px + 12, cy, 12, color("ui_dim"), "left", "middle");
-  drawText(ctx, String(game.score), px + 12 + lblW + 6, cy, 17, color("ui_gold"), "left", "middle");
-  drawText(ctx, `$${p.coins}`, px + pw - 12, cy, 17, color("ui_green"), "right", "middle");
+  drawText(ctx, "SCORE", cellX1, labelY, labelFont, color("ui_dim"), "left", "top");
+  drawText(ctx, fmtInt(game.score), cellX1, valueY, valueFont, color("ui_gold"), "left", "top");
+  drawText(
+    ctx,
+    "MONEY",
+    cellX2,
+    stacked ? labelY + rowH + gapY : labelY,
+    labelFont,
+    color("ui_dim"),
+    "left",
+    "top",
+  );
+  drawText(
+    ctx,
+    "$" + fmtInt(p.coins),
+    cellX2,
+    stacked ? valueY + rowH + gapY : valueY,
+    valueFont,
+    color("ui_green"),
+    "left",
+    "top",
+  );
 
   // Bottom-left weapon
   const wep = p.weapons.current;
@@ -244,9 +361,18 @@ function wpanelRight(x: number, w: number): number {
 
 export function drawMinimap(ctx: CanvasRenderingContext2D, game: IGame, screenW: number, scale: number): void {
   const size = MINIMAP_SIZE * scale;
-  const x0 = screenW - size - 16;
-  const y0 = 62;
-  drawPanel(ctx, x0 - 3, y0 - 3, size + 6, size + 6, "#0A0A0C");
+  // Same panel block as the SCORE/MONEY HUD above: same width, same left
+  // edge, one clear gap below — the map reads as the bottom half of a single
+  // HUD unit instead of a detached floating square.
+  const block = computeHudBlock(game, screenW);
+  const panelX = block.x;
+  const panelW = block.w;
+  const mapY = block.mapY;
+  drawHudPanel(ctx, panelX, mapY - 3, panelW, size + 6, "#0A0A0C");
+  // The map itself keeps its fixed size and stays centered in the panel, so
+  // it remains the dominant element of the block.
+  const x0 = panelX + Math.max(0, (panelW - size) / 2);
+  const y0 = mapY;
   if (game.map && game.map.minimap) {
     ctx.drawImage(game.map.minimap, x0, y0, size, size);
   }
