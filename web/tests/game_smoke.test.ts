@@ -263,16 +263,19 @@ describe("Game smoke", () => {
     expect(stored.high_score).toBe(5000);
     expect(stored.total_kills).toBe(100);
 
-    // And the fresh save was pushed to the backend as a NEW GAME reset.
-    const newGameFetch = (globalThis as any).fetch.mock.calls.find((c: any[]) => {
-      const opts = c[1] ?? {};
-      return (
-        String(c[0]).includes("/api/game/save") &&
-        String(opts.body ?? "").includes("new_game")
-      );
-    });
-    expect(newGameFetch).toBeDefined();
-    const body = JSON.parse(newGameFetch![1]?.body ?? "{}");
-    expect(body.action).toBe("new_game");
+    // A New Game must NOT touch the backend save: only an explicit "Save
+    // Game" action may create/update the Continue save. Otherwise Continue
+    // would wrongly appear after abandoning a New Game without saving, and
+    // an existing old save would be clobbered.
+    const saveCalls = (globalThis as any).fetch.mock.calls.filter((c: any[]) =>
+      String(c[0]).includes("/api/game/save")
+    );
+    // No POST (create/update) and no DELETE (reset) happened during newRun —
+    // the GET from loadSaveAndStart path isn't used here (shouldContinue=false).
+    const writes = saveCalls.filter(
+      (c: any[]) =>
+        ((c[1] ?? {}).method ?? "GET").toUpperCase() !== "GET"
+    );
+    expect(writes).toHaveLength(0);
   });
 });

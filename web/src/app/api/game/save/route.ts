@@ -5,7 +5,6 @@ import {
   getGameSave,
   saveGameSave,
   deleteGameSave,
-  resetGameSave,
 } from "@/lib/db";
 
 export const runtime = "edge";
@@ -46,20 +45,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = (await req.json()) as { savePayload?: any; action?: string };
-    const { savePayload, action } = body;
+    const body = (await req.json()) as { savePayload?: any };
+    const { savePayload } = body;
 
     const db = getD1Database();
 
-    // NEW GAME: replace the player's save row with a server-generated fresh
-    // progression (level 1, $0, pistol only, no drone, empty skill tree,
-    // wave 1). The account itself is never touched. Identity comes from the
-    // verified session, never from the body.
-    if (action === "new_game") {
-      await resetGameSave(db, session.playerId);
-      return NextResponse.json({ success: true });
-    }
-
+    // A save row is ONLY ever written here — an explicit "Save Game" action
+    // from the player. Starting a New Game or leaving the run never touches
+    // the Continue save, so an existing save stays intact and a player with
+    // no save sees no Continue until they actually save.
     if (!savePayload) {
       return NextResponse.json(
         { success: false, error: "Save payload is required" },

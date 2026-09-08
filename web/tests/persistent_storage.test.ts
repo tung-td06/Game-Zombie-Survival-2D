@@ -13,7 +13,6 @@ import {
   getLeaderboardTop100,
   getPlayerStats,
   deleteGameSave,
-  resetGameSave,
   syncSkillState,
   getSkillState,
   upgradeSkill,
@@ -334,7 +333,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(aAfter?.skills.damage).toBe(5);
   });
 
-  it("NEW GAME resets progression but never touches the account", async () => {
+  it("an existing save survives unless explicitly overwritten (New Game never resets it)", async () => {
     const username = "james";
     const password = "Password123!";
     const hash = await hashPassword(password);
@@ -342,7 +341,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
 
     // An advanced old save: high level, money, multiple weapons, drone,
     // weapon mods, and a spent skill tree.
-    await saveGameSave(null, created.id, {
+    const oldSave = {
       save_version: 1,
       level: 25,
       wave: 12,
@@ -368,42 +367,45 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       inventory: {},
       progression: {},
       world: {},
-    });
-
+    };
+    await saveGameSave(null, created.id, oldSave);
     await _flushNowForTests();
     _resetCacheForTests();
+
+    // New Game must NOT touch the save row: no reset function exists, and
+    // merely starting a run changes nothing. The old save stays byte-for-byte
+    // intact so Continue keeps loading it (Test 3: old save preserved).
     const before = await getGameSave(null, created.id);
     expect(before?.level).toBe(25);
     expect(before?.money).toBe(3500);
+    expect(before?.weapon_data?.unlocked).toEqual(["pistol", "shotgun", "rifle", "sniper"]);
+    expect(before?.player_data?.hasDrone).toBe(true);
+    expect(before?.skills).toMatchObject({ damage: 5, max_hp: 4, speed: 3 });
+    const updatedAt = before?.updated_at;
 
-    // New Game: replace with a server-generated fresh progression.
-    await resetGameSave(null, created.id);
+    // Simulate "start a new run, play, return to lobby without saving":
+    // nothing is written, so the row and its updated_at are unchanged.
     await _flushNowForTests();
     _resetCacheForTests();
+    const after = await getGameSave(null, created.id);
+    expect(after?.level).toBe(25);
+    expect(after?.updated_at).toBe(updatedAt);
 
-    const fresh = await getGameSave(null, created.id);
-    expect(fresh).not.toBeNull();
-    expect(fresh?.level).toBe(1);
-    expect(fresh?.xp).toBe(0);
-    expect(fresh?.money).toBe(0);
-    expect(fresh?.wave).toBe(1);
-    expect(fresh?.score).toBe(0);
-    expect(fresh?.skill_points).toBe(0);
-    expect(fresh?.skills).toMatchObject({});
-    expect(fresh?.weapon_data?.currentId).toBe("pistol");
-    expect(fresh?.weapon_data?.unlocked).toEqual(["pistol"]);
-    expect(fresh?.weapon_data?.mods ?? {}).toEqual({});
-    expect(fresh?.player_data?.hasDrone).toBe(false);
-    expect(fresh?.player_data?.upgradeLevels ?? {}).toEqual({});
-    expect(fresh?.player_data?.bombs).toBe(2);
+    // Only an explicit Save Game overwrites the Continue slot.
+    await saveGameSave(null, created.id, {
+      ...oldSave,
+      level: 4,
+      money: 150,
+      wave: 6,
+    });
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const replaced = await getGameSave(null, created.id);
+    expect(replaced?.level).toBe(4);
+    expect(replaced?.money).toBe(150);
+    expect(replaced?.wave).toBe(6);
 
-    // The skill-tree read also reports the fresh state.
-    const tree = await getSkillState(null, created.id);
-    expect(tree?.level).toBe(1);
-    expect(tree?.skill_points).toBe(0);
-    expect(tree?.skills.damage ?? 0).toBe(0);
-
-    // The account itself is untouched.
+    // The account itself is untouched throughout.
     const player = await getPlayerByUsername(null, username);
     expect(player).not.toBeNull();
     expect(player?.id).toBe(created.id);

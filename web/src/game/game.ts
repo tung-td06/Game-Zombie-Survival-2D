@@ -1515,19 +1515,11 @@ export class Game {
       // (weapons, money, drone, upgrades) can never leak into the fresh run
       // or the main-menu shop preview. Account/login data is untouched.
       this.resetLocalProgression();
-      // One save slot per user: starting a new game REPLACES the previous
-      // save with a fresh server-generated progression (UPSERT, not DELETE),
-      // so Continue after a New Game yields the fresh state — never the old
-      // save. Identity comes from the session cookie, not the body.
-      if (typeof window !== "undefined") {
-        fetch("/api/game/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "new_game" }),
-        }).catch((err) =>
-          console.error("Failed to reset save on new game:", err)
-        );
-      }
+      // IMPORTANT: starting a New Game must NOT write anything to the game
+      // save (database or Continue slot). Only an explicit "Save Game"
+      // action creates/updates the Continue save — so an existing save from
+      // a previous run stays intact and Continue keeps loading it, while a
+      // player with no save sees no Continue after abandoning a New Game.
       console.log(
         "[NEW GAME]",
         `User: ${this.username}`,
