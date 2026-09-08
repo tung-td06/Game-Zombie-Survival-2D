@@ -1271,7 +1271,7 @@ export default function Home() {
                         ? "ĐANG CẬP NHẬT..."
                         : leaderboardError
                         ? "THỬ LẠI"
-                        : "🔄 CẬP NHẬT"}
+                        : "CẬP NHẬT"}
                     </button>
                   </div>
 
@@ -1373,7 +1373,7 @@ export default function Home() {
                                 textAlign: "right",
                               }}
                             >
-                              ZOMBIES
+                              KILLS
                             </th>
                             <th
                               style={{
@@ -1385,7 +1385,7 @@ export default function Home() {
                                 textAlign: "right",
                               }}
                             >
-                              TIME
+                              SURVIVAL TIME
                             </th>
                           </tr>
                         </thead>

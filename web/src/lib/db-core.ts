@@ -150,6 +150,10 @@ export interface SubmitScoreInput {
   survival_time: number;
   shots_fired: number;
   shots_hit: number;
+  /** Per-run identifier so repeated saves of the same run upsert one row. */
+  run_id?: string;
+  /** How the run ended: "saved" (mid-run save) or "game_over". */
+  game_status?: "saved" | "game_over";
 }
 
 export interface PersistentScoreEntry {
@@ -161,6 +165,8 @@ export interface PersistentScoreEntry {
   zombies_killed: number;
   survival_time: number;
   created_at: number;
+  run_id?: string;
+  game_status?: "saved" | "game_over";
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +554,8 @@ export async function submitScore(
       zombies_killed: input.zombies_killed,
       survival_time: input.survival_time,
       created_at: now,
+      run_id: input.run_id,
+      game_status: input.game_status,
     });
     const prev = await m.psGetStats(playerId);
     await m.psUpsertStats({
@@ -567,23 +575,41 @@ export async function submitScore(
   }
   const scoreId = crypto.randomUUID();
   const now = Date.now();
+  // One leaderboard row per run: the same (player_id, run_id) updates the
+  // existing row instead of inserting duplicates (Save Game and Game Over of
+  // the same run must converge on a single record).
+  const runId = input.run_id?.trim() || null;
+  const gameStatus: "saved" | "game_over" =
+    input.game_status === "saved" ? "saved" : "game_over";
 
   try {
     const insertScoreStmt = db
       .prepare(
         `INSERT INTO game_scores
-         (id, player_id, score, wave, zombies_killed, survival_time, shots_fired, shots_hit, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         (id, player_id, run_id, game_status, score, wave, zombies_killed, survival_time, shots_fired, shots_hit, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(player_id, run_id) DO UPDATE SET
+           score           = excluded.score,
+           wave            = excluded.wave,
+           zombies_killed  = excluded.zombies_killed,
+           survival_time   = excluded.survival_time,
+           shots_fired     = excluded.shots_fired,
+           shots_hit       = excluded.shots_hit,
+           game_status     = excluded.game_status,
+           updated_at      = excluded.updated_at`
       )
       .bind(
         scoreId,
         playerId,
+        runId,
+        gameStatus,
         input.score,
         input.wave,
         input.zombies_killed,
         input.survival_time,
         input.shots_fired,
         input.shots_hit,
+        now,
         now
       );
 

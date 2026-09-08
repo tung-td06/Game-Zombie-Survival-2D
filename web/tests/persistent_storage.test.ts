@@ -140,4 +140,67 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     const afterDelete = await getGameSave(null, created.id);
     expect(afterDelete).toBeNull();
   });
+
+  it("upserts one leaderboard row per run (save + game over of same run)", async () => {
+    const username = "dave";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+    const runId = "run-0001";
+
+    // Mid-run save, then a higher final score at game over for the SAME run.
+    await submitScore(null, created.id, {
+      score: 1000,
+      wave: 4,
+      zombies_killed: 20,
+      survival_time: 120,
+      shots_fired: 100,
+      shots_hit: 60,
+      run_id: runId,
+      game_status: "saved",
+    });
+    await submitScore(null, created.id, {
+      score: 8000,
+      wave: 9,
+      zombies_killed: 120,
+      survival_time: 420,
+      shots_fired: 500,
+      shots_hit: 300,
+      run_id: runId,
+      game_status: "game_over",
+    });
+
+    await _flushNowForTests();
+    _resetCacheForTests();
+
+    const leaderboard = await getLeaderboardTop100(null);
+    const daveRows = leaderboard.filter(
+      (r) => r.username.toLowerCase() === username
+    );
+    // One row for the run, updated to the final game-over numbers.
+    expect(daveRows).toHaveLength(1);
+    expect(daveRows[0].score).toBe(8000);
+    expect(daveRows[0].wave).toBe(9);
+    expect(daveRows[0].zombies_killed).toBe(120);
+    expect(daveRows[0].survival_time).toBe(420);
+
+    // A different run creates a separate, independent row.
+    await submitScore(null, created.id, {
+      score: 3000,
+      wave: 6,
+      zombies_killed: 50,
+      survival_time: 200,
+      shots_fired: 200,
+      shots_hit: 120,
+      run_id: "run-0002",
+      game_status: "game_over",
+    });
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const afterSecond = await getLeaderboardTop100(null);
+    const daveRows2 = afterSecond.filter(
+      (r) => r.username.toLowerCase() === username
+    );
+    expect(daveRows2).toHaveLength(2);
+  });
 });

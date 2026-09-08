@@ -31,6 +31,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // The player identity always comes from the verified session, never from
+    // the request body. run_id is required so repeated saves of one run
+    // upsert a single leaderboard row instead of duplicating records.
+    const runId = typeof body.run_id === "string" ? body.run_id.trim() : "";
+    if (!runId || runId.length > 64) {
+      return NextResponse.json(
+        { success: false, error: "Missing or invalid run_id" },
+        { status: 400 }
+      );
+    }
+    const gameStatus: "saved" | "game_over" =
+      body.game_status === "saved" ? "saved" : "game_over";
+
     const db = getD1Database();
     await submitScore(db, session.playerId, {
       score: Number(body.score) || 0,
@@ -39,6 +52,8 @@ export async function POST(req: NextRequest) {
       survival_time: Number(body.survival_time) || 0,
       shots_fired: Number(body.shots_fired) || 0,
       shots_hit: Number(body.shots_hit) || 0,
+      run_id: runId,
+      game_status: gameStatus,
     });
 
     return NextResponse.json({ success: true });

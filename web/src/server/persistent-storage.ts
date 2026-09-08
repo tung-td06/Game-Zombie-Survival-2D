@@ -106,16 +106,7 @@ type FileShape = {
   players: Record<string, PlayerRecord>;
   player_stats: Record<string, PlayerStats>;
   game_saves: Record<string, GameSaveRecord>;
-  scores: Array<{
-    id: string;
-    player_id: string;
-    username: string;
-    score: number;
-    wave: number;
-    zombies_killed: number;
-    survival_time: number;
-    created_at: number;
-  }>;
+  scores: PersistentScoreEntry[];
 };
 
 const EMPTY: FileShape = {
@@ -322,11 +313,24 @@ export interface PersistentScoreEntry {
   zombies_killed: number;
   survival_time: number;
   created_at: number;
+  run_id?: string;
+  game_status?: "saved" | "game_over";
 }
 
 export async function psAddScore(entry: PersistentScoreEntry): Promise<void> {
   if (!isNodeRuntime()) return;
   await mutate((data) => {
+    // One row per run — repeated saves of the same run replace the earlier
+    // record (mirrors the D1 ON CONFLICT(player_id, run_id) upsert).
+    if (entry.run_id) {
+      const idx = data.scores.findIndex(
+        (s) => s.player_id === entry.player_id && s.run_id === entry.run_id
+      );
+      if (idx >= 0) {
+        data.scores[idx] = entry;
+        return;
+      }
+    }
     data.scores.push(entry);
     // Cap to last 5000 to avoid unbounded growth.
     if (data.scores.length > 5000) {

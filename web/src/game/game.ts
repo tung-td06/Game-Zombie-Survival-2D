@@ -112,6 +112,14 @@ export class Game {
   comboTimer = 0;
   elapsed = 0;
   timeOfDay = 10;
+
+  /**
+   * Identifier of the current run. Used to upsert a single leaderboard row
+   * per run (Save Game and Game Over of the same run update the same row)
+   * instead of creating duplicates. Generated on new runs and restored from
+   * the saved payload when continuing.
+   */
+  runId = "";
   stats: Stats = {
     kills: 0,
     kills_by_type: {},
@@ -1362,6 +1370,8 @@ export class Game {
     this.elapsed = 0;
     this.timeOfDay = 10;
     this.newHigh = false;
+    // Fresh run -> fresh leaderboard row key.
+    this.runId = crypto.randomUUID();
     this.stats = {
       kills: 0,
       kills_by_type: {},
@@ -1513,6 +1523,9 @@ export class Game {
       shots_hit: 0,
     };
 
+    // Same run keeps its leaderboard row when continued from a save.
+    this.runId = dbSave.progression_data?.run_id || crypto.randomUUID();
+
     this.toasts = [];
     this.waveBanner = null;
     this.quests.bind(this);
@@ -1536,6 +1549,7 @@ export class Game {
       wave: this.waveManager.wave,
       score: this.score,
       money: this.player.coins,
+      // Key used to upsert this run's single leaderboard row.
       player: {
         x: this.player.pos.x,
         y: this.player.pos.y,
@@ -1558,6 +1572,9 @@ export class Game {
       },
       inventory: {},
       progression: {
+        // Persisted so a continued run keeps upserting the SAME leaderboard
+        // row instead of creating a duplicate for the same game session.
+        run_id: this.runId || (this.runId = crypto.randomUUID()),
         combo: this.combo,
         comboTimer: this.comboTimer,
         elapsed: this.elapsed,
@@ -1597,6 +1614,9 @@ export class Game {
       if (res.ok) {
         this.saveButtonState = "success";
         this.toast("GAME SAVED SUCCESSFULLY");
+        // Saving also records the run's current achievement on the
+        // leaderboard (upserted per run, so repeated saves never duplicate).
+        this.submitRunScore("saved");
       } else {
         if (res.status === 401) {
           this.saveButtonState = "error";
@@ -1693,21 +1713,34 @@ export class Game {
     );
 
     if (typeof window !== "undefined" && this.state === GAME_OVER) {
-      fetch("/api/game/submit-score", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          score: Math.max(0, Math.floor(this.score)),
-          wave: Math.max(0, Math.floor(this.waveManager.wave)),
-          zombies_killed: Math.max(0, Math.floor(this.stats.kills)),
-          survival_time: Math.max(0, Math.floor(this.stats.survival_time || 0)),
-          shots_fired: Math.max(0, Math.floor(this.stats.shots_fired || 0)),
-          shots_hit: Math.max(0, Math.floor(this.stats.shots_hit || 0)),
-        }),
-      }).catch((err) => console.error("Failed to submit score to Cloudflare D1:", err));
+      this.submitRunScore("game_over");
     }
 
     return isNewHigh;
+  }
+
+  /**
+   * Record this run's achievement on the leaderboard. Identity comes from
+   * the server session (never from this payload); run_id makes repeated
+   * submissions of the same run update one row instead of duplicating.
+   */
+  private submitRunScore(status: "saved" | "game_over"): void {
+    if (typeof window === "undefined" || !this.player) return;
+    const runId = this.runId || (this.runId = crypto.randomUUID());
+    fetch("/api/game/submit-score", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        score: Math.max(0, Math.floor(this.score)),
+        wave: Math.max(0, Math.floor(this.waveManager.wave)),
+        zombies_killed: Math.max(0, Math.floor(this.stats.kills)),
+        survival_time: Math.max(0, Math.floor(this.stats.survival_time || 0)),
+        shots_fired: Math.max(0, Math.floor(this.stats.shots_fired || 0)),
+        shots_hit: Math.max(0, Math.floor(this.stats.shots_hit || 0)),
+        run_id: runId,
+        game_status: status,
+      }),
+    }).catch((err) => console.error("Failed to submit score to Cloudflare D1:", err));
   }
 
   onLevelUp(): void {
