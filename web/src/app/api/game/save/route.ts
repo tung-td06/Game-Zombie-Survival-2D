@@ -23,7 +23,18 @@ export async function GET(req: NextRequest) {
 
     const db = getD1Database();
     const save = await getGameSave(db, session.playerId);
-    return NextResponse.json({ success: true, save });
+    // Only a save that carries a genuine run snapshot counts as a Continue
+    // target. The same game_saves row also stores the account Skill Tree
+    // (level/xp/skill points sync on every level-up, even before the first
+    // explicit Save Game), so a row with no player position is just skill
+    // state — showing Continue for it would restore an empty run.
+    const usable =
+      !!save &&
+      !!save.player_data &&
+      typeof save.player_data.x === "number" &&
+      typeof save.player_data.y === "number" &&
+      typeof save.player_data.hp === "number";
+    return NextResponse.json({ success: true, save: usable ? save : null });
   } catch (err) {
     console.error("Game save GET error:", err);
     return NextResponse.json(

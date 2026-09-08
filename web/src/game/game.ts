@@ -25,7 +25,7 @@ import { mulberry32, type Rng } from "../lib/rng";
 import { Client } from "./network";
 import { WEAPON_ORDER } from "./weapon";
 import { modDef } from "./mods";
-import { createZombie } from "./zombie";
+import { createZombie, type Zombie } from "./zombie";
 import {
   BIOME_TINT,
   COMBO_KILLS_PER_STEP,
@@ -1705,17 +1705,28 @@ export class Game {
     // 4. Restore WaveManager
     const wm = dbSave.progression_data?.waveManager || {};
     this.waveManager = new WaveManager();
-    this.waveManager.wave = dbSave.wave;
-    this.waveManager.state = wm.state ?? "intermission";
-    this.waveManager.timer = wm.timer ?? 3;
-    this.waveManager.to_spawn = wm.to_spawn ?? 0;
-    this.waveManager.spawned_this_wave = wm.spawned_this_wave ?? 0;
-    this.waveManager.spawnTimer = wm.spawnTimer ?? 0;
-    this.waveManager.spawnInterval = wm.spawnInterval ?? 1.5;
-    this.waveManager.hpMult = wm.hpMult ?? 1;
-    this.waveManager.speedMult = wm.speedMult ?? 1;
-    this.waveManager.dmgMult = wm.dmgMult ?? 1;
-    this.waveManager.bossAlive = wm.bossAlive ?? false;
+    const num = (v: unknown, d: number): number => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : d;
+    };
+    this.waveManager.wave = Math.max(0, Math.floor(num(dbSave.wave, 0)));
+    this.waveManager.state = wm.state === "active" ? "active" : "intermission";
+    this.waveManager.timer = num(wm.timer, 3);
+    this.waveManager.to_spawn = Math.max(0, Math.floor(num(wm.to_spawn, 0)));
+    this.waveManager.spawned_this_wave = Math.max(
+      0,
+      Math.floor(num(wm.spawned_this_wave, 0)),
+    );
+    this.waveManager.spawnTimer = num(wm.spawnTimer, 0);
+    this.waveManager.spawnInterval = Math.max(0.1, num(wm.spawnInterval, 1.5));
+    this.waveManager.hpMult = Math.max(0.01, num(wm.hpMult, 1));
+    this.waveManager.speedMult = Math.max(0.01, num(wm.speedMult, 1));
+    this.waveManager.dmgMult = Math.max(0.01, num(wm.dmgMult, 1));
+    this.waveManager.bossAlive = !!wm.bossAlive;
+    // Preserve the wave's theme so the continued fight stays faithful.
+    this.waveManager.modifier = typeof wm.modifier === "string" ? wm.modifier : "none";
+    this.waveManager.biome = typeof wm.biome === "string" ? wm.biome : "city";
+    this.waveManager.bossSpawnedThisWave = !!wm.bossSpawnedThisWave;
 
     // 5. Clear dynamic arrays
     this.particles.clear();
@@ -1723,6 +1734,50 @@ export class Game {
     this.bullets = [];
     this.enemyBullets = [];
     this.grenades = [];
+
+    // 5b. Re-materialize the zombies that were alive at the moment of saving
+    // (wave scaling is recomputed from the restored wave + modifier, then the
+    // exact saved hp/maxHp are applied so wounded enemies stay wounded).
+    const enemies = dbSave.world_data?.enemies;
+    if (Array.isArray(enemies) && this.zombieData) {
+      const restored: Zombie[] = [];
+      for (const sz of enemies.slice(0, 250)) {
+        if (
+          !sz ||
+          typeof sz.kind !== "string" ||
+          !Number.isFinite(Number(sz.x)) ||
+          !Number.isFinite(Number(sz.y))
+        ) {
+          continue;
+        }
+        try {
+          const z = this.spawner.makeZombie(
+            sz.kind,
+            { x: Number(sz.x), y: Number(sz.y) },
+            this.zombieData,
+            this.waveManager.wave,
+            0,
+            this.waveManager.modifier,
+          );
+          if (Number.isFinite(Number(sz.maxHp)) && Number(sz.maxHp) > 0) {
+            z.maxHp = Number(sz.maxHp);
+          }
+          if (Number.isFinite(Number(sz.hp))) {
+            z.hp = Math.max(0, Math.min(Number(sz.hp), z.maxHp));
+          }
+          if (Number.isFinite(Number(sz.faceAngle))) {
+            z.faceAngle = Number(sz.faceAngle);
+          }
+          // Anything already injured (or saved mid-chase) aggroes again;
+          // untouched zombies stay idle until the player gets close.
+          if (z.hp < z.maxHp) z.state = "chase";
+          restored.push(z);
+        } catch {
+          // Skip any kind that no longer exists in the zombie catalog.
+        }
+      }
+      this.zombies = restored;
+    }
 
     // 6. Restore Loot drops
     this.loots = dbSave.world_data?.loot?.map((l: any) => new Loot(l.pos, l.kind, l.amount, l.payload)) ?? [];
@@ -1771,6 +1826,21 @@ export class Game {
     this.state = PLAYING;
     this.audio.startMusic();
     this.toast("RUN RESUMED!");
+    console.log(
+      "[CONTINUE GAME]",
+      `User: ${this.username}`,
+      `Restoring Wave: ${this.waveManager.wave}`,
+      `Wave State: ${this.waveManager.state}`,
+      `Restoring Level: ${this.player.level}`,
+      `Restoring XP: ${this.player.xp}`,
+      `Restoring Money: ${this.player.coins}`,
+      `Restoring Enemies: ${this.zombies.length}`,
+      `Current Weapon: ${this.player.weapons.currentId}`,
+      `Weapons Owned: ${Object.keys(this.player.weapons.weapons).join(", ")}`,
+      `Skill Points: ${this.player.skillPoints}`,
+      `Skills Unlocked: ${Object.values(this.player.upgradeLevels)
+        .reduce((a, b) => a + b, 0)}`
+    );
   }
 
   async performSaveGame() {
@@ -1835,10 +1905,28 @@ export class Game {
           speedMult: this.waveManager.speedMult,
           dmgMult: this.waveManager.dmgMult,
           bossAlive: this.waveManager.bossAlive,
+          // The active wave's theme + whether its boss already spawned must
+          // survive the round trip, or a continued mid-wave fight loses its
+          // modifier and can summon a duplicate boss.
+          modifier: this.waveManager.modifier,
+          biome: this.waveManager.biome,
+          bossSpawnedThisWave: this.waveManager.bossSpawnedThisWave,
         }
       },
       world: {
         seed: this.map?.seed ?? MAP_SEED,
+        // Snapshot of every zombie alive at the moment of saving (kind, pos,
+        // hp) so Continue resumes the fight instead of emptying the arena.
+        // Projectiles/grenades are intentionally not persisted — they only
+        // live a few frames and are recreated by the resumed gameplay.
+        enemies: this.zombies.map(z => ({
+          kind: z.KIND,
+          x: z.pos.x,
+          y: z.pos.y,
+          hp: z.hp,
+          maxHp: z.maxHp,
+          faceAngle: z.faceAngle,
+        })),
         loot: this.loots.map(l => ({ pos: l.pos, kind: l.kind, amount: l.amount, payload: l.payload })),
         supplyCrates: this.supplyCrates.map(c => ({ pos: c.pos, kind: c.kind })),
         crateTimer: this.crateTimer
@@ -1863,10 +1951,15 @@ export class Game {
           "[SAVE GAME]",
           `User: ${this.username}`,
           `Level: ${payload.level}`,
+          `XP: ${payload.player.xp}`,
           `Money: ${payload.money}`,
           `Wave: ${payload.wave}`,
+          `Enemies: ${payload.world?.enemies?.length ?? 0}`,
+          `Current Weapon: ${payload.weapons.currentId}`,
           `Weapons: ${payload.weapons.unlocked.join(", ")}`,
-          `Skill Points: ${payload.player.skillPoints}`
+          `Skill Points: ${payload.player.skillPoints}`,
+          `Skills Unlocked: ${Object.values(payload.player.upgradeLevels ?? {})
+            .reduce((a, b) => a + b, 0)}`
         );
         // Saving also records the run's current achievement on the
         // leaderboard (upserted per run, so repeated saves never duplicate).

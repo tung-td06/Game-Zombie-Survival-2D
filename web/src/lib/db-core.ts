@@ -901,6 +901,22 @@ export async function saveGameSave(
   playerId: string,
   savePayload: any
 ): Promise<void> {
+  // Sanitize the scalar columns exactly once so both the JSON fallback and
+  // the D1 write below agree. `wave` may legitimately be 0 (a save taken
+  // during the first intermission, before wave 1 starts), so it must never
+  // be collapsed with `|| 1` — that would silently skip the first wave on
+  // Continue. Every other number is floored and clamped to a sane range.
+  const num = (v: unknown, d: number): number => {
+    const n = Math.floor(Number(v));
+    return Number.isFinite(n) ? n : d;
+  };
+  const level = Math.max(1, num(savePayload.level, 1));
+  const wave = Math.max(0, num(savePayload.wave, 0));
+  const score = Math.max(0, num(savePayload.score, 0));
+  const money = Math.max(0, num(savePayload.money, 0));
+  const xp = Math.max(0, num(savePayload.player?.xp, 0));
+  const skillPoints = Math.max(0, num(savePayload.player?.skillPoints, 0));
+
   if (!db) {
     const m = await loadPersistent();
     if (!m) return;
@@ -909,10 +925,10 @@ export async function saveGameSave(
     await m.psUpsertSave({
       player_id: playerId,
       save_version: savePayload.save_version || 1,
-      level: savePayload.level || 1,
-      wave: savePayload.wave || 1,
-      score: savePayload.score || 0,
-      money: savePayload.money || 0,
+      level,
+      wave,
+      score,
+      money,
       player_data: savePayload.player ?? savePayload.player_data ?? {},
       weapon_data: savePayload.weapons
         ? savePayload.weapons
@@ -925,8 +941,8 @@ export async function saveGameSave(
       created_at: existing?.created_at ?? now,
       updated_at: now,
       // Skill Tree columns (mirrors the D1 INSERT below).
-      xp: savePayload.player?.xp ?? 0,
-      skill_points: savePayload.player?.skillPoints ?? 0,
+      xp,
+      skill_points: skillPoints,
       skills: { ...(savePayload.player?.upgradeLevels ?? {}) },
     });
     return;
@@ -987,12 +1003,12 @@ export async function saveGameSave(
       .bind(
         playerId,
         savePayload.save_version || 1,
-        savePayload.level || 1,
-        Math.max(0, Math.floor(Number(savePayload.player?.xp) || 0)),
-        savePayload.wave || 1,
-        savePayload.score || 0,
-        savePayload.money || 0,
-        Math.max(0, Math.floor(Number(savePayload.player?.skillPoints) || 0)),
+        level,
+        xp,
+        wave,
+        score,
+        money,
+        skillPoints,
         ...skillVals,
         JSON.stringify(savePayload.player || {}),
         savePayload.weapons ? JSON.stringify(savePayload.weapons) : null,

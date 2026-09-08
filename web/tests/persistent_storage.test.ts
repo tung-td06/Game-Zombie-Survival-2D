@@ -144,6 +144,75 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(afterDelete).toBeNull();
   });
 
+  it("preserves wave 0 and sanitizes scalars on save (no wave skip on Continue)", async () => {
+    const username = "wavez";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    // A save taken during the opening intermission legitimately has wave 0.
+    // It must be stored as 0 (never coerced to 1, which would silently skip
+    // wave 1 after Continue) and negative/NaN scalars must be clamped.
+    await saveGameSave(null, created.id, {
+      save_version: 1,
+      level: 4,
+      wave: 0,
+      score: -5,
+      money: 999,
+      player: {
+        x: 100,
+        y: 100,
+        hp: 80,
+        xp: 10,
+        skillPoints: 2,
+        upgradeLevels: {},
+      },
+      weapons: {},
+      inventory: {},
+      progression: {},
+      world: {},
+    });
+
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const save = await getGameSave(null, created.id);
+    expect(save?.wave).toBe(0);
+    expect(save?.level).toBe(4);
+    expect(save?.money).toBe(999);
+    expect(save?.score).toBe(0);
+    expect(save?.player_data?.hp).toBe(80);
+
+    await deleteGameSave(null, created.id);
+    await _flushNowForTests();
+  });
+
+  it("skill-sync-only row carries no run snapshot (distinct from a real save)", async () => {
+    const username = "skillstub";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    // Level-ups sync immediately via skill-state, which upserts a game_saves
+    // row that ONLY holds the Skill Tree columns (no player position). That
+    // row must never be mistaken for a Continue save.
+    await syncSkillState(null, created.id, {
+      level: 5,
+      xp: 120,
+      skill_points: 2,
+      skills: { damage: 2, max_hp: 1 },
+    });
+    await _flushNowForTests();
+    _resetCacheForTests();
+
+    const save = await getGameSave(null, created.id);
+    expect(save).not.toBeNull();
+    expect(save?.skills?.damage).toBe(2);
+    expect(save?.player_data?.x).toBeUndefined();
+
+    await deleteGameSave(null, created.id);
+    await _flushNowForTests();
+  });
+
   it("upserts one leaderboard row per run (save + game over of same run)", async () => {
     const username = "dave";
     const password = "Password123!";
