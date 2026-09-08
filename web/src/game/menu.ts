@@ -1081,22 +1081,30 @@ export class MenuSystem {
     } else if (this.activeShopTab === "mods") {
       const wid = p.weapons.currentId;
       const w = p.weapons.current;
-      drawText(
-        ctx,
-        `MODDING: ${w.name.toUpperCase()} (switch weapon to mod another)`,
-        cx,
-        gridY - 20,
-        12,
-        color("ui_dim"),
-        "center",
-        "top",
-      );
+      // Dedicated MODDING status band between the tab row (which ends at
+      // PANEL_Y + 110) and the mod grid. The grid starts BELOW this band, so
+      // the header can never overlap the tabs or the item cards. If the
+      // weapon name makes the line too wide it wraps onto a second line
+      // instead of clipping or running under neighbouring elements.
+      const modHeaderY = PANEL_Y + 114;
+      const modGridY = gridY + 30;
+      const hint = "(switch weapon to mod another)";
+      const label = `MODDING: ${w.name.toUpperCase()}`;
+      ctx.font = "bold 12px ui-monospace, monospace";
+      const fitsOneLine =
+        ctx.measureText(label).width + ctx.measureText(hint).width + 16 <= PANEL_W - 48;
+      if (fitsOneLine) {
+        drawText(ctx, `${label} ${hint}`, cx, modHeaderY, 12, color("ui_dim"), "center", "top");
+      } else {
+        drawText(ctx, label, cx, modHeaderY, 12, color("ui_gold"), "center", "top");
+        drawText(ctx, hint, cx, modHeaderY + 15, 10, color("ui_dim"), "center", "top");
+      }
 
       MOD_CATALOG.forEach((mod, idx) => {
         const col = idx % 2;
         const row = Math.floor(idx / 2);
         const cX = gridX + col * (cardW + cardGapX);
-        const cY = gridY + row * (cardH + cardGapY);
+        const cY = modGridY + row * (cardH + cardGapY);
 
         const equipped = w.mods.includes(mod.id);
 
