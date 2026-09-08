@@ -11,7 +11,8 @@ export const MAX_HP_PRICE = 300;
 export const ARMOR_PRICE = 500;
 export const AMMO_PACK_PRICE = 150;
 export { BOMB_PACK_PRICE };
-export const DRONE_PRICE = 10000;
+import { DRONE_PRICE, MAX_UFO_OWNED, firstUnownedUFO, ufoDef } from "./ufo";
+export { DRONE_PRICE, MAX_UFO_OWNED, firstUnownedUFO, ufoDef };
 
 export class Shop {
   data: Record<string, WeaponData>;
@@ -20,9 +21,64 @@ export class Shop {
     this.data = data;
   }
 
+  /**
+   * Buy one UFO. Enforces every rule server-side-of-the-client: unknown id,
+   * already owned, fleet full (>= MAX_UFO_OWNED), and insufficient coins are
+   * all rejected BEFORE any money moves — repeated/double clicks can never
+   * double-charge or exceed the 4-UFO limit. Ownership is written to the
+   * persistent profile (localStorage) and mirrored into the run save by
+   * performSaveGame.
+   */
+  buyUFO(
+    ufoId: string,
+    game: IGame,
+  ): "ok" | "owned" | "limit" | "funds" | "invalid" {
+    const def = ufoDef(ufoId);
+    if (!def) return "invalid";
+    const p = game.player!;
+    const save = game.save;
+    if (p.ownedUFOs.includes(ufoId)) return "owned";
+    if (p.ownedUFOs.length >= MAX_UFO_OWNED) return "limit";
+    if (p.coins < def.price) return "funds";
+    p.coins -= def.price;
+    // First purchase auto-equips; later ones stay on the current active UFO.
+    p.setUFOs([...p.ownedUFOs, ufoId], p.activeUFO || ufoId);
+    save.data.owned_ufos = [...p.ownedUFOs];
+    save.data.active_ufo = p.activeUFO;
+    save.data.has_drone = p.hasDrone;
+    save.coins = p.coins;
+    save.save();
+    game.audio.playSFX("ui.purchase", p.pos);
+    return "ok";
+  }
+
+  /** Equip an owned UFO as the ACTIVE saucer (no cost). */
+  equipUFO(ufoId: string, game: IGame): boolean {
+    const p = game.player!;
+    if (!p.ownedUFOs.includes(ufoId)) return false;
+    p.setUFOs(p.ownedUFOs, ufoId);
+    const save = game.save;
+    save.data.owned_ufos = [...p.ownedUFOs];
+    save.data.active_ufo = ufoId;
+    save.data.has_drone = true;
+    save.save();
+    game.audio.playSFX("ui.purchase", p.pos);
+    return true;
+  }
+
   buy(key: string, game: IGame): boolean {
     const p = game.player!;
     const save = game.save;
+    if (key === "drone") {
+      // Legacy single-drone entry → first UFO purchase.
+      return this.buyUFO("drone", game) === "ok";
+    }
+    if (key === "ufo_fleet") {
+      // Legacy list shop's single UFO FLEET row → buy the next unowned UFO.
+      const next = firstUnownedUFO(p.ownedUFOs);
+      if (!next) return false;
+      return this.buyUFO(next.id, game) === "ok";
+    }
     if (key.startsWith("weapon:")) {
       const wid = key.slice("weapon:".length);
       const price = this.data[wid]?.price ?? 0;
@@ -51,9 +107,6 @@ export class Shop {
       } else if (key === "max_hp") {
         p.maxHp += 20;
         p.heal(20);
-      } else if (key === "drone") {
-        p.hasDrone = true;
-        save.data["has_drone"] = true;
       } else {
         return false;
       }

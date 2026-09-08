@@ -4,6 +4,7 @@
 import { color } from "./colors";
 import { formatTime } from "./utils";
 import { WEAPON_ORDER } from "./weapon";
+import { ufoDef } from "./ufo";
 import type { IGame } from "./types";
 import { MINIMAP_SIZE } from "./settings";
 
@@ -517,6 +518,8 @@ export function drawShopIcon(
   let id = key;
   if (key.startsWith("weapon:")) {
     id = key.slice("weapon:".length);
+  } else if (key.startsWith("ufo:")) {
+    id = key;
   } else if (key === "ammo_pack") {
     id = "ammo";
   } else if (key === "health" || key === "medkit") {
@@ -959,14 +962,19 @@ export function drawShopIcon(
     ctx.fillStyle = "#F0C850";
     ctx.fillRect(-2, -4, 4, 3);
     ctx.fillRect(-2, 1, 4, 3);
-  } else if (id === "drone") {
-    // UFO saucer: dome + disc + glow, matching the in-game drone
-    ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
+  } else if (id === "drone" || id.startsWith("ufo:")) {
+    // UFO saucer: dome + disc + glow, matching the in-game drone. The
+    // ACTIVE UFO's colours come from the fleet catalog; the classic drone
+    // keeps its cyan look.
+    const def = id.startsWith("ufo:") ? ufoDef(id.slice("ufo:".length)) : undefined;
+    const tint = def?.tint ?? "#8FE8FF";
+    const glow = def?.glow ?? "rgba(140, 230, 255, 0.45)";
+    ctx.strokeStyle = glow;
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(0, 0, 14, 0, Math.PI * 2); ctx.stroke();
     ctx.fillStyle = "#3A3A44";
     ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = "#8FE8FF";
+    ctx.fillStyle = tint;
     ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#EAFBFF";
     ctx.beginPath(); ctx.arc(-2.5, -2.5, 2.5, 0, Math.PI * 2); ctx.fill();

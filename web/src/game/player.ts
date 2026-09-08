@@ -19,6 +19,7 @@ import type { Vec } from "./vec";
 import type { Camera } from "./camera";
 import { drawPlayerSprite } from "./pixelArt";
 import { BOMB_MAX, BOMB_START_COUNT, BOMB_THROW_COOLDOWN, Grenade } from "./grenade";
+import { MAX_UFO_OWNED, ufoDef } from "./ufo";
 
 /** UFO drone companion tuning. */
 const DRONE_ORBIT = 40;
@@ -70,11 +71,56 @@ export class Player {
   /** Set by a tank's charge attack: blocks movement/firing while > 0. */
   stunTimer = 0;
 
-  // Drone companion ("UFO") — unlocked by buying it in the shop.
-  hasDrone = false;
+  // Drone companion ("UFO FLEET") — purchased in the shop. A player can own
+  // up to MAX_UFO_OWNED UFOs (permanent, one-time unlocks) and equips exactly
+  // one ACTIVE saucer, which is the drone that orbits and auto-fires.
+  ownedUFOs: string[] = [];
+  activeUFO = "";
   droneAngle = 0;
   droneCooldown = 0;
   droneDamage = 18;
+
+  /** True while an ACTIVE UFO is equipped (drone flies + auto-fires). */
+  get hasDrone(): boolean {
+    return this.activeUFO !== "";
+  }
+
+  /**
+   * Backward-compatible setter for the pre-fleet boolean. `true` grants the
+   * classic drone (or keeps the current fleet if one already exists);
+   * `false` clears every owned UFO.
+   */
+  set hasDrone(v: boolean) {
+    if (v) {
+      if (this.ownedUFOs.length === 0) this.setUFOs(["drone"]);
+      else if (!this.activeUFO) this.setUFOs(this.ownedUFOs, this.ownedUFOs[0]);
+    } else {
+      this.setUFOs([]);
+    }
+  }
+
+  /**
+   * Set the owned UFO list + active selection. The active UFO must be owned;
+   * when none is selected the first owned UFO becomes active automatically.
+   */
+  setUFOs(owned: string[], active?: string): void {
+    const seen = new Set<string>();
+    this.ownedUFOs = [];
+    for (const id of owned) {
+      if (typeof id !== "string" || seen.has(id)) continue;
+      if (!ufoDef(id)) continue; // never trust unknown UFO ids
+      seen.add(id);
+      this.ownedUFOs.push(id);
+      if (this.ownedUFOs.length >= MAX_UFO_OWNED) break;
+    }
+    if (this.ownedUFOs.length === 0) {
+      this.activeUFO = "";
+    } else if (typeof active === "string" && this.ownedUFOs.includes(active)) {
+      this.activeUFO = active;
+    } else {
+      this.activeUFO = this.ownedUFOs[0]!;
+    }
+  }
 
   weapons: WeaponManager;
 
@@ -391,11 +437,15 @@ export class Player {
       this.flashTimer > 0 && Math.floor(this.flashTimer * 20) % 2 === 0,
     );
 
-    // Drone companion: orbits the player and glows softly.
+    // Drone companion: orbits the player and glows softly. The saucer takes
+    // the ACTIVE UFO's colours (gameplay is identical for every UFO).
     if (this.hasDrone) {
+      const def = ufoDef(this.activeUFO);
+      const tint = def?.tint ?? "#8FE8FF";
+      const glow = def?.glow ?? "rgba(140, 230, 255, 0.45)";
       const dxx = sp.x + Math.cos(this.droneAngle) * DRONE_ORBIT;
       const dyy = sp.y + Math.sin(this.droneAngle) * DRONE_ORBIT - 14;
-      ctx.strokeStyle = "rgba(140, 230, 255, 0.45)";
+      ctx.strokeStyle = glow;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(dxx, dyy, 11, 0, Math.PI * 2);
@@ -404,7 +454,7 @@ export class Player {
       ctx.beginPath();
       ctx.arc(dxx, dyy, 8, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = "#8FE8FF";
+      ctx.fillStyle = tint;
       ctx.beginPath();
       ctx.arc(dxx, dyy, 5, 0, Math.PI * 2);
       ctx.fill();

@@ -14,6 +14,7 @@ import { Player } from "./player";
 import { QuestSystem } from "./quest";
 import { SaveManager } from "./save";
 import { DRONE_PRICE, Shop } from "./shop";
+import { MAX_UFO_OWNED, firstUnownedUFO, ufoDef } from "./ufo";
 import { LEVELUP_PICK_LOCK, UpgradeSystem, rollLevelUpChoices } from "./upgrade";
 import { WaveManager } from "./waveManager";
 import { ZombieSpawner } from "./spawner";
@@ -260,6 +261,8 @@ export class Game {
    * overlay opens. The overlay then waits indefinitely for a real choice.
    */
   levelUpLockTimer = 0;
+  /** Short lock after a UFO buy/equip so a rapid double-click can't re-enter. */
+  ufoPurchaseLock = 0;
 
   // Data caches
   weaponData: Record<string, WeaponData> = {};
@@ -508,6 +511,9 @@ export class Game {
     }
     // Tick toasts always so they fade in menus too
     this.tickToasts(this.dt);
+    // The UFO buy/equip lock must decay in EVERY state (incl. the shop), so
+    // a purchase made in the BLACK MARKET doesn't freeze the tab.
+    this.ufoPurchaseLock = Math.max(0, this.ufoPurchaseLock - this.dt);
   }
 
   private updatePlaying(dt: number) {
@@ -1088,14 +1094,17 @@ export class Game {
       price: 300,
       owned: false,
     });
+    // UFO FLEET: a single row in the legacy list shop. The fleet cap is
+    // enforced by Shop.buyUFO; the BUY action buys the next unowned UFO.
+    const nextUfo = firstUnownedUFO(p.ownedUFOs);
     out.push({
-      key: "drone",
-      label: "UFO DRONE",
-      detail: p.hasDrone
-        ? "Combat drone active — auto-fires at zombies"
-        : "Orbiting drone that auto-fires at nearby zombies",
-      price: DRONE_PRICE,
-      owned: p.hasDrone,
+      key: "ufo_fleet",
+      label: "UFO FLEET",
+      detail: `${p.ownedUFOs.length}/${MAX_UFO_OWNED} owned${
+        p.activeUFO ? ` — active ${ufoDef(p.activeUFO)?.name ?? p.activeUFO}` : ""
+      }`,
+      price: nextUfo?.price ?? DRONE_PRICE,
+      owned: !nextUfo,
     });
     return out;
   }
@@ -1129,10 +1138,68 @@ export class Game {
       this.state = PAUSE_SHOP;
     } else if (action.startsWith("shop_tab:")) {
       this.menus.activeShopTab = action.slice("shop_tab:".length) as any;
+    } else if (action.startsWith("ps_equip_ufo:")) {
+      // Equip an owned UFO as the ACTIVE saucer (no cost).
+      const ufoId = action.slice("ps_equip_ufo:".length);
+      const p = this.player!;
+      if (this.ufoPurchaseLock > 0) {
+        // Still processing the previous action — ignore.
+      } else if (this.shop.equipUFO(ufoId, this)) {
+        this.ufoPurchaseLock = 0.25;
+        this.toast(`ACTIVE UFO: ${ufoDef(ufoId)?.name ?? ufoId}`);
+      } else {
+        this.toast("UFO NOT OWNED");
+      }
     } else if (action.startsWith("ps_buy:")) {
       const payload = action.slice("ps_buy:".length);
       const p = this.player!;
-      if (payload.startsWith("weapon:")) {
+      if (payload === "ufo_fleet") {
+        // Legacy list shop: buy the next unowned UFO (enforces the 4 cap).
+        if (this.ufoPurchaseLock > 0) {
+          // still processing — ignore
+        } else if (p.ownedUFOs.length >= MAX_UFO_OWNED) {
+          this.toast(`UFO FLEET FULL (${MAX_UFO_OWNED}/${MAX_UFO_OWNED})`);
+        } else {
+          const next = firstUnownedUFO(p.ownedUFOs);
+          if (!next) {
+            this.toast("ALL UFOs OWNED");
+          } else if (p.coins < next.price) {
+            this.toast("NOT ENOUGH CASH");
+          } else {
+            this.ufoPurchaseLock = 0.25;
+            if (this.shop.buyUFO(next.id, this) === "ok") {
+              this.toast(`PURCHASED: ${next.name}`);
+            }
+          }
+        }
+      } else if (payload.startsWith("ufo:")) {
+        // Buy ONE specific UFO — all guards (owned/limit/funds) live in
+        // Shop.buyUFO, plus a short re-entry lock for rapid double-clicks.
+        const ufoId = payload.slice("ufo:".length);
+        if (this.ufoPurchaseLock > 0) {
+          // Still processing the previous click — ignore.
+        } else if (p.ownedUFOs.includes(ufoId)) {
+          this.toast("UFO ALREADY OWNED");
+        } else if (p.ownedUFOs.length >= MAX_UFO_OWNED) {
+          this.toast(`UFO FLEET FULL (${MAX_UFO_OWNED}/${MAX_UFO_OWNED})`);
+        } else if (p.coins < (ufoDef(ufoId)?.price ?? Infinity)) {
+          this.toast("NOT ENOUGH CASH");
+        } else {
+          this.ufoPurchaseLock = 0.25;
+          const res = this.shop.buyUFO(ufoId, this);
+          if (res === "ok") {
+            this.toast(`PURCHASED: ${ufoDef(ufoId)?.name ?? ufoId}`);
+          } else if (res === "owned") {
+            this.toast("UFO ALREADY OWNED");
+          } else if (res === "limit") {
+            this.toast(`UFO FLEET FULL (${MAX_UFO_OWNED}/${MAX_UFO_OWNED})`);
+          } else if (res === "funds") {
+            this.toast("NOT ENOUGH CASH");
+          } else {
+            this.toast("INVALID UFO");
+          }
+        }
+      } else if (payload.startsWith("weapon:")) {
         const wid = payload.slice("weapon:".length);
         const price = this.weaponData[wid]?.price ?? 500;
         if (p.coins >= price) {
@@ -1485,7 +1552,8 @@ export class Game {
         previewOnly: true,
       },
     );
-    this.player.hasDrone = !!this.save.data["has_drone"];
+    // UFO ownership is a permanent account unlock (kept across runs).
+    this.player.setUFOs(this.save.data.owned_ufos, this.save.data.active_ufo);
   }
 
   newRun(): void {
@@ -1515,7 +1583,9 @@ export class Game {
     this.player.skillPoints = 0;
     this.player.upgradeLevels = {};
     this.recomputeSkillBonuses();
-    this.player.hasDrone = false;
+    // UFO FLEET ownership is a PERMANENT account unlock (one-time purchases
+    // kept across runs), so a fresh run starts with the equipped saucer.
+    this.player.setUFOs(this.save.data.owned_ufos, this.save.data.active_ufo);
     this.player.bombs = BOMB_START_COUNT;
 
     if (this.networkMode === "single") {
@@ -1535,7 +1605,7 @@ export class Game {
         `Money: ${fresh.money}`,
         `Weapon: ${fresh.weapons.currentId}`,
         `Owned Weapons: ${fresh.weapons.unlocked.join(", ")}`,
-        `UFO: ${fresh.player.hasDrone ? "owned" : "locked"}`,
+        `UFO FLEET: ${this.player.ownedUFOs.length}/${MAX_UFO_OWNED} owned (active: ${this.player.activeUFO || "none"})`,
         "Skill Tree: reset",
         `Wave: ${fresh.wave}`
       );
@@ -1590,7 +1660,7 @@ export class Game {
     d.coins = 0;
     d.unlocked_weapons = ["pistol"];
     d.weapon_upgrades = {};
-    d.has_drone = false;
+    // UFO ownership is a permanent unlock — never cleared by New Game.
     d.player_level = 1;
     d.xp = 0;
     d.player_upgrades = {};
@@ -1651,7 +1721,27 @@ export class Game {
       weaponMods: dbSave.weapon_data?.mods ?? {},
       username: this.username,
     });
-    this.player.hasDrone = !!pData.hasDrone;
+    // UFO FLEET is permanent, so Continue merges the saved unlocks with the
+    // local profile (a UFO bought after the last Save Game must not vanish).
+    const savedUFOs: string[] = Array.isArray(pData.ownedUFOs)
+      ? pData.ownedUFOs
+      : pData.hasDrone
+        ? ["drone"]
+        : [];
+    const localUFOs: string[] = Array.isArray(this.save.data.owned_ufos)
+      ? this.save.data.owned_ufos
+      : [];
+    const mergedUFOs = Array.from(new Set([...savedUFOs, ...localUFOs])).slice(
+      0,
+      MAX_UFO_OWNED,
+    );
+    const savedActive =
+      typeof pData.activeUFO === "string" ? pData.activeUFO : "";
+    const localActive =
+      typeof this.save.data.active_ufo === "string"
+        ? this.save.data.active_ufo
+        : "";
+    this.player.setUFOs(mergedUFOs, savedActive || localActive);
     // Bombs were added after the first save schema, so older saves fall back
     // to the fresh-run stock instead of stranding the player with zero.
     this.player.bombs = Math.min(
@@ -1834,6 +1924,9 @@ export class Game {
     this.save.data.coins = dbSave.money;
     this.save.data.unlocked_weapons = [...unlocked];
     this.save.data.weapon_upgrades = { ...(dbSave.weapon_data?.mods ?? {}) };
+    this.save.data.owned_ufos = [...this.player.ownedUFOs];
+    this.save.data.active_ufo = this.player.activeUFO;
+    this.save.data.has_drone = this.player.hasDrone;
     this.save.data.has_drone = !!pData.hasDrone;
     this.save.data.player_level = dbSave.level;
     this.save.data.xp = dbSave.xp ?? pData.xp ?? 0;
@@ -1887,6 +1980,9 @@ export class Game {
         xp: this.player.xp,
         skillPoints: this.player.skillPoints,
         upgradeLevels: this.player.upgradeLevels,
+        // UFO FLEET — permanent unlocks, persisted with every explicit save.
+        ownedUFOs: this.player.ownedUFOs,
+        activeUFO: this.player.activeUFO,
         hasDrone: this.player.hasDrone,
         bombs: this.player.bombs,
       },

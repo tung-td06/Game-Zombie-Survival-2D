@@ -223,7 +223,7 @@ function check(name, cond, extra) {
     g.player.weapons.give("smg");
     g.player.weapons.give("shotgun");
     g.player.weapons.currentId = "shotgun";
-    g.player.hasDrone = true;
+    g.player.setUFOs(["drone"]); // UFO FLEET: own + auto-activate the drone
   });
 
   await page.evaluate(() => window.__game.performSaveGame());

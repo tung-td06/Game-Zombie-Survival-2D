@@ -13,6 +13,10 @@ export interface SaveData {
   xp: number;
   unlocked_weapons: string[];
   has_drone: boolean;
+  /** UFO FLEET: ids of every UFO ever purchased (max MAX_UFO_OWNED). */
+  owned_ufos: string[];
+  /** Currently equipped UFO id (must be in owned_ufos). */
+  active_ufo: string;
   /** Weapon id -> mod ids attached to it (see src/game/mods.ts). */
   weapon_upgrades: Record<string, string[]>;
   player_upgrades: Record<string, number>;
@@ -44,6 +48,8 @@ export const DEFAULT_SAVE: SaveData = {
   xp: 0,
   unlocked_weapons: ["pistol"],
   has_drone: false,
+  owned_ufos: [],
+  active_ufo: "",
   weapon_upgrades: {},
   player_upgrades: {},
   achievements: [],
@@ -104,6 +110,23 @@ function mergeInto(target: SaveData, source: SaveData): SaveData {
   out.quests_claimed = Array.isArray(source.quests_claimed)
     ? source.quests_claimed
     : target.quests_claimed;
+  out.owned_ufos = Array.isArray(source.owned_ufos)
+    ? source.owned_ufos.filter((id) => typeof id === "string")
+    : target.owned_ufos;
+  out.active_ufo =
+    typeof source.active_ufo === "string" ? source.active_ufo : target.active_ufo;
+  // Migrate the pre-fleet single drone boolean onto the fleet model, so an
+  // old profile that owned the drone keeps it (permanent unlock).
+  if (out.has_drone && out.owned_ufos.length === 0) {
+    out.owned_ufos = ["drone"];
+    out.active_ufo = "drone";
+  }
+  if (out.owned_ufos.length === 0) {
+    out.active_ufo = "";
+  } else if (!out.owned_ufos.includes(out.active_ufo)) {
+    out.active_ufo = out.owned_ufos[0]!;
+  }
+  return out;
   out.weapon_upgrades =
     source.weapon_upgrades && typeof source.weapon_upgrades === "object"
       ? source.weapon_upgrades

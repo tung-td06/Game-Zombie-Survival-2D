@@ -10,8 +10,8 @@ import { renderScale } from "./pixelArt";
 import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
 import { SKILL_BRANCHES, branchForSkill, LEVELUP_PICK_LOCK } from "./upgrade";
 import { MOD_CATALOG } from "./mods";
-import { DRONE_PRICE } from "./shop";
 import { BOMB_PACK_AMOUNT, BOMB_PACK_PRICE } from "./grenade";
+import { MAX_UFO_OWNED, UFO_CATALOG, ufoDef } from "./ufo";
 import type { IGame } from "./types";
 
 interface Ember {
@@ -69,7 +69,7 @@ export class MenuSystem {
   private embers: Embers = makeEmbers();
   static _highScore = 0;
   static _kills = 0;
-  activeShopTab: "weapons" | "supplies" | "upgrades" | "mods" = "weapons";
+  activeShopTab: "weapons" | "supplies" | "upgrades" | "mods" | "ufos" = "weapons";
 
   setProfile(highScore: number, totalKills: number): void {
     MenuSystem._highScore = highScore;
@@ -695,16 +695,21 @@ export class MenuSystem {
     const buttons: Button[] = [];
     const p = game.player!;
 
-    // Category Tabs: WEAPONS, SUPPLIES, UPGRADES, MODS
-    const tabW = 130;
-    const tabH = 34;
+    // Category Tabs: WEAPONS, SUPPLIES, UPGRADES, MODS, UFO
     const tabGap = 12;
-    const categories: Array<"weapons" | "supplies" | "upgrades" | "mods"> = [
+    const categories: Array<"weapons" | "supplies" | "upgrades" | "mods" | "ufos"> = [
       "weapons",
       "supplies",
       "upgrades",
       "mods",
+      "ufos",
     ];
+    // Shrink tabs so all five fit inside the 600px panel without overflow.
+    const tabW = Math.min(
+      130,
+      Math.floor((PANEL_W - 24 - (categories.length - 1) * tabGap) / categories.length),
+    );
+    const tabH = 34;
     const totalTabW = categories.length * tabW + (categories.length - 1) * tabGap;
     const tabStartX = cx - totalTabW / 2;
     const tabY = PANEL_Y + 76;
@@ -949,112 +954,56 @@ export class MenuSystem {
         if (available) buttons.push(buyBtn);
       });
 
-      // ── Featured: UFO DRONE (one-time unlock, persists across runs) ────
-      // Layout = three independent zones left-to-right:
-      //   [ item info / description ]  [ status button ]  [ icon ]
-      // The icon keeps its current size and sits flush on the right edge; the
-      // status button is sized to fit its own label (measured at the standard
-      // button font); the description auto-wraps inside the remaining width,
-      // so no text can ever overlap the button, the icon, or the card border.
-      const dX = gridX;
-      const dY = gridY + 2 * (sCardH + sGapY);
-      const dW = cardW * 2 + cardGapX;
-      const dH = 76;
-      const dPad = 14;
-      const droneOwned = p.hasDrone;
-      const droneAfford = p.coins >= DRONE_PRICE;
+      // ── UFO FLEET summary (full fleet lives in the UFO tab) ────────────
+      const fX = gridX;
+      const fY = gridY + 2 * (sCardH + sGapY);
+      const fW = cardW * 2 + cardGapX;
+      const fH = 76;
+      const fPad = 14;
+      const fleetOwned = p.ownedUFOs.length;
+      const fleetFull = fleetOwned >= MAX_UFO_OWNED;
+      const activeName = p.activeUFO ? ufoDef(p.activeUFO)?.name ?? p.activeUFO : "";
 
-      // Icon zone (right edge, unchanged size/effect).
-      const droneIconW = 84;
-      const droneIconH = 60;
-      const droneIconX = dX + dW - dPad - droneIconW;
-      const droneIconY = dY + (dH - droneIconH) / 2;
-
-      let droneText = `$${DRONE_PRICE} [BUY]`;
-      let droneAccent = color("ui_blue");
-      if (droneOwned) {
-        droneText = "OWNED / ACTIVE";
-        droneAccent = color("ui_green");
-      } else if (!droneAfford) {
-        droneText = "NOT ENOUGH CASH";
-        droneAccent = "#787882";
-      }
-
-      // Status button zone — width measured so the label always fits at the
-      // standard 22px button font (same size every other shop button uses).
-      const droneBtnH = 30;
-      ctx.font = "bold 22px ui-monospace, monospace";
-      const droneBtnW = Math.ceil(ctx.measureText(droneText).width) + 26;
-      const droneBtnX = droneIconX - 10 - droneBtnW;
-      const droneBtnY = dY + (dH - droneBtnH) / 2;
-
-      // Text zone — everything to the left of the button (minus a small gap),
-      // which is exactly the space the description is allowed to use.
-      const droneDescMaxW = Math.max(60, droneBtnX - 6 - (dX + dPad));
-
-      ctx.fillStyle = droneOwned ? "#16242A" : "#1E1E24";
-      roundRect(ctx, dX, dY, dW, dH, 8);
+      ctx.fillStyle = fleetOwned > 0 ? "#16242A" : "#1E1E24";
+      roundRect(ctx, fX, fY, fW, fH, 8);
       ctx.fill();
-      ctx.strokeStyle = droneOwned
+      ctx.strokeStyle = fleetFull
         ? color("ui_green")
-        : droneAfford
+        : fleetOwned > 0
           ? color("ui_blue")
           : "#3C3C46";
       ctx.lineWidth = 1.5;
-      roundRect(ctx, dX, dY, dW, dH, 8);
+      roundRect(ctx, fX, fY, fW, fH, 8);
       ctx.stroke();
 
-      drawShopIcon(ctx, "drone", droneIconX, droneIconY, droneIconW, droneIconH, droneOwned);
+      drawShopIcon(ctx, `ufo:${p.activeUFO || "drone"}`, fX + fW - fPad - 76, fY + 10, 76, 54, false);
 
+      drawText(ctx, "UFO FLEET", fX + fPad, fY + 14, 17, color("ui_gold"), "left", "top");
       drawText(
         ctx,
-        "UFO DRONE",
-        dX + dPad,
-        dY + 12,
+        `${fleetOwned} / ${MAX_UFO_OWNED} OWNED`,
+        fX + fPad + 150,
+        fY + 14,
         17,
-        droneOwned ? color("ui_green") : color("ui_blue"),
+        fleetFull ? color("ui_green") : color("ui_blue"),
         "left",
         "top",
       );
-
-      // Description auto-wraps inside the text zone instead of being drawn
-      // with a fixed width that could run under the status button.
-      const droneDescLines = wrapLines(
-        ctx,
-        droneOwned
-          ? "Combat saucer active — auto-fires at nearby zombies."
-          : "Orbiting saucer that auto-fires at nearby zombies.",
-        10,
-        droneDescMaxW,
-      );
-      let droneDescY = dY + 36;
-      for (const line of droneDescLines) {
-        drawText(ctx, line, dX + dPad, droneDescY, 10, color("ui_dim"), "left", "top");
-        droneDescY += 11;
-      }
       drawText(
         ctx,
-        "One-time unlock — kept across runs.",
-        dX + dPad,
-        droneDescY,
+        fleetOwned > 0
+          ? `Active: ${activeName} — one-time unlock, kept across runs.`
+          : "No saucers owned yet. Buy up to 4 — kept across runs.",
+        fX + fPad,
+        fY + 40,
         10,
         color("ui_dim"),
         "left",
         "top",
       );
-
-      const droneBtn = new Button(
-        droneText,
-        droneBtnX,
-        droneBtnY,
-        droneBtnW,
-        droneBtnH,
-        !droneOwned && droneAfford ? "ps_buy:drone" : "",
-        droneAccent,
-      );
-      droneBtn.update(dt, hx, hy, false);
-      droneBtn.draw(ctx);
-      if (!droneOwned && droneAfford) buttons.push(droneBtn);
+      drawText(ctx, "Manage in the UFO tab ▸", fX + fPad, fY + 55, 10, color("ui_dim"), "left", "top");
+    } else if (this.activeShopTab === "ufos") {
+      this.drawUfoTab(ctx, game, buttons, gridX, gridY, hx, hy, dt);
     } else if (this.activeShopTab === "upgrades") {
       const items = [
         { id: "max_hp",    name: "MAX HP UPGRADE", desc: "Gain +20 Max HP and heal.",       price: 300 },
@@ -1225,6 +1174,150 @@ export class MenuSystem {
     }
 
     return { action: null, buttons };
+  }
+
+  /**
+   * UFO FLEET tab inside the BLACK MARKET: a live N/4 OWNED counter plus one
+   * card per UFO in the catalog with clear states:
+   *   unowned + affordable  -> "$PRICE [BUY]"   (gold, clickable)
+   *   unowned + broke       -> "NOT ENOUGH CASH" (grey, disabled)
+   *   unowned + fleet full  -> "MAX OWNED"       (grey, disabled)
+   *   owned + active        -> "OWNED / ACTIVE"  (green, disabled)
+   *   owned + not active    -> "EQUIP"           (green, clickable)
+   */
+  private drawUfoTab(
+    ctx: CanvasRenderingContext2D,
+    game: IGame,
+    buttons: Button[],
+    gridX: number,
+    gridY: number,
+    hx: number,
+    hy: number,
+    dt: number,
+  ): void {
+    const p = game.player!;
+    const ownedCount = p.ownedUFOs.length;
+    const fleetFull = ownedCount >= MAX_UFO_OWNED;
+
+    // Header: title + realtime counter.
+    drawText(ctx, "UFO FLEET", gridX, gridY + 2, 18, color("ui_gold"), "left", "top");
+    drawText(
+      ctx,
+      `${ownedCount} / ${MAX_UFO_OWNED} OWNED`,
+      gridX + 280,
+      gridY + 2,
+      18,
+      fleetFull ? color("ui_green") : color("ui_blue"),
+      "left",
+      "top",
+    );
+
+    // 3 x 2 grid of UFO cards inside the fixed content slot.
+    const uCardW = 176;
+    const uCardH = 118;
+    const uGapX = 8;
+    const uGapY = 10;
+    const uGridY = gridY + 34;
+
+    UFO_CATALOG.forEach((def, idx) => {
+      const col = idx % 3;
+      const row = Math.floor(idx / 3);
+      const cX = gridX + col * (uCardW + uGapX);
+      const cY = uGridY + row * (uCardH + uGapY);
+
+      const owned = p.ownedUFOs.includes(def.id);
+      const isActive = p.activeUFO === def.id;
+      const maxed = !owned && fleetFull;
+      const afford = p.coins >= def.price;
+
+      let btnText: string;
+      let btnAccent: string;
+      let action = "";
+      let border: string;
+      let fill = "#1E1E24";
+
+      if (isActive) {
+        btnText = "OWNED / ACTIVE";
+        btnAccent = color("ui_green");
+        border = color("ui_green");
+        fill = "#16242A";
+      } else if (owned) {
+        btnText = "EQUIP";
+        btnAccent = color("ui_green");
+        action = `ps_equip_ufo:${def.id}`;
+        border = color("ui_green");
+        fill = "#16242A";
+      } else if (maxed) {
+        btnText = "MAX OWNED";
+        btnAccent = "#787882";
+        border = "#3C3C46";
+      } else if (afford) {
+        btnText = `$${def.price} [BUY]`;
+        btnAccent = color("ui_gold");
+        action = `ps_buy:ufo:${def.id}`;
+        border = color("ui_gold");
+      } else {
+        btnText = "NOT ENOUGH CASH";
+        btnAccent = "#787882";
+        border = "#3C3C46";
+      }
+
+      // Card fill + border.
+      ctx.fillStyle = fill;
+      roundRect(ctx, cX, cY, uCardW, uCardH, 8);
+      ctx.fill();
+      ctx.strokeStyle = border;
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, cX, cY, uCardW, uCardH, 8);
+      ctx.stroke();
+
+      // Saucer icon, top-right, clear of the title.
+      drawShopIcon(ctx, `ufo:${def.id}`, cX + uCardW - 62, cY + 6, 54, 38, false);
+
+      // Name — shrink to fit the zone left of the icon.
+      const nameMaxW = uCardW - 72;
+      let nameSize = 11;
+      ctx.font = `bold ${nameSize}px ui-monospace, monospace`;
+      if (ctx.measureText(def.name).width > nameMaxW) {
+        nameSize = Math.max(
+          8,
+          Math.floor((nameSize * nameMaxW) / Math.max(1, ctx.measureText(def.name).width)),
+        );
+      }
+      drawText(
+        ctx,
+        def.name,
+        cX + 8,
+        cY + 7,
+        nameSize,
+        owned ? color("ui_green") : "#FFFFFF",
+        "left",
+        "top",
+      );
+
+      // Description — two wrapped lines inside the card.
+      const descLines = wrapLines(ctx, def.desc, 9, uCardW - 16);
+      let descY = cY + 27;
+      for (const line of descLines.slice(0, 2)) {
+        drawText(ctx, line, cX + 8, descY, 9, color("ui_dim"), "left", "top");
+        descY += 11;
+      }
+
+      // Status / buy button spans the card bottom.
+      const btn = new Button(
+        btnText,
+        cX + 8,
+        cY + uCardH - 28,
+        uCardW - 16,
+        22,
+        action,
+        btnAccent,
+        11,
+      );
+      btn.update(dt, hx, hy, false);
+      btn.draw(ctx);
+      if (action) buttons.push(btn);
+    });
   }
 
   drawSettings(ctx: CanvasRenderingContext2D, game: IGame): { action: string | null; buttons: Button[] } {

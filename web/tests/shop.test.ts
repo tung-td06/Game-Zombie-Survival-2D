@@ -33,28 +33,47 @@ const DATA: Record<string, WeaponData> = {
 };
 
 function makeGame(coins: number, weapons = ["pistol"] as string[]) {
-  return {
-    player: {
-      coins,
-      hp: 50,
-      max_hp: 100,
-      armor: 0,
-      weapons: {
-        weapons: Object.fromEntries(weapons.map((w) => [w, { addReserve: vi.fn(), magazineSize: DATA[w]!.magazine }])),
-        give: vi.fn().mockReturnValue(true),
-        currentId: "pistol",
-        current: { addReserve: vi.fn(), magazineSize: 12 },
-      },
-      heal: vi.fn(),
-      addArmor: vi.fn(),
-      bombs: 0,
-      maxBombs: BOMB_MAX,
-      addBombs(n: number) {
-        const before = this.bombs;
-        this.bombs = Math.min(this.maxBombs, this.bombs + n);
-        return this.bombs - before;
-      },
+  const player: Record<string, any> = {
+    coins,
+    hp: 50,
+    max_hp: 100,
+    armor: 0,
+    ownedUFOs: [] as string[],
+    activeUFO: "",
+    pos: { x: 0, y: 0 },
+    weapons: {
+      weapons: Object.fromEntries(weapons.map((w) => [w, { addReserve: vi.fn(), magazineSize: DATA[w]!.magazine }])),
+      give: vi.fn().mockReturnValue(true),
+      currentId: "pistol",
+      current: { addReserve: vi.fn(), magazineSize: 12 },
     },
+    heal: vi.fn(),
+    addArmor: vi.fn(),
+    bombs: 0,
+    maxBombs: BOMB_MAX,
+    addBombs(n: number) {
+      const before = this.bombs;
+      this.bombs = Math.min(this.maxBombs, this.bombs + n);
+      return this.bombs - before;
+    },
+    setUFOs(owned: string[], active?: string) {
+      this.ownedUFOs = [...owned];
+      this.activeUFO =
+        this.ownedUFOs.length === 0
+          ? ""
+          : typeof active === "string" && this.ownedUFOs.includes(active)
+            ? active
+            : this.ownedUFOs[0]!;
+    },
+  };
+  Object.defineProperty(player, "hasDrone", {
+    get() {
+      return player.activeUFO !== "";
+    },
+    enumerable: true,
+  });
+  return {
+    player,
     save: {
       data: { unlocked_weapons: weapons },
       coins,
@@ -93,8 +112,10 @@ describe("Shop", () => {
     expect(g.player!.coins).toBe(0);
     expect(g.player!.hasDrone).toBe(true);
     expect(g.save.data["has_drone"]).toBe(true);
+    expect(g.save.data["owned_ufos"]).toEqual(["drone"]);
     // Already owned: no second charge.
     expect(s.buy("drone", g)).toBe(false);
+    expect(g.player!.coins).toBe(0);
   });
 
   test("UFO drone refused below 10000 coins", () => {
@@ -102,6 +123,48 @@ describe("Shop", () => {
     const g = makeGame(DRONE_PRICE - 1);
     expect(s.buy("drone", g)).toBe(false);
     expect(g.player!.hasDrone).toBeFalsy();
+  });
+
+  test("UFO fleet caps at MAX_UFO_OWNED (4) purchases", () => {
+    const s = new Shop(DATA);
+    const g = makeGame(1000000);
+    const ids = ["drone", "wasp", "phantom", "goliath", "vulture", "sentinel"];
+    let ok = 0;
+    for (const id of ids) {
+      const res = s.buyUFO(id, g);
+      if (res === "ok") ok++;
+      else expect(res).toBe("limit");
+    }
+    expect(ok).toBe(4);
+    expect(g.player!.ownedUFOs.length).toBe(4);
+    expect(g.player!.ownedUFOs).toEqual(["drone", "wasp", "phantom", "goliath"]);
+    // 5th attempt never touches money.
+    const coinsBefore = g.player!.coins;
+    expect(s.buyUFO("vulture", g)).toBe("limit");
+    expect(g.player!.coins).toBe(coinsBefore);
+  });
+
+  test("UFO buy rejects already-owned, insufficient funds, unknown ids", () => {
+    const s = new Shop(DATA);
+    const g = makeGame(999);
+    expect(s.buyUFO("drone", g)).toBe("funds"); // 10000 > 999
+    expect(g.player!.ownedUFOs.length).toBe(0);
+    expect(s.buyUFO("nope", g)).toBe("invalid");
+    expect(s.buyUFO("drone", g)).toBe("funds");
+  });
+
+  test("equip switches the ACTIVE saucer without charging", () => {
+    const s = new Shop(DATA);
+    const g = makeGame(1000000);
+    s.buyUFO("drone", g);
+    s.buyUFO("wasp", g);
+    expect(g.player!.activeUFO).toBe("drone"); // first buy auto-activates
+    expect(s.equipUFO("wasp", g)).toBe(true);
+    expect(g.player!.activeUFO).toBe("wasp");
+    expect(g.save.data["active_ufo"]).toBe("wasp");
+    // Cannot equip something not owned.
+    expect(s.equipUFO("phantom", g)).toBe(false);
+    expect(g.player!.activeUFO).toBe("wasp");
   });
 
   test("bomb pack grants bombs and charges once", () => {
