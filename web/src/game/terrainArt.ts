@@ -440,6 +440,13 @@ const ROAD_TONE: Record<RoadClass, [string, string, string]> = {
   link: ["#171816", "#282926", "#232421"],
 };
 
+/** Untouched asphalt left along the road on each side of a patch. */
+const PATCH_GAP = 22;
+/** Untouched asphalt left between a patch and each kerb. */
+const PATCH_EDGE = 14;
+/** Narrowest a patch may be across the road. */
+const PATCH_MIN_BAND = 14;
+
 /**
  * An along-axis interval of a slab, in slab-local pixels: [start, end).
  * Everything a road paints ON ITSELF (grain, kerb paint, lane lines) is
@@ -573,21 +580,56 @@ export function drawRoadSlab(
       else ctx.fillRect(sx, sy + across * t - 6, w, 12);
     }
 
-    // Resurfacing patches — darker rectangles of newer asphalt. The hash
-    // takes the cell's raw world coordinate: pre-dividing it by the period
-    // hit `worldHash`'s own 8px quantisation and made every run of eight
-    // neighbouring cells share one value, so patches fused into 704px
-    // full-width blocks with a hard step across the road at each end.
+    // Resurfacing patches — a strip of re-laid asphalt over a trench.
+    //
+    // A patch is a LOCAL repair, so it is bounded on all four sides:
+    //   • across  — a band of the carriageway, never kerb to kerb, so a
+    //     patch can never become a bar spanning the whole road;
+    //   • along   — shorter than its 88px cell by at least PATCH_GAP, so two
+    //     patches in neighbouring cells can never abut into one long block;
+    //   • tone    — ROAD_TONE[cls][2], the class's own resurfaced-asphalt
+    //     colour, five levels off the carriageway. Painting a near-black
+    //     wash (rgba(16,16,18,0.42)) over it instead is what turned every
+    //     fourth cell of every road into a black rectangle;
+    //   • edge    — stepped, not straight, so it reads as a saw-cut trench
+    //     and not as a rectangle pasted on top of the road.
+    //
+    // Size, offset and side all come from the cell's WORLD hash, so a patch
+    // is the same wherever the camera is and whichever slab draws it.
     for (let p = phase(88); p < span; p += 88) {
       const hh = cellHash(907, p);
-      if (hh % 4 === 0) {
-        ctx.fillStyle = "rgba(16,16,18,0.42)";
-        if (vertical) ctx.fillRect(sx + 8, sy + p, w - 16, 88);
-        else ctx.fillRect(sx + p, sy + 8, 88, h - 16);
-      } else if (hh % 9 === 0) {
-        ctx.fillStyle = "rgba(72,68,60,0.13)";
-        if (vertical) ctx.fillRect(sx + 12, sy + p, w - 24, 88);
-        else ctx.fillRect(sx + p, sy + 12, 88, h - 24);
+      const fresh = hh % 4 === 0;
+      if (!fresh && hh % 9 !== 0) continue;
+      // Along-axis: 30…65px of the cell, leaving >= PATCH_GAP of untouched
+      // asphalt before the next cell's patch can start.
+      const len = 30 + (cellHash(1031, p) % (88 - PATCH_GAP - 30));
+      const lead = cellHash(1033, p) % Math.max(1, 88 - PATCH_GAP - len);
+      // Across-axis: a band inset from both kerbs, at most 55% of the road.
+      const bandMax = Math.max(PATCH_MIN_BAND, Math.round(across * 0.55));
+      const band =
+        PATCH_MIN_BAND + (cellHash(1039, p) % Math.max(1, bandMax - PATCH_MIN_BAND));
+      const room = Math.max(0, across - 2 * PATCH_EDGE - band);
+      const off = PATCH_EDGE + (room === 0 ? 0 : cellHash(1049, p) % room);
+      const a = p + lead;
+      // Laid as strips whose two ends step in and out by a few pixels, so
+      // the repair reads as a saw-cut in the surface. A flat axis-aligned
+      // fill is what made the old patch read as a rectangle pasted on the
+      // road rather than as asphalt.
+      const tone = fresh ? ROAD_TONE[cls][2] : "rgba(96,92,82,0.10)";
+      const STRIP = 7;
+      for (let q = 0; q < len; q += STRIP) {
+        const jag = cellHash(1051 + q, p);
+        const head = jag % 5;
+        const tail = (jag >> 3) % 5;
+        const o0 = off + head;
+        const o1 = off + band - tail;
+        const q1 = Math.min(len, q + STRIP);
+        if (o1 <= o0) continue;
+        if (vertical) {
+          rect(ctx, sx + o0, sy + a + q, o1 - o0, q1 - q, tone);
+        } else {
+          rect(ctx, sx + a + q, sy + o0, q1 - q, o1 - o0, tone);
+        }
       }
     }
 
