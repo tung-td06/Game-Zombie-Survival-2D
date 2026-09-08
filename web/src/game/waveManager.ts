@@ -16,6 +16,7 @@ import {
   WAVE_SIZE_GROWTH,
 } from "./settings";
 import { createZombie, type Zombie } from "./zombie";
+import { bossKindForWave } from "./enemyGates";
 import type { ZombieData } from "./data";
 import type { IGame } from "./types";
 
@@ -113,7 +114,10 @@ export class WaveManager {
       .zombieData;
     while (this.spawnTimer <= 0 && this.to_spawn > 0 && aliveOk && data) {
       const kind = game.spawner.pickType(this.wave, this.modifier);
-      const pos = game.spawner.spawnPosition(game.player!.pos, game.map!);
+      // Validate the spawn spot against the KIND's real body radius (+margin)
+      // so big zombies (Brute r25) never materialise clipped into a wall.
+      const kindRadius = (data[kind]?.radius ?? 16) + 3;
+      const pos = game.spawner.spawnPosition(game.player!.pos, game.map!, kindRadius);
       if (pos) {
         const z: Zombie = game.spawner.makeZombie(
           kind,
@@ -137,10 +141,10 @@ export class WaveManager {
       game.zombies.length < MAX_ALIVE_ZOMBIES &&
       data
     ) {
-      // From wave 15 the two bosses alternate every wave:
-      // odd waves summon the NECROMANCER KING, even waves the ABOMINATION.
-      const bossKind =
-        this.wave >= 15 && this.wave % 2 === 1 ? "necromancer_boss" : "boss";
+      // From FIRST_BOSS_WAVE every boss wave summons the ABOMINATION; from
+      // BOSS_ALT_START_WAVE the two bosses alternate — odd waves summon the
+      // NECROMANCER KING, even waves the ABOMINATION.
+      const bossKind = bossKindForWave(this.wave);
       const bossData = data[bossKind];
       const bossRadius = bossData?.radius ?? 42;
       const pos = game.spawner.spawnPosition(game.player!.pos, game.map!, bossRadius);

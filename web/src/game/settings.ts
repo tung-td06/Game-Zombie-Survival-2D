@@ -37,6 +37,9 @@ export const DAMAGE_GROWTH_PER_WAVE = 0.04;
 export const SPAWN_MIN_DIST = 500.0;
 export const SPAWN_MAX_DIST = 950.0;
 export const FIRST_BOSS_WAVE = 5; // from this wave on, EVERY wave includes a boss
+// From this wave the two bosses alternate: odd waves = NECROMANCER KING,
+// even waves = ABOMINATION (see waveManager + enemyGates.bossKindForWave).
+export const BOSS_ALT_START_WAVE = 15;
 
 // Wave modifiers & biomes
 export type WaveModifier =

@@ -4,31 +4,46 @@
 import { SPAWN_MAX_DIST, SPAWN_MIN_DIST, WORLD_HEIGHT, WORLD_WIDTH } from "./settings";
 import { mulberry32, type Rng } from "../lib/rng";
 import { createZombie, type Zombie } from "./zombie";
+import { KIND_FIRST_WAVE } from "./enemyGates";
 import type { ZombieData } from "./data";
 import type { GameMap } from "./map";
 import type { Vec } from "./vec";
+
+/**
+ * Weighted zombie pool for a wave (pure — no RNG). The gates come from
+ * enemyGates.KIND_FIRST_WAVE, the single source of truth shared with the
+ * lobby BESTIARY. Exported so tests/bestiary can read the real spawn pool.
+ */
+export function waveWeights(
+  wave: number,
+  modifier = "none",
+): Record<string, number> {
+  const g = KIND_FIRST_WAVE;
+  const weights: Record<string, number> = { normal: 10 };
+  if (wave >= g["fast"]) weights.fast = Math.min(6, 2 + wave * 0.5);
+  if (wave >= g["tank"]) weights.tank = Math.min(5, 1 + (wave - 2) * 0.4);
+  if (wave >= g["exploder"]) {
+    weights.exploder = Math.min(4, 1 + (wave - 3) * 0.35);
+    weights.ranged = Math.min(4, 1 + (wave - 3) * 0.35);
+  }
+  if (wave >= g["crawler"]) weights.crawler = Math.min(3, 1 + (wave - 4) * 0.25);
+  if (wave >= g["necromancer"]) weights.necromancer = Math.min(2, 0.5 + (wave - 6) * 0.15);
+  if (modifier === "blood_moon") {
+    for (const k of Object.keys(weights)) weights[k] *= 1.25;
+    weights.tank = (weights.tank ?? 0) * 1.5;
+    weights.elite = 1.5 + wave * 0.05;
+  } else if (modifier === "swarm") {
+    weights.crawler = (weights.crawler ?? 0) * 2;
+    weights.fast = (weights.fast ?? 0) * 1.4;
+  }
+  return weights;
+}
 
 export class ZombieSpawner {
   rng: Rng = mulberry32(Math.floor(Math.random() * 2 ** 31));
 
   pickType(wave: number, modifier = "none"): string {
-    const weights: Record<string, number> = { normal: 10 };
-    if (wave >= 2) weights.fast = Math.min(6, 2 + wave * 0.5);
-    if (wave >= 3) weights.tank = Math.min(5, 1 + (wave - 2) * 0.4);
-    if (wave >= 4) {
-      weights.exploder = Math.min(4, 1 + (wave - 3) * 0.35);
-      weights.ranged = Math.min(4, 1 + (wave - 3) * 0.35);
-    }
-    if (wave >= 5) weights.crawler = Math.min(3, 1 + (wave - 4) * 0.25);
-    if (wave >= 7) weights.necromancer = Math.min(2, 0.5 + (wave - 6) * 0.15);
-    if (modifier === "blood_moon") {
-      for (const k of Object.keys(weights)) weights[k] *= 1.25;
-      weights.tank = (weights.tank ?? 0) * 1.5;
-      weights.elite = 1.5 + wave * 0.05;
-    } else if (modifier === "swarm") {
-      weights.crawler = (weights.crawler ?? 0) * 2;
-      weights.fast = (weights.fast ?? 0) * 1.4;
-    }
+    const weights = waveWeights(wave, modifier);
     const total = Object.values(weights).reduce((a, b) => a + b, 0);
     let roll = this.rng.next() * total;
     for (const [k, w] of Object.entries(weights)) {

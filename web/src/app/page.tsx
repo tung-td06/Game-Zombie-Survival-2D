@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_SAVE, SaveManager, type SaveData } from "@/game/save";
 import { AudioManager } from "@/game/audio";
+import { BestiarySection } from "@/components/bestiary/BestiarySection";
 
 interface LeaderboardEntry {
   rank: number;
@@ -820,6 +821,11 @@ export default function Home() {
                 </li>
               </ul>
             </div>
+
+            {/* Bestiary — enemy reference derived from the same data/gates
+                gameplay uses (stats from /data/zombies.json, wave gates from
+                enemyGates). Read-only: never touches save/gameplay. */}
+            <BestiarySection />
           </section>
 
           {/* RIGHT COLUMN — Tabs + Content */}

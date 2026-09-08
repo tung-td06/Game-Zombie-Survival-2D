@@ -150,7 +150,7 @@ export function drawPlayerSprite(
   ctx.restore();
 }
 
-const zombiePalette: Record<string, readonly [string, string, string]> = {
+export const zombiePalette: Record<string, readonly [string, string, string]> = {
   normal: ["#3F7436", "#6FA950", "#A8C66B"],
   fast: ["#8A9133", "#B9BE45", "#E0D66C"],
   tank: ["#4C395D", "#78588D", "#B083C1"],
