@@ -168,6 +168,41 @@ a:hover {
   inset: 0;
   background: var(--zs-bg-deep);
   overflow: hidden;
+  /* Game-only chrome: no text selection, no long-press callout, no tap
+     highlight — none of this leaks to the lobby or other pages. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* Touch-primary devices (phones/tablets): fill the DYNAMIC viewport and
+   block browser gestures (scroll, pull-to-refresh, pinch zoom) inside the
+   game. `dvh`/`dvw` track the mobile URL-bar collapse; the vh/vw lines are
+   the fallback for browsers without dynamic units. */
+@media (pointer: coarse) {
+  .zs-stage {
+    width: 100vw;
+    width: 100dvw;
+    height: 100vh;
+    height: 100dvh;
+    touch-action: none;
+  }
+
+  .zs-stage canvas {
+    touch-action: none;
+  }
+}
+
+@keyframes zs-rotate-phone {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(90deg);
+  }
 }
 
 .zs-stage canvas {

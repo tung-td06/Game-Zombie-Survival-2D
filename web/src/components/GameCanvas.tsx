@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Game } from "@/game/game";
 import { renderScale } from "@/game/pixelArt";
-import { useIsMobile } from "@/lib/device";
+import { useIsMobileControlMode, useOrientation } from "@/lib/device";
 import TouchHUD from "./touch/TouchHUD";
+import RotateOverlay from "./touch/RotateOverlay";
 
 interface GameCanvasProps {
   mode?: string;
@@ -17,11 +18,79 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
   const ref = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
   const [wsStatus, setWsStatus] = useState<"connecting" | "open" | "closed" | "error" | "none">("none");
-  const isMobile = useIsMobile();
+  // Mobile control mode = touch-primary device (coarse pointer + small
+  // viewport). Desktop/laptops never enter it, so joystick events can
+  // never affect desktop input.
+  const isMobile = useIsMobileControlMode();
+  const orientation = useOrientation();
   const isMobileRef = useRef(false);
   useEffect(() => {
     isMobileRef.current = isMobile;
   }, [isMobile]);
+
+  /** True when a phone must rotate: touch device held in portrait. */
+  const needsRotate = isMobile && orientation === "portrait";
+  const autoPausedRef = useRef(false);
+
+  // Landscape orientation lock (with graceful fallback): ask the browser
+  // to force landscape on phones. When the API is unavailable or rejected
+  // (e.g. iOS Safari), the rotate overlay below handles the UX instead.
+  const lockLandscape = useCallback(async () => {
+    try {
+      const so = (window.screen as unknown as {
+        orientation?: { lock?: (o: string) => Promise<void> };
+      }).orientation;
+      if (so?.lock) {
+        await so.lock("landscape");
+      }
+    } catch {
+      // Denied — the rotate overlay covers the portrait case.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) return;
+    void lockLandscape();
+    // Some browsers only honour the lock from a user gesture; retry on the
+    // first interaction so the game snaps to landscape when possible.
+    const retry = () => void lockLandscape();
+    window.addEventListener("pointerdown", retry, { once: true });
+    return () => window.removeEventListener("pointerdown", retry);
+  }, [isMobile, lockLandscape]);
+
+  // Portrait on mobile: pause gameplay so stray touches can't kill the
+  // player; back to landscape: resume the exact run state (no reload, no
+  // reset). If the player had already paused, leave their state alone.
+  // The game may still be booting (data load → newRun) when the overlay
+  // first appears, so while portrait we re-check until the run is paused.
+  useEffect(() => {
+    if (!needsRotate) {
+      if (autoPausedRef.current) {
+        autoPausedRef.current = false;
+        const g = gameRef.current;
+        if (g && g.state === "PAUSED") {
+          g.audio.setSfxMuted(g.save.settings.muted);
+          g.audio.resumeMusic();
+          g.state = "PLAYING";
+        }
+      }
+      return;
+    }
+    const maybePause = () => {
+      const g = gameRef.current;
+      if (!g || g.state !== "PLAYING") return;
+      g.state = "PAUSED";
+      g.audio.setSfxMuted(true);
+      g.audio.pauseMusic();
+      if (typeof document !== "undefined" && document.pointerLockElement) {
+        document.exitPointerLock();
+      }
+      autoPausedRef.current = true;
+    };
+    maybePause();
+    const id = window.setInterval(maybePause, 250);
+    return () => window.clearInterval(id);
+  }, [needsRotate]);
 
   useEffect(() => {
     const canvas = ref.current;
@@ -66,6 +135,14 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
     resize();
 
     window.addEventListener("resize", resize);
+    // Mobile browsers shrink the visual viewport when the URL bar
+    // collapses — keep the canvas sized to the visible area (presentation
+    // only; game state is never touched by resize).
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", resize);
+      vv.addEventListener("scroll", resize);
+    }
     const onPointerLock = () => {
       game.input.pointerLocked = document.pointerLockElement === canvas;
     };
@@ -141,6 +218,10 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
 
     return () => {
       window.removeEventListener("resize", resize);
+      if (vv) {
+        vv.removeEventListener("resize", resize);
+        vv.removeEventListener("scroll", resize);
+      }
       document.removeEventListener("pointerlockchange", onPointerLock);
       canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("click", onClick);
@@ -167,6 +248,9 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
       {isMobile && gameRef.current && (
         <TouchHUD input={gameRef.current.input} gameRef={gameRef} />
       )}
+      {/* Portrait phone: block input and ask for landscape. Hides itself
+          automatically on rotation — no reload, no state reset. */}
+      {needsRotate && <RotateOverlay />}
       {wsStatus !== "none" && wsStatus !== "open" && (
         <div className="zs-overlay" role="status" aria-live="polite">
           {wsStatus === "connecting" && (

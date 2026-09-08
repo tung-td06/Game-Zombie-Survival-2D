@@ -1,22 +1,58 @@
 "use client";
 
-// TouchHUD composes the mobile controls and wires them into the
-// InputManager. Uses the same key codes as desktop bindings so
-// Player.update() sees identical state — no game-core changes.
+// TouchHUD composes the mobile controls and wires them into the existing
+// InputManager — no game-core changes. Twin-stick layout:
+//
+//   • LEFT joystick  → movement (moveVec → WASD key surface)
+//   • RIGHT joystick → aim + fire (aimOverride + fireHeld → existing weapon)
+//   • WEAPON button  → cycles owned weapons (next_weapon binding)
+//   • BOMB button    → one-shot bombPressed (existing F-key surface)
+//   • PAUSE button   → real Escape keydown (existing pause manager)
+//
+// Sizes scale with the viewport (clamped touch targets); safe-area insets
+// keep everything clear of notches and gesture bars.
 
 import type { RefObject } from "react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { InputManager } from "@/game/input";
 import type { Game } from "@/game/game";
 import VirtualJoystick from "./VirtualJoystick";
-import FireButton from "./FireButton";
+import RightJoystick from "./RightJoystick";
 import BombButton from "./BombButton";
-import WeaponSwitcher from "./WeaponSwitcher";
+import WeaponSwitchButton from "./WeaponSwitchButton";
 import PauseButton from "./PauseButton";
 
 interface Props {
   input: InputManager;
   gameRef: RefObject<Game | null>;
+}
+
+/** Clamped touch-target sizes driven by the smaller viewport dimension. */
+function computeControlSizes(): { joystick: number; thumb: number; button: number } {
+  if (typeof window === "undefined") {
+    return { joystick: 120, thumb: 56, button: 60 };
+  }
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const base = Math.min(vw, vh); // landscape → the height; portrait → width
+  const joystick = Math.round(Math.max(96, Math.min(150, base * 0.3)));
+  const thumb = Math.round(joystick * 0.46);
+  const button = Math.round(Math.max(52, Math.min(72, base * 0.15)));
+  return { joystick, thumb, button };
+}
+
+function useControlSizes() {
+  const [sizes, setSizes] = useState(computeControlSizes);
+  useEffect(() => {
+    const onResize = () => setSizes(computeControlSizes());
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, []);
+  return sizes;
 }
 
 export default function TouchHUD({ input, gameRef }: Props) {
@@ -48,14 +84,20 @@ export default function TouchHUD({ input, gameRef }: Props) {
       if (input.fireHeld) input.mouseDown.add(0);
       else input.mouseDown.delete(0);
 
-      // Tap fire button area + hold reload to reload (auto when empty
-      // is already handled; no extra wiring needed).
+      // Tap fire area + hold reload to reload (auto when empty is already
+      // handled; no extra wiring needed).
       void reload;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [input, left, right, up, down, reload]);
+
+  const { joystick, thumb, button } = useControlSizes();
+  const safeTop = "max(16px, env(safe-area-inset-top))";
+  const safeRight = "max(16px, env(safe-area-inset-right))";
+  const safeBottom = "max(16px, env(safe-area-inset-bottom))";
+  const safeLeft = "max(16px, env(safe-area-inset-left))";
 
   return (
     <div
@@ -64,71 +106,74 @@ export default function TouchHUD({ input, gameRef }: Props) {
         position: "absolute",
         inset: 0,
         pointerEvents: "none",
-        paddingBottom: "max(16px, env(safe-area-inset-bottom))",
-        paddingLeft: "max(16px, env(safe-area-inset-left))",
-        paddingRight: "max(16px, env(safe-area-inset-right))",
-        paddingTop: "max(16px, env(safe-area-inset-top))",
+        paddingBottom: safeBottom,
+        paddingLeft: safeLeft,
+        paddingRight: safeRight,
+        paddingTop: safeTop,
         boxSizing: "border-box",
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTapHighlightColor: "transparent",
       }}
     >
-      {/* Top row: pause (right), weapon switcher (center) */}
+      {/* Pause — top-right */}
       <div
         style={{
           position: "absolute",
-          top: "max(16px, env(safe-area-inset-top))",
-          right: "max(16px, env(safe-area-inset-right))",
+          top: safeTop,
+          right: safeRight,
           pointerEvents: "auto",
         }}
       >
-        <PauseButton input={input} />
-      </div>
-      <div
-        style={{
-          position: "absolute",
-          top: "max(16px, env(safe-area-inset-top))",
-          left: "50%",
-          transform: "translateX(-50%)",
-          pointerEvents: "auto",
-        }}
-      >
-        <WeaponSwitcher input={input} />
+        <PauseButton input={input} size={button} />
       </div>
 
-      {/* Bottom row: joystick (left), fire (right) */}
+      {/* Left joystick — movement (bottom-left) */}
       <div
         style={{
           position: "absolute",
-          bottom: "max(16px, env(safe-area-inset-bottom))",
-          left: "max(16px, env(safe-area-inset-left))",
+          bottom: safeBottom,
+          left: safeLeft,
           pointerEvents: "auto",
         }}
       >
         <VirtualJoystick
+          size={joystick}
+          thumbSize={thumb}
           onChange={(vec) => {
             input.moveVec = vec;
           }}
         />
       </div>
+
+      {/* Right joystick — aim + fire (bottom-right) */}
       <div
         style={{
           position: "absolute",
-          bottom: "max(16px, env(safe-area-inset-bottom))",
-          right: "max(16px, env(safe-area-inset-right))",
+          bottom: safeBottom,
+          right: safeRight,
           pointerEvents: "auto",
         }}
       >
-        <FireButton input={input} gameRef={gameRef} />
+        <RightJoystick input={input} gameRef={gameRef} size={joystick} thumbSize={thumb} />
       </div>
-      {/* Bomb sits above FIRE so a thumb reaches both without overlap. */}
+
+      {/* Action buttons — Bomb above Weapon, just left of the right joystick
+          so they never overlap it and stay reachable mid-combat. */}
       <div
         style={{
           position: "absolute",
-          bottom: "calc(max(16px, env(safe-area-inset-bottom)) + 124px)",
-          right: "max(16px, env(safe-area-inset-right))",
+          bottom: safeBottom,
+          right: `calc(${safeRight} + ${joystick}px + 14px)`,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          alignItems: "center",
           pointerEvents: "auto",
         }}
       >
-        <BombButton input={input} gameRef={gameRef} />
+        <WeaponSwitchButton input={input} gameRef={gameRef} size={button} />
+        <BombButton input={input} gameRef={gameRef} size={button} />
       </div>
     </div>
   );
