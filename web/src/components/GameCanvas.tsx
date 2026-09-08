@@ -70,6 +70,7 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
         const g = gameRef.current;
         if (g && g.state === "PAUSED") {
           g.audio.setSfxMuted(g.save.settings.muted);
+          g.audio.setPaused(false);
           g.audio.resumeMusic();
           g.state = "PLAYING";
         }
@@ -80,7 +81,7 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
       const g = gameRef.current;
       if (!g || g.state !== "PLAYING") return;
       g.state = "PAUSED";
-      g.audio.setSfxMuted(true);
+      g.audio.setPaused(true);
       g.audio.pauseMusic();
       if (typeof document !== "undefined" && document.pointerLockElement) {
         document.exitPointerLock();

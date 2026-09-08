@@ -134,10 +134,17 @@ export class AudioManager {
   ctx: AudioContext | null = null;
   game: IGame | null = null;
 
-  master = 0.8;
-  musicVolume = 0.6;
-  sfxVolume = 0.8;
+  master = 1;
+  musicVolume = 1;
+  sfxVolume = 1;
   sfxMuted = false;
+  /**
+   * True while the game is in a pause/menu state. Kept SEPARATE from the
+   * user's mute setting (sfxMuted) so pausing silences audio without
+   * touching the persisted mute flag — and so toggling MUTE inside the
+   * pause-settings screen can never un-silence a still-paused game.
+   */
+  paused = false;
 
   private bufferCache: Map<string, AudioBuffer> = new Map();
   private activeSFXCount: Map<string, number> = new Map();
@@ -227,6 +234,16 @@ export class AudioManager {
     this.updateNodeVolumes();
   }
 
+  /**
+   * Silence for pause/menu states (game paused, level-up overlay, etc.).
+   * Does NOT change the user's mute setting — the two combine so the
+   * effective master gain is `(muted || paused) ? 0 : master`.
+   */
+  setPaused(v: boolean) {
+    this.paused = !!v;
+    this.updateNodeVolumes();
+  }
+
   mute() {
     this.setSfxMuted(true);
   }
@@ -238,8 +255,9 @@ export class AudioManager {
   private updateNodeVolumes() {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
+    const silent = this.sfxMuted || this.paused;
     if (this.masterGainNode) {
-      this.masterGainNode.gain.setValueAtTime(this.sfxMuted ? 0 : this.master, t);
+      this.masterGainNode.gain.setValueAtTime(silent ? 0 : this.master, t);
     }
     if (this.sfxGainNode) {
       this.sfxGainNode.gain.setValueAtTime(this.sfxVolume, t);

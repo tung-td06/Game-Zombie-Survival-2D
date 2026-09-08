@@ -49,9 +49,11 @@ export const DEFAULT_SAVE: SaveData = {
   achievements: [],
   quests_claimed: [],
   settings: {
-    master_volume: 0.8,
-    music_volume: 0.6,
-    sfx_volume: 0.8,
+    // New players start at 100% on every channel, unmuted. Existing saves
+    // keep whatever they stored.
+    master_volume: 1,
+    music_volume: 1,
+    sfx_volume: 1,
     muted: false,
     fullscreen: false,
     show_fps: false,

@@ -409,13 +409,14 @@ export class Game {
       } else if (k === "Escape") {
         if (this.state === PLAYING) {
           this.state = PAUSED;
-          this.audio.setSfxMuted(true);
+          this.audio.setPaused(true);
           this.audio.pauseMusic();
           if (typeof document !== "undefined" && document.pointerLockElement) {
             document.exitPointerLock();
           }
         } else if (this.state === PAUSED) {
           this.audio.setSfxMuted(this.save.settings.muted);
+          this.audio.setPaused(false);
           this.audio.resumeMusic();
           this.state = PLAYING;
         } else if (
@@ -1413,12 +1414,17 @@ export class Game {
   restoreAudioForState(state: string) {
     if (state === PLAYING) {
       this.audio.setSfxMuted(this.save.settings.muted);
+      this.audio.setPaused(false);
       this.audio.resumeMusic();
     } else if (state === MENU) {
       this.audio.setSfxMuted(this.save.settings.muted);
+      this.audio.setPaused(false);
       this.audio.playMusic("menu");
     } else {
-      this.audio.setSfxMuted(true);
+      // Pause / pause-settings / shop / upgrade overlays: silence without
+      // touching the user's mute setting (so MUTE toggles there stay
+      // isolated from the pause state).
+      this.audio.setPaused(true);
       this.audio.pauseMusic();
     }
   }
@@ -1427,6 +1433,7 @@ export class Game {
     this.commitRun(true);
     this.inRunContext = false;
     this.audio.setSfxMuted(this.save.settings.muted);
+    this.audio.setPaused(false);
     this.audio.playMusic("menu");
     this.menus.setProfile(this.save.high_score, this.save.total_kills);
     if (this.netClient) {
@@ -1441,6 +1448,7 @@ export class Game {
     this.commitRun(true);
     this.inRunContext = false;
     this.audio.setSfxMuted(this.save.settings.muted);
+    this.audio.setPaused(false);
     this.audio.stopMusic();
     if (this.netClient) {
       this.netClient.close();
