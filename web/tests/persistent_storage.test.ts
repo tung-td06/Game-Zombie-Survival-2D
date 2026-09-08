@@ -308,8 +308,13 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     _resetCacheForTests();
     const fetched = await getSkillState(null, created.id);
     expect(fetched).not.toBeNull();
-    expect(fetched?.level).toBe(6);
-    expect(fetched?.xp).toBe(50);
+    // level/xp are NOT persisted by the skill-state sync: they belong to the
+    // Continue snapshot and only an explicit SAVE GAME may write them. The
+    // row created by this sync therefore keeps the schema defaults.
+    expect(fetched?.level).toBe(1);
+    expect(fetched?.xp).toBe(0);
+    // The Skill Tree columns (points + skills) ARE persisted by the sync, and
+    // stored values are returned untouched (they were validated at write time).
     expect(fetched?.skills.damage).toBe(1);
     expect(fetched?.skill_points).toBe(1);
   });
@@ -400,6 +405,42 @@ describe("Persistent JSON storage (no D1 binding)", () => {
 
     const aAfter = await getSkillState(null, a.id);
     expect(aAfter?.skills.damage).toBe(5);
+  });
+
+  it("level/xp columns are owned by SAVE GAME — skill-state syncs never overwrite them", async () => {
+    const username = "xpowns";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    // 1. Explicit Save Game writes the snapshot (level 14, XP 1238).
+    await saveGameSave(null, created.id, {
+      save_version: 1,
+      level: 14,
+      wave: 7,
+      score: 500,
+      money: 900,
+      player: { x: 100, y: 200, hp: 80, maxHp: 100, xp: 1238 },
+    });
+    // 2. Player levels up afterwards: the skill-state sync must NOT touch
+    //    level/xp (only the Skill Tree columns), or a fire-and-forget sync
+    //    could corrupt the Continue snapshot with an XP that was never saved.
+    await syncSkillState(null, created.id, {
+      level: 15,
+      xp: 38,
+      skill_points: 1,
+      skills: { damage: 1 },
+    });
+    await _flushNowForTests();
+    _resetCacheForTests();
+
+    const save = await getGameSave(null, created.id);
+    expect(save).not.toBeNull();
+    expect(save?.level).toBe(14); // snapshot, untouched by the sync
+    expect(save?.xp).toBe(1238); // snapshot, untouched by the sync
+    // The Skill Tree columns still received the fresh state.
+    expect(save?.skill_points).toBe(1);
+    expect(save?.skills?.damage).toBe(1);
   });
 
   it("an existing save survives unless explicitly overwritten (New Game never resets it)", async () => {

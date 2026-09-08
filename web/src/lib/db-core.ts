@@ -220,10 +220,16 @@ export function normalizeSkillState(input: Partial<SkillState>): SkillState {
 
 /** Build a SkillState from a game_saves row (or a partial row). */
 function rowToSkillState(row: Record<string, any>): SkillState {
-  return normalizeSkillState({
-    level: row.level,
-    xp: row.xp,
-    skill_points: row.skill_points,
+  // Preserve the stored values as-is instead of re-running them through
+  // normalizeSkillState. skill_points/skills were already validated and
+  // clamped at write time (against the client's CURRENT level); re-clamping
+  // here against the row's stored level would corrupt them, because level/xp
+  // are the Continue snapshot (only SAVE GAME writes them) and can be older
+  // than the Skill Tree columns, which level-ups sync immediately.
+  return {
+    level: Math.max(1, Math.floor(Number(row.level) || 1)),
+    xp: Math.max(0, Math.floor(Number(row.xp) || 0)),
+    skill_points: Math.max(0, Math.floor(Number(row.skill_points) || 0)),
     skills: SKILL_COLUMNS.reduce((acc, col) => {
       // col is one of the hardcoded catalog columns (skill_*), so the reverse
       // lookup is always safe here.
@@ -233,7 +239,7 @@ function rowToSkillState(row: Record<string, any>): SkillState {
       acc[uid] = Math.max(0, Math.floor(Number(row[col]) || 0));
       return acc;
     }, {} as Record<string, number>),
-  });
+  };
 }
 
 export interface SubmitScoreInput {
@@ -1115,10 +1121,15 @@ export async function syncSkillState(
     )!;
     return state.skills[uid] ?? 0;
   });
+  // NOTE: `level`/`xp` are deliberately NOT written here. The same row also
+  // holds the Continue-run snapshot, and SAVE GAME must be the ONLY writer
+  // of level/xp — otherwise a fire-and-forget level-up sync (which can carry
+  // a mid-level-up XP value) can land after a Save and corrupt the snapshot,
+  // making Continue restore an XP value that was never actually saved.
+  // `state.level` is still used by normalizeSkillState to validate/clamp
+  // skill_points; it is just not persisted by this statement.
   const cols = [
     "player_id",
-    "level",
-    "xp",
     "skill_points",
     ...SKILL_COLUMNS,
     "created_at",
@@ -1138,8 +1149,6 @@ export async function syncSkillState(
       )
       .bind(
         playerId,
-        state.level,
-        state.xp,
         state.skill_points,
         ...skillVals,
         now,

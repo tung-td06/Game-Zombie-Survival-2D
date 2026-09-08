@@ -2065,6 +2065,12 @@ export class Game {
         this.saveButtonState = "success";
         this.toast("GAME SAVED SUCCESSFULLY");
         console.log(
+          "[XP DEBUG] SAVE BEFORE",
+          `level: ${payload.level}`,
+          `xp: ${payload.player.xp}`,
+          `requiredXP: ${this.player.xpNeeded}`,
+        );
+        console.log(
           "[SAVE GAME]",
           `User: ${this.username}`,
           `Level: ${payload.level}`,
@@ -2077,6 +2083,13 @@ export class Game {
           `Skill Points: ${payload.player.skillPoints}`,
           `Skills Unlocked: ${Object.values(payload.player.upgradeLevels ?? {})
             .reduce((a, b) => a + b, 0)}`
+        );
+        console.log(
+          "[XP DEBUG] SAVE RESPONSE",
+          `level: ${this.player.level}`,
+          `xp: ${this.player.xp}`,
+          `requiredXP: ${this.player.xpNeeded}`,
+          "— run state unchanged by save (snapshot only)",
         );
         // Saving also records the run's current achievement on the
         // leaderboard (upserted per run, so repeated saves never duplicate).
@@ -2232,9 +2245,12 @@ export class Game {
   }
 
   /**
-   * Adopt a server-returned Skill Tree state as authoritative: updates the
-   * player's level/xp/points/skills, recomputes bonuses and mirrors the
-   * level/xp back into the local profile save.
+   * Adopt a server-returned Skill Tree state. The server is authoritative
+   * for the Skill Tree itself (spent points + skill levels), but NOT for the
+   * run's level/XP — those belong to the Continue snapshot and are only ever
+   * changed by real gameplay (addXp) or restored from a Save. Adopting the
+   * mirror's level/xp here used to clobber the live run with the DB's stale
+   * (possibly mid-level-up) values, which made XP jump around Save/Load.
    */
   adoptSkillState(state: {
     level: number;
@@ -2243,8 +2259,11 @@ export class Game {
     skills: Record<string, number>;
   }): void {
     const p = this.player!;
-    p.level = Math.max(1, Math.floor(Number(state.level) || 1));
-    p.xp = Math.max(0, Math.floor(Number(state.xp) || 0));
+    console.log(
+      "[XP DEBUG] adoptSkillState — server mirror level/xp ignored",
+      `server: L${Math.max(1, Math.floor(Number(state.level) || 1))} XP${Math.max(0, Math.floor(Number(state.xp) || 0))}`,
+      `run kept: L${p.level} XP${p.xp}`,
+    );
     p.skillPoints = Math.max(0, Math.floor(Number(state.skill_points) || 0));
     p.upgradeLevels = { ...(state.skills ?? {}) };
     this.recomputeSkillBonuses();
@@ -2257,6 +2276,9 @@ export class Game {
   /**
    * Push the current Skill Tree state to the server so level-ups (and their
    * skill point) persist to the database immediately, not only on SAVE GAME.
+   * The server persists only skill_points/skills from this payload; level/xp
+   * are sent for validation (the earned-points clamp) and are NOT written to
+   * the Continue snapshot — SAVE GAME is the only writer of level/xp.
    */
   private syncSkillState(): void {
     if (typeof window === "undefined" || !this.player) return;

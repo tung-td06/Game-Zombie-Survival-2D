@@ -356,8 +356,9 @@ export async function psSyncSkillState(
       created_at: now,
       updated_at: now,
     };
-    save.level = state.level;
-    save.xp = state.xp;
+    // level/xp are intentionally NOT touched: the same row also stores the
+    // Continue-run snapshot and only an explicit SAVE GAME may write level/xp
+    // (a level-up sync could otherwise land after a Save and corrupt it).
     save.skill_points = state.skill_points;
     save.skills = { ...state.skills };
     save.updated_at = now;
