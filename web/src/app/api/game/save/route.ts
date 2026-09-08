@@ -5,6 +5,7 @@ import {
   getGameSave,
   saveGameSave,
   deleteGameSave,
+  resetGameSave,
 } from "@/lib/db";
 
 export const runtime = "edge";
@@ -45,8 +46,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const body = (await req.json()) as { savePayload?: any };
-    const { savePayload } = body;
+    const body = (await req.json()) as { savePayload?: any; action?: string };
+    const { savePayload, action } = body;
+
+    const db = getD1Database();
+
+    // NEW GAME: replace the player's save row with a server-generated fresh
+    // progression (level 1, $0, pistol only, no drone, empty skill tree,
+    // wave 1). The account itself is never touched. Identity comes from the
+    // verified session, never from the body.
+    if (action === "new_game") {
+      await resetGameSave(db, session.playerId);
+      return NextResponse.json({ success: true });
+    }
 
     if (!savePayload) {
       return NextResponse.json(
@@ -55,7 +67,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getD1Database();
     await saveGameSave(db, session.playerId, savePayload);
 
     return NextResponse.json({ success: true });

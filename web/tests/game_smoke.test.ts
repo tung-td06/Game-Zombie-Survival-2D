@@ -161,4 +161,118 @@ describe("Game smoke", () => {
     (g as any).update();
     (g as any).draw();
   });
+
+  test("NEW GAME starts fully fresh even when an old save is in localStorage", async () => {
+    // Seed a stale, advanced profile: money, extra weapons, mods, drone,
+    // high level/xp, spent skill tree.
+    const ls = {
+      _: {
+        "zs.save.v1": JSON.stringify({
+          high_score: 5000,
+          total_kills: 100,
+          coins: 999,
+          player_level: 25,
+          xp: 500,
+          unlocked_weapons: ["pistol", "shotgun", "sniper"],
+          weapon_upgrades: { shotgun: ["extended_mag"] },
+          has_drone: true,
+          player_upgrades: { damage: 5 },
+          achievements: [],
+          quests_claimed: [],
+          settings: {
+            master_volume: 0.8,
+            music_volume: 0.6,
+            sfx_volume: 0.8,
+            muted: false,
+            fullscreen: false,
+            show_fps: false,
+            resolution_index: 0,
+            screen_shake: true,
+            damage_numbers: true,
+            hit_effects: true,
+            footstep_dust: false,
+            window_lights: false,
+            brightness: 1,
+            bindings: {},
+          },
+        }),
+      },
+      getItem(k: string) {
+        return this._[k] ?? null;
+      },
+      setItem(k: string, v: string) {
+        this._[k] = v;
+      },
+      removeItem(k: string) {
+        delete this._[k];
+      },
+    } as any;
+    (globalThis as any).localStorage = ls;
+    (globalThis as any).window = {
+      devicePixelRatio: 1,
+      innerWidth: 1280,
+      innerHeight: 720,
+      localStorage: ls,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      location: { protocol: "http:", host: "localhost" },
+    };
+    (globalThis as any).document = {
+      pointerLockElement: null,
+      exitPointerLock: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      fullscreenElement: null,
+      body: { setAttribute: () => {} },
+      createElement: () => ({ getContext: () => new FakeCtx() }),
+    };
+    (globalThis as any).performance = { now: () => Date.now() };
+
+    const { Game } = await import("../src/game/game");
+    const ctx = new FakeCtx() as any;
+    const g = new Game(ctx, 1280, 720, {
+      mode: "single",
+      username: "FreshStart",
+      shouldContinue: false,
+    });
+    await g.start();
+
+    // start() auto-runs newRun for a named user; force it again to be sure.
+    g["newRun"]();
+
+    const p = g.player!;
+    expect(p.coins).toBe(0);
+    expect(p.level).toBe(1);
+    expect(p.xp).toBe(0);
+    expect(p.skillPoints).toBe(0);
+    expect(p.hasDrone).toBe(false);
+    expect(Object.keys(p.weapons.weapons)).toEqual(["pistol"]);
+    expect(p.weapons.currentId).toBe("pistol");
+    expect(p.upgradeLevels).toEqual({});
+    expect(p.weapons.weapons["pistol"]?.mods ?? []).toEqual([]);
+
+    // The local profile mirror was reset too (run progression fields only).
+    const stored = JSON.parse(ls._["zs.save.v1"]);
+    expect(stored.coins).toBe(0);
+    expect(stored.unlocked_weapons).toEqual(["pistol"]);
+    expect(stored.weapon_upgrades).toEqual({});
+    expect(stored.has_drone).toBe(false);
+    expect(stored.player_level).toBe(1);
+    expect(stored.xp).toBe(0);
+    // Account-level stats are preserved.
+    expect(stored.high_score).toBe(5000);
+    expect(stored.total_kills).toBe(100);
+
+    // And the fresh save was pushed to the backend as a NEW GAME reset.
+    const newGameFetch = (globalThis as any).fetch.mock.calls.find((c: any[]) => {
+      const opts = c[1] ?? {};
+      return (
+        String(c[0]).includes("/api/game/save") &&
+        String(opts.body ?? "").includes("new_game")
+      );
+    });
+    expect(newGameFetch).toBeDefined();
+    const body = JSON.parse(newGameFetch![1]?.body ?? "{}");
+    expect(body.action).toBe("new_game");
+  });
 });

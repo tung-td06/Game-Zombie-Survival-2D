@@ -313,6 +313,83 @@ export async function psDeleteSave(playerId: string): Promise<void> {
   });
 }
 
+/**
+ * Replace a player's save with a brand-new-run state (level 1, $0, pistol
+ * only, no drone, empty skill tree, wave 1). Mirrors db-core's
+ * resetGameSave for the Node fallback. Account data is never touched.
+ */
+export async function psResetSave(playerId: string): Promise<void> {
+  await mutate((data) => {
+    const now = Date.now();
+    const existing = data.game_saves[playerId];
+    data.game_saves[playerId] = {
+      player_id: playerId,
+      save_version: 1,
+      level: 1,
+      wave: 1,
+      score: 0,
+      money: 0,
+      player_data: {
+        x: 2000,
+        y: 2000,
+        hp: 100,
+        maxHp: 100,
+        armor: 0,
+        xp: 0,
+        skillPoints: 0,
+        upgradeLevels: {},
+        hasDrone: false,
+        bombs: 2,
+      },
+      weapon_data: {
+        currentId: "pistol",
+        unlocked: ["pistol"],
+        ammo: {},
+        mods: {},
+      },
+      inventory_data: {},
+      progression_data: {
+        combo: 0,
+        comboTimer: 0,
+        elapsed: 0,
+        timeOfDay: 10,
+        stats: {
+          kills: 0,
+          kills_by_type: {},
+          boss_kills: 0,
+          survival_time: 0,
+          shots_by_weapon: {},
+          shots_fired: 0,
+          shots_hit: 0,
+        },
+        waveManager: {
+          state: "intermission",
+          timer: 3,
+          to_spawn: 0,
+          spawned_this_wave: 0,
+          spawnTimer: 0,
+          spawnInterval: 1.5,
+          hpMult: 1,
+          speedMult: 1,
+          dmgMult: 1,
+          bossAlive: false,
+        },
+      },
+      world_data: {
+        seed: 0,
+        loot: [],
+        supplyCrates: [],
+        crateTimer: 30,
+      },
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+      xp: 0,
+      skill_points: 0,
+      skills: {},
+    };
+  });
+}
+
 // --- Skill Tree CRUD ---------------------------------------------------------
 
 function skillStateFromSave(save: GameSaveRecord): SkillState {

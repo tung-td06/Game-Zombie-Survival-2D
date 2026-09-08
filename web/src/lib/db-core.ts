@@ -1028,6 +1028,83 @@ export async function deleteGameSave(
   }
 }
 
+/**
+ * Fresh run progression written when a player starts a NEW GAME. The account
+ * row (players / player_stats / leaderboard history) is untouched — only the
+ * single in-progress save is replaced. This is a server-generated clean
+ * state, so a client can never "reset" by echoing its own stale save back.
+ * Values intentionally mirror the game's fresh-run constants:
+ *   level 1, xp 0, money 0, pistol owned/unlocked/equipped only,
+ *   no weapon mods, no drone (UFO), empty skill tree, 0 skill points,
+ *   wave 1, empty run stats.
+ */
+export async function resetGameSave(
+  db: D1Database | null | undefined,
+  playerId: string
+): Promise<void> {
+  const freshPayload = {
+    save_version: 1,
+    level: 1,
+    wave: 1,
+    score: 0,
+    money: 0,
+    player: {
+      // World centre (WORLD_WIDTH/2, WORLD_HEIGHT/2) — same as a fresh run.
+      x: 2000,
+      y: 2000,
+      hp: 100,
+      maxHp: 100,
+      armor: 0,
+      xp: 0,
+      skillPoints: 0,
+      upgradeLevels: {},
+      hasDrone: false,
+      bombs: 2, // BOMB_START_COUNT
+    },
+    weapons: {
+      currentId: "pistol",
+      unlocked: ["pistol"],
+      ammo: {},
+      mods: {},
+    },
+    inventory: {},
+    progression: {
+      combo: 0,
+      comboTimer: 0,
+      elapsed: 0,
+      timeOfDay: 10,
+      stats: {
+        kills: 0,
+        kills_by_type: {},
+        boss_kills: 0,
+        survival_time: 0,
+        shots_by_weapon: {},
+        shots_fired: 0,
+        shots_hit: 0,
+      },
+      waveManager: {
+        state: "intermission",
+        timer: 3,
+        to_spawn: 0,
+        spawned_this_wave: 0,
+        spawnTimer: 0,
+        spawnInterval: 1.5,
+        hpMult: 1,
+        speedMult: 1,
+        dmgMult: 1,
+        bossAlive: false,
+      },
+    },
+    world: {
+      seed: 0,
+      loot: [],
+      supplyCrates: [],
+      crateTimer: 30, // CRATE_SPAWN_INTERVAL
+    },
+  };
+  await saveGameSave(db, playerId, freshPayload);
+}
+
 // ---------------------------------------------------------------------------
 // D1 Database Operations: Skill Tree
 // ---------------------------------------------------------------------------

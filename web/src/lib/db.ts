@@ -50,6 +50,7 @@ export {
   getGameSave,
   saveGameSave,
   deleteGameSave,
+  resetGameSave,
   validateScoreInput,
   getSkillState,
   syncSkillState,

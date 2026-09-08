@@ -63,6 +63,126 @@ export const UPGRADE_INFO = "UPGRADE_INFO";
 export const SETTINGS = "SETTINGS";
 export const GAME_OVER = "GAME_OVER";
 
+/**
+ * Fresh, clean progression state for a NEW GAME. This is the single source
+ * of truth for what a brand-new run looks like — level 1, xp 0, money 0,
+ * pistol owned/unlocked/equipped only, no weapon mods, UFO (drone) locked,
+ * empty skill tree with 0 points, wave 1, empty run stats. It seeds BOTH the
+ * runtime player AND the server-side save reset, so an old save (localStorage
+ * profile or database row) can never leak into a new run.
+ */
+export function createNewGameState(): {
+  save_version: number;
+  level: number;
+  wave: number;
+  score: number;
+  money: number;
+  player: {
+    x: number;
+    y: number;
+    hp: number;
+    maxHp: number;
+    armor: number;
+    xp: number;
+    skillPoints: number;
+    upgradeLevels: Record<string, number>;
+    hasDrone: boolean;
+    bombs: number;
+  };
+  weapons: {
+    currentId: string;
+    unlocked: string[];
+    ammo: Record<string, { ammo: number; reserve: number }>;
+    mods: Record<string, string[]>;
+  };
+  inventory: Record<string, never>;
+  progression: {
+    combo: number;
+    comboTimer: number;
+    elapsed: number;
+    timeOfDay: number;
+    stats: Stats;
+    waveManager: {
+      state: string;
+      timer: number;
+      to_spawn: number;
+      spawned_this_wave: number;
+      spawnTimer: number;
+      spawnInterval: number;
+      hpMult: number;
+      speedMult: number;
+      dmgMult: number;
+      bossAlive: boolean;
+    };
+  };
+  world: {
+    seed: number;
+    loot: unknown[];
+    supplyCrates: unknown[];
+    crateTimer: number;
+  };
+} {
+  return {
+    save_version: 1,
+    level: 1,
+    wave: 1,
+    score: 0,
+    money: 0,
+    player: {
+      x: WORLD_WIDTH / 2,
+      y: WORLD_HEIGHT / 2,
+      hp: PLAYER_BASE_MAX_HP,
+      maxHp: PLAYER_BASE_MAX_HP,
+      armor: 0,
+      xp: 0,
+      skillPoints: 0,
+      upgradeLevels: {},
+      hasDrone: false,
+      bombs: BOMB_START_COUNT,
+    },
+    weapons: {
+      currentId: "pistol",
+      unlocked: ["pistol"],
+      ammo: {},
+      mods: {},
+    },
+    inventory: {},
+    progression: {
+      combo: 0,
+      comboTimer: 0,
+      elapsed: 0,
+      timeOfDay: 10,
+      stats: {
+        kills: 0,
+        kills_by_type: {},
+        boss_kills: 0,
+        survival_time: 0,
+        shots_by_weapon: {},
+        shots_fired: 0,
+        shots_hit: 0,
+      },
+      waveManager: {
+        state: "intermission",
+        timer: 3,
+        to_spawn: 0,
+        spawned_this_wave: 0,
+        spawnTimer: 0,
+        spawnInterval: 1.5,
+        hpMult: 1,
+        speedMult: 1,
+        dmgMult: 1,
+        bossAlive: false,
+      },
+    },
+    world: {
+      seed: MAP_SEED,
+      loot: [],
+      supplyCrates: [],
+      crateTimer: CRATE_SPAWN_INTERVAL,
+    },
+  };
+}
+
 export class Game {
   ctx: CanvasRenderingContext2D;
   viewW: number;
@@ -1370,26 +1490,54 @@ export class Game {
         start.y = alt.y;
       }
     }
-    const unlocked = ["pistol", ...this.save.unlocked_weapons.filter((w) => w !== "pistol")];
-    // A NEW GAME always starts fresh: level 1, no XP, no skill points and an
-    // empty skill tree. It never inherits level/skills from a previous save.
+    // A NEW GAME always starts from a completely fresh progression: level 1,
+    // $0, pistol owned/unlocked/equipped only, no weapon mods, no drone (UFO),
+    // empty skill tree, wave 1. It NEVER reads level/xp/money/weapons/drone
+    // from the old save — neither the localStorage profile nor the database.
+    const fresh = createNewGameState();
     this.player = new Player(start, {
-      unlocked,
-      coins: this.save.coins,
-      level: 1,
-      xp: 0,
+      unlocked: [...fresh.weapons.unlocked],
+      coins: 0,
+      level: fresh.level,
+      xp: fresh.player.xp,
       weaponData: this.weaponData,
-      weaponMods: this.save.data.weapon_upgrades,
+      weaponMods: {},
       username: this.username,
     });
     this.player.skillPoints = 0;
     this.player.upgradeLevels = {};
     this.recomputeSkillBonuses();
-    this.player.hasDrone = !!this.save.data["has_drone"];
-    // One save slot per user: starting a new game replaces the previous save.
-    if (typeof window !== "undefined") {
-      fetch("/api/game/save", { method: "DELETE" }).catch((err) =>
-        console.error("Failed to clear old save on new game:", err)
+    this.player.hasDrone = false;
+    this.player.bombs = BOMB_START_COUNT;
+
+    if (this.networkMode === "single") {
+      // Reset the local profile mirror (localStorage) so stale save data
+      // (weapons, money, drone, upgrades) can never leak into the fresh run
+      // or the main-menu shop preview. Account/login data is untouched.
+      this.resetLocalProgression();
+      // One save slot per user: starting a new game REPLACES the previous
+      // save with a fresh server-generated progression (UPSERT, not DELETE),
+      // so Continue after a New Game yields the fresh state — never the old
+      // save. Identity comes from the session cookie, not the body.
+      if (typeof window !== "undefined") {
+        fetch("/api/game/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "new_game" }),
+        }).catch((err) =>
+          console.error("Failed to reset save on new game:", err)
+        );
+      }
+      console.log(
+        "[NEW GAME]",
+        `User: ${this.username}`,
+        `Level: ${fresh.level}`,
+        `Money: ${fresh.money}`,
+        `Weapon: ${fresh.weapons.currentId}`,
+        `Owned Weapons: ${fresh.weapons.unlocked.join(", ")}`,
+        `UFO: ${fresh.player.hasDrone ? "owned" : "locked"}`,
+        "Skill Tree: reset",
+        `Wave: ${fresh.wave}`
       );
     }
     this.camera = new Camera(this.viewW, this.viewH);
@@ -1431,18 +1579,52 @@ export class Game {
     this.toast("SURVIVE THE HORDE!");
   }
 
+  /**
+   * Reset the persistent local profile mirror (localStorage zs.save.v1) to
+   * a fresh-run progression. Only run-progression fields are cleared;
+   * account-level data (high score, total kills, achievements, settings,
+   * login) is preserved.
+   */
+  private resetLocalProgression(): void {
+    const d = this.save.data;
+    d.coins = 0;
+    d.unlocked_weapons = ["pistol"];
+    d.weapon_upgrades = {};
+    d.has_drone = false;
+    d.player_level = 1;
+    d.xp = 0;
+    d.player_upgrades = {};
+    this.save.save();
+  }
+
   async loadSaveAndStart() {
     try {
-      const res = await fetch(`/api/game/save?username=${encodeURIComponent(this.username)}`);
+      // Identity comes from the session cookie; never pass a username.
+      const res = await fetch("/api/game/save");
       const data = await res.json() as any;
       if (data.save) {
+        console.log(
+          "[LOAD GAME]",
+          `User: ${this.username}`,
+          "Save found: true"
+        );
         this.restoreGameFromSave(data.save);
       } else {
+        console.log(
+          "[LOAD GAME]",
+          `User: ${this.username}`,
+          "Save found: false — starting fresh"
+        );
         this.toast("NO SAVE FOUND, STARTING NEW RUN");
         this.newRun();
       }
     } catch (err) {
       console.error("Failed to load save:", err);
+      console.log(
+        "[LOAD GAME]",
+        `User: ${this.username}`,
+        "Save found: false (error) — starting fresh"
+      );
       this.toast("LOAD FAILED, STARTING NEW RUN");
       this.newRun();
     }
@@ -1464,6 +1646,9 @@ export class Game {
       level: dbSave.level,
       xp: dbSave.xp ?? pData.xp ?? 0,
       weaponData: this.weaponData,
+      // Weapon mods are part of the save (payload `weapons.mods`); restore
+      // them so upgraded weapons keep their attachments after Continue.
+      weaponMods: dbSave.weapon_data?.mods ?? {},
       username: this.username,
     });
     this.player.hasDrone = !!pData.hasDrone;
@@ -1567,6 +1752,17 @@ export class Game {
     // Same run keeps its leaderboard row when continued from a save.
     this.runId = dbSave.progression_data?.run_id || crypto.randomUUID();
 
+    // Mirror the restored run into the local profile (localStorage) so the
+    // main-menu shop preview and any later meta reads never drift from the
+    // save that was actually loaded (and never carry a stale old save).
+    this.save.data.coins = dbSave.money;
+    this.save.data.unlocked_weapons = [...unlocked];
+    this.save.data.weapon_upgrades = { ...(dbSave.weapon_data?.mods ?? {}) };
+    this.save.data.has_drone = !!pData.hasDrone;
+    this.save.data.player_level = dbSave.level;
+    this.save.data.xp = dbSave.xp ?? pData.xp ?? 0;
+    this.save.save();
+
     this.toasts = [];
     this.waveBanner = null;
     this.quests.bind(this);
@@ -1609,7 +1805,14 @@ export class Game {
         ammo: Object.entries(this.player.weapons.weapons).reduce((acc, [id, w]) => {
           acc[id] = { ammo: (w as any).ammo, reserve: (w as any).reserve };
           return acc;
-        }, {} as Record<string, { ammo: number, reserve: number }>)
+        }, {} as Record<string, { ammo: number, reserve: number }>),
+        // Weapon mods are persisted so upgraded weapons keep their
+        // attachments after Continue (restored via weapon_data.mods).
+        mods: Object.entries(this.player.weapons.weapons).reduce((acc, [id, w]) => {
+          const mods = (w as any).mods as string[] | undefined;
+          if (mods && mods.length > 0) acc[id] = [...mods];
+          return acc;
+        }, {} as Record<string, string[]>)
       },
       inventory: {},
       progression: {
@@ -1647,7 +1850,8 @@ export class Game {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: this.username,
+          // Identity is resolved from the session cookie server-side; the
+          // body never carries a username.
           savePayload: payload
         })
       });
@@ -1655,6 +1859,15 @@ export class Game {
       if (res.ok) {
         this.saveButtonState = "success";
         this.toast("GAME SAVED SUCCESSFULLY");
+        console.log(
+          "[SAVE GAME]",
+          `User: ${this.username}`,
+          `Level: ${payload.level}`,
+          `Money: ${payload.money}`,
+          `Wave: ${payload.wave}`,
+          `Weapons: ${payload.weapons.unlocked.join(", ")}`,
+          `Skill Points: ${payload.player.skillPoints}`
+        );
         // Saving also records the run's current achievement on the
         // leaderboard (upserted per run, so repeated saves never duplicate).
         this.submitRunScore("saved");

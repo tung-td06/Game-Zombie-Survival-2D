@@ -272,9 +272,14 @@ export default function Home() {
   const startNewSinglePlayer = () => {
     if (!isLoggedIn || !currentUser) return;
     if (confirm("Bắt đầu chơi mới sẽ xóa file lưu cũ. Bạn có muốn tiếp tục?")) {
+      // Replace the old save with a fresh server-generated progression
+      // (level 1, $0, pistol only, UFO locked, skill tree reset) instead of
+      // deleting the row — New Game = Fresh Save State, never the old save.
       fetch("/api/game/save", {
-        method: "DELETE",
-      }).catch((err) => console.error("Failed to delete old save:", err));
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "new_game" }),
+      }).catch((err) => console.error("Failed to reset old save:", err));
       router.push(
         `/play?mode=single&name=${encodeURIComponent(
           currentUser.display_name || currentUser.username

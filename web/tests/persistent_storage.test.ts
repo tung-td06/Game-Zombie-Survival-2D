@@ -13,6 +13,7 @@ import {
   getLeaderboardTop100,
   getPlayerStats,
   deleteGameSave,
+  resetGameSave,
   syncSkillState,
   getSkillState,
   upgradeSkill,
@@ -331,6 +332,83 @@ describe("Persistent JSON storage (no D1 binding)", () => {
 
     const aAfter = await getSkillState(null, a.id);
     expect(aAfter?.skills.damage).toBe(5);
+  });
+
+  it("NEW GAME resets progression but never touches the account", async () => {
+    const username = "james";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash, "James");
+
+    // An advanced old save: high level, money, multiple weapons, drone,
+    // weapon mods, and a spent skill tree.
+    await saveGameSave(null, created.id, {
+      save_version: 1,
+      level: 25,
+      wave: 12,
+      score: 50000,
+      money: 3500,
+      player: {
+        x: 100,
+        y: 100,
+        hp: 120,
+        maxHp: 180,
+        armor: 40,
+        xp: 900,
+        skillPoints: 1,
+        upgradeLevels: { damage: 5, max_hp: 4, speed: 3 },
+        hasDrone: true,
+      },
+      weapons: {
+        currentId: "shotgun",
+        unlocked: ["pistol", "shotgun", "rifle", "sniper"],
+        ammo: {},
+        mods: { shotgun: ["extended_mag"] },
+      },
+      inventory: {},
+      progression: {},
+      world: {},
+    });
+
+    await _flushNowForTests();
+    _resetCacheForTests();
+    const before = await getGameSave(null, created.id);
+    expect(before?.level).toBe(25);
+    expect(before?.money).toBe(3500);
+
+    // New Game: replace with a server-generated fresh progression.
+    await resetGameSave(null, created.id);
+    await _flushNowForTests();
+    _resetCacheForTests();
+
+    const fresh = await getGameSave(null, created.id);
+    expect(fresh).not.toBeNull();
+    expect(fresh?.level).toBe(1);
+    expect(fresh?.xp).toBe(0);
+    expect(fresh?.money).toBe(0);
+    expect(fresh?.wave).toBe(1);
+    expect(fresh?.score).toBe(0);
+    expect(fresh?.skill_points).toBe(0);
+    expect(fresh?.skills).toMatchObject({});
+    expect(fresh?.weapon_data?.currentId).toBe("pistol");
+    expect(fresh?.weapon_data?.unlocked).toEqual(["pistol"]);
+    expect(fresh?.weapon_data?.mods ?? {}).toEqual({});
+    expect(fresh?.player_data?.hasDrone).toBe(false);
+    expect(fresh?.player_data?.upgradeLevels ?? {}).toEqual({});
+    expect(fresh?.player_data?.bombs).toBe(2);
+
+    // The skill-tree read also reports the fresh state.
+    const tree = await getSkillState(null, created.id);
+    expect(tree?.level).toBe(1);
+    expect(tree?.skill_points).toBe(0);
+    expect(tree?.skills.damage ?? 0).toBe(0);
+
+    // The account itself is untouched.
+    const player = await getPlayerByUsername(null, username);
+    expect(player).not.toBeNull();
+    expect(player?.id).toBe(created.id);
+    expect(player?.display_name).toBe("James");
+    expect(await verifyPassword(password, player!.password_hash)).toBe(true);
   });
 
   it("round-trips the Skill Tree through SAVE GAME / LOAD GAME", async () => {
