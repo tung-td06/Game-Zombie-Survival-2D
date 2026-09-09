@@ -18,18 +18,30 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
   const ref = useRef<HTMLCanvasElement | null>(null);
   const gameRef = useRef<Game | null>(null);
   const [wsStatus, setWsStatus] = useState<"connecting" | "open" | "closed" | "error" | "none">("none");
-  // Mobile control mode = touch-primary device (coarse pointer + small
-  // viewport). Desktop/laptops never enter it, so joystick events can
-  // never affect desktop input.
+  // Mobile control mode = touch-primary device (coarse pointer + no
+  // hover). Desktop/laptops never enter it, so joystick events can never
+  // affect desktop input. Detected synchronously on first client render
+  // (see lib/device) so controls don't wait for a post-hydration effect.
   const isMobile = useIsMobileControlMode();
   const orientation = useOrientation();
+  // True once the client component has hydrated/mounted. All mobile UI is
+  // gated on it so the server-rendered DOM is never contradicted during
+  // hydration (isMobile is now computed synchronously on the client).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  // True once the Game instance exists. gameRef is a ref — mutating it does
+  // NOT re-render — so the touch HUD must be gated on this state instead of
+  // on `gameRef.current`, or it could wait for an unrelated re-render
+  // (e.g. a resize) before appearing.
+  const [gameReady, setGameReady] = useState(false);
   const isMobileRef = useRef(false);
   useEffect(() => {
     isMobileRef.current = isMobile;
   }, [isMobile]);
 
-  /** True when a phone must rotate: touch device held in portrait. */
-  const needsRotate = isMobile && orientation === "portrait";
+  /** True when a phone must rotate: touch device held in portrait. Gated on
+      `mounted` so the rotate overlay can never render during SSR/hydration. */
+  const needsRotate = mounted && isMobile && orientation === "portrait";
   const autoPausedRef = useRef(false);
 
   // Landscape orientation lock (with graceful fallback): ask the browser
@@ -134,6 +146,10 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
     gameRef.current = game;
     (window as unknown as { __game?: Game }).__game = game;
     resize();
+    // Publish the game instance via state (not just the ref) so the touch
+    // HUD — gated on `gameReady` — mounts the moment the game exists,
+    // with no dependence on an unrelated re-render.
+    setGameReady(true);
 
     window.addEventListener("resize", resize);
     // Mobile browsers shrink the visual viewport when the URL bar
@@ -246,7 +262,7 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
       <canvas ref={ref} data-testid="game-canvas" />
       {/* Inert screen treatment: corner falloff + faint scanlines. */}
       <div className="zs-screen-fx" aria-hidden="true" />
-      {isMobile && gameRef.current && (
+      {mounted && isMobile && gameReady && gameRef.current && (
         <TouchHUD input={gameRef.current.input} gameRef={gameRef} />
       )}
       {/* Portrait phone: block input and ask for landscape. Hides itself

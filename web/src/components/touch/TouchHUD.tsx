@@ -47,8 +47,10 @@ function computeControlSizes(): {
   if (typeof window === "undefined") {
     return { joystick: 120, thumb: 56, button: 60, fire: 80 };
   }
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  // Prefer the VISUAL viewport (tracks the mobile URL-bar collapse and
+  // pinch zoom); fall back to the layout viewport for older browsers.
+  const vw = window.visualViewport?.width ?? window.innerWidth;
+  const vh = window.visualViewport?.height ?? window.innerHeight;
   const base = Math.min(vw, vh); // landscape → the height; portrait → width
   const joystick = Math.round(Math.max(96, Math.min(150, base * 0.3)));
   const thumb = Math.round(joystick * 0.46);
@@ -59,14 +61,28 @@ function computeControlSizes(): {
 }
 
 function useControlSizes() {
+  // Synchronous first measurement: the sizes are correct from the very
+  // first client render — resize only RE-measures when the viewport
+  // actually changes, it is never required for the controls to appear.
   const [sizes, setSizes] = useState(computeControlSizes);
   useEffect(() => {
     const onResize = () => setSizes(computeControlSizes());
     window.addEventListener("resize", onResize);
     window.addEventListener("orientationchange", onResize);
+    // Mobile URL-bar collapse / pinch zoom change the VISUAL viewport; keep
+    // the touch targets sized to the real visible area.
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", onResize);
+      vv.addEventListener("scroll", onResize);
+    }
     return () => {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("orientationchange", onResize);
+      if (vv) {
+        vv.removeEventListener("resize", onResize);
+        vv.removeEventListener("scroll", onResize);
+      }
     };
   }, []);
   return sizes;
@@ -122,9 +138,14 @@ export default function TouchHUD({ input, gameRef }: Props) {
   const safeBottom = "max(16px, env(safe-area-inset-bottom))";
   const safeLeft = "max(16px, env(safe-area-inset-left))";
 
-  // Game-state gating (see header comment). Polled cheaply; state only ever
-  // changes between a small set of values, so re-renders are rare.
-  const [gameState, setGameState] = useState("");
+  // Game-state gating (see header comment). The initial value is read
+  // synchronously from the game (which exists by the time this mounts —
+  // TouchHUD only renders after `gameReady`), and the first poll runs on
+  // the same tick, so controls appear the moment the game is PLAYING
+  // without waiting a frame.
+  const [gameState, setGameState] = useState<string>(
+    () => gameRef.current?.state ?? ""
+  );
   useEffect(() => {
     let raf = 0;
     const tick = () => {
@@ -132,7 +153,7 @@ export default function TouchHUD({ input, gameRef }: Props) {
       setGameState((prev) => (prev === s ? prev : s));
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+    tick();
     return () => cancelAnimationFrame(raf);
   }, [gameRef]);
 
@@ -161,6 +182,10 @@ export default function TouchHUD({ input, gameRef }: Props) {
       style={{
         position: "absolute",
         inset: 0,
+        // Above the canvas and the screen-fx chrome (z-index 5), below the
+        // modal overlays (100+) — controls can never be painted under the
+        // game layer.
+        zIndex: 20,
         pointerEvents: "none",
         paddingBottom: safeBottom,
         paddingLeft: safeLeft,

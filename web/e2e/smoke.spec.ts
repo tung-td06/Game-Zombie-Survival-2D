@@ -5,8 +5,15 @@ test("landing page loads with Play button", async ({ page }) => {
     localStorage.setItem("zs.username", "SurvivorTest");
   });
   await page.goto("/");
-  await expect(page.getByRole("link", { name: /play/i })).toBeVisible();
+  // The landing page shows the auth panel when logged out (PLAYER ACCOUNT)
+  // or the lobby when a session exists (NEW GAME / CHƠI MỚI button — the
+  // old "Play" link was replaced by the confirm-modal flow).
   await expect(page.getByRole("heading", { name: /ZOMBIE SURVIVAL/i })).toBeVisible();
+  await expect(
+    page
+      .getByRole("heading", { name: /PLAYER ACCOUNT/i })
+      .or(page.getByRole("button", { name: /CHƠI MỚI|NEW GAME/i }))
+  ).toBeVisible();
 });
 
 test("play page mounts canvas and starts a run", async ({ page }) => {
