@@ -950,14 +950,6 @@ export class Game {
       this.currentButtons = this.menus.drawGameOver(ctx, this, this.runStats(), this.newHigh).buttons;
     }
 
-    if (this.showFps) {
-      ctx.fillStyle = "#82827E";
-      ctx.font = "12px ui-monospace, monospace";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
-      ctx.fillText(`FPS ${this.fpsDisplay}`, 6, this.viewH - 18);
-    }
-
     if (this.isDebug()) {
       ctx.save();
       ctx.fillStyle = "rgba(10, 10, 14, 0.85)";
