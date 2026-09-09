@@ -670,15 +670,6 @@ export class MenuSystem {
     roundRect(ctx, PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 12);
     ctx.stroke();
 
-    // Corner accents
-    const ca = 18;
-    ctx.strokeStyle = color("ui_gold");
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(PANEL_X, PANEL_Y + ca); ctx.lineTo(PANEL_X, PANEL_Y); ctx.lineTo(PANEL_X + ca, PANEL_Y); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(PANEL_X + PANEL_W - ca, PANEL_Y); ctx.lineTo(PANEL_X + PANEL_W, PANEL_Y); ctx.lineTo(PANEL_X + PANEL_W, PANEL_Y + ca); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(PANEL_X, PANEL_Y + PANEL_H - ca); ctx.lineTo(PANEL_X, PANEL_Y + PANEL_H); ctx.lineTo(PANEL_X + ca, PANEL_Y + PANEL_H); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(PANEL_X + PANEL_W - ca, PANEL_Y + PANEL_H); ctx.lineTo(PANEL_X + PANEL_W, PANEL_Y + PANEL_H); ctx.lineTo(PANEL_X + PANEL_W, PANEL_Y + PANEL_H - ca); ctx.stroke();
-
     // Title & Cash
     drawText(ctx, "BLACK MARKET", cx, PANEL_Y + 24, 28, "#E63C42", "center", "middle");
     drawText(ctx, `CASH: $${game.player!.coins}`, cx, PANEL_Y + 54, 18, color("ui_green"), "center", "middle");
