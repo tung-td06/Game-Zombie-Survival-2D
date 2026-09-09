@@ -11,7 +11,7 @@ import { SCREEN_HEIGHT, SCREEN_WIDTH } from "./settings";
 import { SKILL_BRANCHES, branchForSkill, LEVELUP_PICK_LOCK } from "./upgrade";
 import { MOD_CATALOG } from "./mods";
 import { BOMB_PACK_AMOUNT, BOMB_PACK_PRICE } from "./grenade";
-import { MAX_UFO_OWNED, UFO_CATALOG, ufoDef } from "./ufo";
+import { MAX_UFO_OWNED, UFO_CATALOG } from "./ufo";
 import type { IGame } from "./types";
 
 interface Ember {
@@ -63,6 +63,31 @@ function wrapLines(
   }
   if (line) lines.push(line);
   return lines;
+}
+
+/**
+ * Draw `text` wrapped to `maxW` at (x, y): lines only break when the text
+ * really runs out of horizontal space, and at most `maxLines` are drawn.
+ * Returns how many lines were drawn. Text is measured with the actual
+ * canvas font, so nothing can overflow the zone or clip mid-word.
+ */
+function drawWrapped(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  maxW: number,
+  maxLines: number,
+  lineH: number,
+  col: string,
+): number {
+  const lines = wrapLines(ctx, text, size, maxW).slice(0, maxLines);
+  for (const line of lines) {
+    drawText(ctx, line, x, y, size, col, "left", "top");
+    y += lineH;
+  }
+  return lines.length;
 }
 
 export class MenuSystem {
@@ -777,38 +802,10 @@ export class MenuSystem {
         }
         drawText(ctx, item.name, cX + 8, cY + 7, nameSize, owned ? color("ui_green") : "#FFFFFF", "left", "top");
 
-        // Split description into two lines
-        let desc1 = item.desc;
-        let desc2 = "";
-        if (item.id === "shotgun") {
-          desc1 = "High scatter damage";
-          desc2 = "at close range.";
-        } else if (item.id === "smg") {
-          desc1 = "High rate of fire,";
-          desc2 = "low accuracy.";
-        } else if (item.id === "rifle") {
-          desc1 = "Excellent damage";
-          desc2 = "and auto-fire.";
-        } else if (item.id === "sniper") {
-          desc1 = "Slow bolt-action";
-          desc2 = "but heavy damage.";
-        } else if (item.id === "flamethrower") {
-          desc1 = "Short-range stream";
-          desc2 = "of fire.";
-        } else if (item.id === "plasma") {
-          desc1 = "Energy bolts that";
-          desc2 = "explode on impact.";
-        } else if (item.id === "crossbow") {
-          desc1 = "Bolt pierces";
-          desc2 = "through crowds.";
-        }
-        // Description stays inside the card's left text zone (never runs
-        // under the icon or past the card edge).
-        const descCol = color("ui_dim");
-        drawText(ctx, desc1, cX + 9, cY + 27, 9, descCol, "left", "top");
-        if (desc2) {
-          drawText(ctx, desc2, cX + 9, cY + 38, 9, descCol, "left", "top");
-        }
+        // Description — measured word-wrap inside the text zone left of the
+        // icon: short lines stay on one line, longer ones break naturally at
+        // whitespace, and nothing can run under the icon or the card edge.
+        drawWrapped(ctx, item.desc, cX + 9, cY + 27, 9, wTextRight - 8 - 2, 3, 11, color("ui_dim"));
 
         let btnText = `$${price} [BUY]`;
         let btnAccent = color("ui_gold");
@@ -849,19 +846,16 @@ export class MenuSystem {
         { id: "armor",  name: "ARMOR PLATE", desc: "Adds +15 armor plating.",       price: 250 },
       ];
 
-      // Supplies use slightly shorter cards than the shared grid so the
-      // featured UFO DRONE card fits on a third row inside the panel.
-      const sCardH = 92;
-      const sGapY = 10;
-
+      // Supplies use the shared 2-column card grid (same card size as the
+      // upgrades / mods tabs). UFO FLEET lives exclusively in the UFO tab.
       items.forEach((item, idx) => {
         const col = idx % 2;
         const row = Math.floor(idx / 2);
         const cX = gridX + col * (cardW + cardGapX);
-        const cY = gridY + row * (sCardH + sGapY);
+        const cY = gridY + row * (cardH + cardGapY);
 
         ctx.fillStyle = "#1E1E24";
-        roundRect(ctx, cX, cY, cardW, sCardH, 8);
+        roundRect(ctx, cX, cY, cardW, cardH, 8);
         ctx.fill();
 
         let available = true;
@@ -892,7 +886,7 @@ export class MenuSystem {
 
         ctx.strokeStyle = isMax ? btnAccent : "#3C3C46";
         ctx.lineWidth = 1.5;
-        roundRect(ctx, cX, cY, cardW, sCardH, 8);
+        roundRect(ctx, cX, cY, cardW, cardH, 8);
         ctx.stroke();
 
         // Draw supply icon
@@ -901,31 +895,19 @@ export class MenuSystem {
         // Text Info (Left aligned)
         drawText(ctx, item.name, cX + 12, cY + 12, 15, isMax ? btnAccent : "#FFFFFF", "left", "top");
 
-        // Split description into two lines
-        let desc1 = item.desc;
-        let desc2 = "";
-        if (item.id === "ammo") {
-          desc1 = "Adds +30 reserve";
-          desc2 = "ammo.";
-        } else if (item.id === "bomb") {
-          desc1 = `Adds +${BOMB_PACK_AMOUNT} bombs — F`;
-          desc2 = `to throw (${p.bombs}/${p.maxBombs}).`;
-        } else if (item.id === "medkit") {
-          desc1 = "Restores +25";
-          desc2 = "health.";
-        } else if (item.id === "armor") {
-          desc1 = "Adds +15 armor";
-          desc2 = "plating.";
-        }
-        drawText(ctx, desc1, cX + 12, cY + 32, 10, color("ui_dim"), "left", "top");
-        if (desc2) {
-          drawText(ctx, desc2, cX + 12, cY + 44, 10, color("ui_dim"), "left", "top");
-        }
+        // Description — measured word-wrap that only breaks when the text
+        // reaches the icon zone, so short descriptions stay on one line and
+        // long ones wrap naturally at whitespace without clipping.
+        const desc =
+          item.id === "bomb"
+            ? `Adds +${BOMB_PACK_AMOUNT} throwable bombs (${p.bombs}/${p.maxBombs}) — press F`
+            : item.desc;
+        drawWrapped(ctx, desc, cX + 12, cY + 34, 10, cardW - 98, 3, 12, color("ui_dim"));
 
         const buyBtn = new Button(
           btnText,
           cX + 12,
-          cY + sCardH - 30,
+          cY + cardH - 34,
           cardW - 24,
           24,
           available ? `ps_buy:${item.id}` : "",
@@ -935,55 +917,6 @@ export class MenuSystem {
         buyBtn.draw(ctx);
         if (available) buttons.push(buyBtn);
       });
-
-      // ── UFO FLEET summary (full fleet lives in the UFO tab) ────────────
-      const fX = gridX;
-      const fY = gridY + 2 * (sCardH + sGapY);
-      const fW = cardW * 2 + cardGapX;
-      const fH = 76;
-      const fPad = 14;
-      const fleetOwned = p.ownedUFOs.length;
-      const fleetFull = fleetOwned >= MAX_UFO_OWNED;
-      const activeName = p.activeUFO ? ufoDef(p.activeUFO)?.name ?? p.activeUFO : "";
-
-      ctx.fillStyle = fleetOwned > 0 ? "#16242A" : "#1E1E24";
-      roundRect(ctx, fX, fY, fW, fH, 8);
-      ctx.fill();
-      ctx.strokeStyle = fleetFull
-        ? color("ui_green")
-        : fleetOwned > 0
-          ? color("ui_blue")
-          : "#3C3C46";
-      ctx.lineWidth = 1.5;
-      roundRect(ctx, fX, fY, fW, fH, 8);
-      ctx.stroke();
-
-      drawShopIcon(ctx, `ufo:${p.activeUFO || "drone"}`, fX + fW - fPad - 76, fY + 10, 76, 54, false);
-
-      drawText(ctx, "UFO FLEET", fX + fPad, fY + 14, 17, color("ui_gold"), "left", "top");
-      drawText(
-        ctx,
-        `${fleetOwned} / ${MAX_UFO_OWNED} OWNED`,
-        fX + fPad + 150,
-        fY + 14,
-        17,
-        fleetFull ? color("ui_green") : color("ui_blue"),
-        "left",
-        "top",
-      );
-      drawText(
-        ctx,
-        fleetOwned > 0
-          ? `Active: ${activeName} — one-time unlock, kept across runs.`
-          : "No saucers owned yet. Buy up to 4 — kept across runs.",
-        fX + fPad,
-        fY + 40,
-        10,
-        color("ui_dim"),
-        "left",
-        "top",
-      );
-      drawText(ctx, "Manage in the UFO tab ▸", fX + fPad, fY + 55, 10, color("ui_dim"), "left", "top");
     } else if (this.activeShopTab === "ufos") {
       this.drawUfoTab(ctx, game, buttons, gridX, gridY, hx, hy, dt);
     } else if (this.activeShopTab === "upgrades") {
@@ -1032,20 +965,15 @@ export class MenuSystem {
         // Text Info (Left aligned)
         drawText(ctx, item.name, cX + 12, cY + 14, 15, isMaxed ? color("ui_green") : "#FFFFFF", "left", "top");
 
-        // Split description into two lines
-        let desc1 = item.desc;
-        let desc2 = `Level: ${currentLvl} / ${maxLimit}`;
-        if (item.id === "max_hp") {
-          desc1 = "Gain +20 Max HP";
-        } else if (item.id === "damage") {
-          desc1 = "Base DMG +10%";
-        } else if (item.id === "speed") {
-          desc1 = "Move Speed +8%";
-        } else if (item.id === "fire_rate") {
-          desc1 = "Fire Rate +8%";
+        // Description — measured word-wrap; short ones stay on one line and
+        // long ones wrap naturally at the icon zone without clipping.
+        const upDescLines = wrapLines(ctx, item.desc, 10, cardW - 98);
+        let upDescY = cY + 36;
+        for (const line of upDescLines.slice(0, 2)) {
+          drawText(ctx, line, cX + 12, upDescY, 10, color("ui_dim"), "left", "top");
+          upDescY += 12;
         }
-        drawText(ctx, desc1, cX + 12, cY + 36, 10, color("ui_dim"), "left", "top");
-        drawText(ctx, desc2, cX + 12, cY + 48, 10, isMaxed ? color("ui_green") : color("ui_gold"), "left", "top");
+        drawText(ctx, `Level: ${currentLvl} / ${maxLimit}`, cX + 12, upDescY + 2, 10, isMaxed ? color("ui_green") : color("ui_gold"), "left", "top");
 
         const buyBtn = new Button(
           btnText,
@@ -1116,12 +1044,18 @@ export class MenuSystem {
         drawShopIcon(ctx, `mod:${mod.id}`, cX + cardW - 84, cY + 12, 72, 48, equipped);
 
         drawText(ctx, mod.name.toUpperCase(), cX + 12, cY + 14, 15, equipped ? color("ui_green") : "#FFFFFF", "left", "top");
-        drawText(ctx, mod.desc, cX + 12, cY + 40, 11, color("ui_dim"), "left", "top");
+        // Description — measured word-wrap, short ones stay on one line.
+        const modDescLines = wrapLines(ctx, mod.desc, 10, cardW - 98);
+        let modDescY = cY + 36;
+        for (const line of modDescLines.slice(0, 2)) {
+          drawText(ctx, line, cX + 12, modDescY, 10, color("ui_dim"), "left", "top");
+          modDescY += 12;
+        }
         drawText(
           ctx,
           `Fits: ${w.name.toUpperCase()}`,
           cX + 12,
-          cY + 56,
+          modDescY + 2,
           10,
           equipped ? color("ui_green") : color("ui_gold"),
           "left",
@@ -1285,10 +1219,11 @@ export class MenuSystem {
         "top",
       );
 
-      // Description — two wrapped lines inside the card.
+      // Description — measured word-wrap inside the text zone. Every line
+      // that fits is drawn so no part of the description is ever cut.
       const descLines = wrapLines(ctx, def.desc, 9, uCardW - 72);
       let descY = cY + 27;
-      for (const line of descLines.slice(0, 2)) {
+      for (const line of descLines.slice(0, 4)) {
         drawText(ctx, line, cX + 8, descY, 9, color("ui_dim"), "left", "top");
         descY += 11;
       }

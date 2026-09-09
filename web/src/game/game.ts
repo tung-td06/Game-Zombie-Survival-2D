@@ -13,7 +13,7 @@ import { ParticleSystem } from "./particle";
 import { Player } from "./player";
 import { QuestSystem } from "./quest";
 import { SaveManager } from "./save";
-import { DRONE_PRICE, Shop } from "./shop";
+import { Shop } from "./shop";
 import { MAX_UFO_OWNED, firstUnownedUFO, ufoDef } from "./ufo";
 import { LEVELUP_PICK_LOCK, UpgradeSystem, rollLevelUpChoices } from "./upgrade";
 import { WaveManager } from "./waveManager";
@@ -1090,18 +1090,9 @@ export class Game {
       price: 300,
       owned: false,
     });
-    // UFO FLEET: a single row in the legacy list shop. The fleet cap is
-    // enforced by Shop.buyUFO; the BUY action buys the next unowned UFO.
-    const nextUfo = firstUnownedUFO(p.ownedUFOs);
-    out.push({
-      key: "ufo_fleet",
-      label: "UFO FLEET",
-      detail: `${p.ownedUFOs.length}/${MAX_UFO_OWNED} owned${
-        p.activeUFO ? ` — active ${ufoDef(p.activeUFO)?.name ?? p.activeUFO}` : ""
-      }`,
-      price: nextUfo?.price ?? DRONE_PRICE,
-      owned: !nextUfo,
-    });
+    // UFO FLEET is deliberately NOT listed in the legacy list shop: UFOs are
+    // managed exclusively in the BLACK MARKET -> UFOS tab, which enforces the
+    // same MAX_UFO_OWNED cap and persists ownership via Shop.buyUFO.
     return out;
   }
 

@@ -230,14 +230,32 @@ function check(name, cond, extra) {
     pd,
   );
 
-  // ---- Persistence 2: reload -> New Game keeps the permanent fleet ----
+  // ---- Persistence 2: reload -> New Game resets, Continue restores ----
+  // A NEW GAME always starts with a fresh progression: 0 UFOs, no active
+  // saucer (never inherited from any save). Continue / Load Game is what
+  // restores purchased UFOs, straight from the database save.
   await page.goto(BASE + "/");
   await page.waitForSelector("button", { timeout: 15000 });
   await page.waitForTimeout(800);
   await startNewGameViaModal();
   g = await readGame();
-  check("after reload + New Game the fleet is still 4/4 (permanent)", g.ownedUFOs.length === 4, g);
-  check("active UFO survives reload", g.activeUFO === "wasp", g);
+  check("reload + New Game starts with an empty fleet (0/4)", g.ownedUFOs.length === 0 && g.activeUFO === "", g);
+
+  await page.goto(BASE + "/");
+  await page.waitForSelector("button", { timeout: 15000 });
+  await page.waitForTimeout(800);
+  const contClicked = await page.evaluate(() => {
+    const b = Array.from(document.querySelectorAll("button")).find((x) =>
+      (x.textContent || "").includes("TIẾP TỤC")
+    );
+    if (b) b.click();
+    return !!b;
+  });
+  if (!contClicked) throw new Error("Continue button not found after reload");
+  await page.waitForURL(/\/play/, { timeout: 15000 });
+  await waitGame();
+  g = await readGame();
+  check("Continue restores the saved fleet (4/4, wasp active)", g.ownedUFOs.length === 4 && g.activeUFO === "wasp", g);
 
   await browser.close();
   console.log(failures === 0 ? "\nALL UFO SHOP CHECKS PASSED ✅" : `\n${failures} FAILURES`);
