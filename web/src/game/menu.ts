@@ -768,7 +768,7 @@ export class MenuSystem {
         ctx.fillStyle = "#1E1E24";
         roundRect(ctx, cX, cY, wCardW, wCardH, 8);
         ctx.fill();
-        ctx.strokeStyle = owned ? color("ui_green") : p.coins >= price ? color("ui_gold") : "#3C3C46";
+        ctx.strokeStyle = owned ? color("ui_green") : "#3C3C46";
         ctx.lineWidth = 1.5;
         roundRect(ctx, cX, cY, wCardW, wCardH, 8);
         ctx.stroke();
@@ -899,7 +899,7 @@ export class MenuSystem {
           btnAccent = "#787882";
         }
 
-        ctx.strokeStyle = isMax ? btnAccent : available ? color("ui_gold") : "#3C3C46";
+        ctx.strokeStyle = isMax ? btnAccent : "#3C3C46";
         ctx.lineWidth = 1.5;
         roundRect(ctx, cX, cY, cardW, sCardH, 8);
         ctx.stroke();
@@ -1030,7 +1030,7 @@ export class MenuSystem {
           btnAccent = "#787882";
         }
 
-        ctx.strokeStyle = isMaxed ? color("ui_green") : available ? color("ui_gold") : "#3C3C46";
+        ctx.strokeStyle = isMaxed ? color("ui_green") : "#3C3C46";
         ctx.lineWidth = 1.5;
         roundRect(ctx, cX, cY, cardW, cardH, 8);
         ctx.stroke();
@@ -1116,7 +1116,7 @@ export class MenuSystem {
           btnAccent = "#787882";
         }
 
-        ctx.strokeStyle = equipped ? color("ui_green") : available ? color("ui_gold") : "#3C3C46";
+        ctx.strokeStyle = equipped ? color("ui_green") : "#3C3C46";
         ctx.lineWidth = 1.5;
         roundRect(ctx, cX, cY, cardW, cardH, 8);
         ctx.stroke();
@@ -1254,7 +1254,7 @@ export class MenuSystem {
         btnText = `$${def.price} [BUY]`;
         btnAccent = color("ui_gold");
         action = `ps_buy:ufo:${def.id}`;
-        border = color("ui_gold");
+        border = "#3C3C46";
       } else {
         btnText = "NOT ENOUGH CASH";
         btnAccent = "#787882";
