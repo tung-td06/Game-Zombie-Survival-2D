@@ -72,6 +72,12 @@ test("splitting a road slab in two renders identically", async ({ page }) => {
                   : { x: r.x + o, y: r.y, w: l, h: r.h },
                 texRuns: [],
                 paintRuns: [],
+                // Cleared, then recomputed below with everything else that
+                // is derived from the network's geometry: the two halves
+                // meet, so neither of the new faces is a free end and
+                // neither may be capped with a kerb.
+                capLo: false,
+                capHi: false,
               });
               next.push(mk(0, a), mk(a, len - a));
             } else {
@@ -81,8 +87,10 @@ test("splitting a road slab in two renders identically", async ({ page }) => {
           map.slabs = next;
           map.roads = next.map((s: any) => s.rect);
           map.junctions.length = 0;
+          map.boxes.length = 0;
           map.findJunctions();
           map.computeSlabRuns();
+          map.computeEndCaps();
         }
 
         const cam = g.camera;

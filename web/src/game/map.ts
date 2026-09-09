@@ -56,8 +56,10 @@ import {
   drawRoadSlab,
   drawSidewalkBand,
   drawStreetLamp,
+  drawStreetLampPool,
   drawSurfacePatch,
   drawTerrainTile,
+  type JunctionArms,
   type PatchKind,
   type RoadRun,
 } from "./terrainArt";
@@ -116,15 +118,39 @@ interface RoadSlab {
    * through the road was the seam.
    */
   paintRuns: RoadRun[];
+  /**
+   * True when this end of the slab is a FREE face — no other carriageway
+   * continues there. Only a free end gets a kerb drawn across it; an end
+   * that runs into another road must stay open or the joint shows as a dark
+   * bar across the asphalt. `capLo` is the low end on the along axis (top /
+   * left), `capHi` the high end.
+   */
+  capLo: boolean;
+  capHi: boolean;
 }
 
-interface Junction {
+/**
+ * A box where a vertical and a horizontal carriageway overlap, with the
+ * compass directions that leave it as road.
+ *
+ * EVERY overlap is a box — the crossroads in the middle of downtown, the
+ * T where a link meets the beltway, and the corner where a ring road turns.
+ * They differ only in which arms they have, and the renderer paints them
+ * from that. Modelling only the four-way crossings (the old `Junction`) is
+ * what left every T and every ring corner as a blank square of asphalt with
+ * no markings, no kerb line and no crossing.
+ */
+interface JunctionBox {
   v: RoadSlab;
   h: RoadSlab;
   overlap: Rect;
+  arms: JunctionArms;
   /** Zebra crossings are painted on a deterministic subset of junctions. */
   zebra: boolean;
 }
+
+/** A four-way crossing — the boxes that get traffic lights and signage. */
+type Junction = JunctionBox;
 
 interface Patch {
   rect: Rect;
@@ -165,6 +191,9 @@ export class GameMap {
   /** Every road slab's rect (flat list kept for external consumers). */
   roads: Rect[] = [];
   slabs: RoadSlab[] = [];
+  /** Every vertical x horizontal overlap: crossings, tees and corners. */
+  boxes: JunctionBox[] = [];
+  /** The four-way crossings — a subset of `boxes`. */
   junctions: Junction[] = [];
   streetLamps: Vec[] = [];
   obstacles: Obstacle[] = [];
@@ -376,7 +405,15 @@ export class GameMap {
   // ───────────────────────────────────────────────────────────── roads ──
   private slab(cls: RoadClass, x: number, y: number, w: number, h: number): void {
     const r: Rect = { x, y, w, h };
-    this.slabs.push({ rect: r, vertical: h > w, cls, texRuns: [], paintRuns: [] });
+    this.slabs.push({
+      rect: r,
+      vertical: h > w,
+      cls,
+      texRuns: [],
+      paintRuns: [],
+      capLo: false,
+      capHi: false,
+    });
     this.roads.push(r);
   }
 
@@ -431,7 +468,34 @@ export class GameMap {
 
     this.findJunctions();
     this.computeSlabRuns();
+    this.computeEndCaps();
     this.placeStreetLamps();
+  }
+
+  /**
+   * Mark the ends of every slab that no other carriageway continues.
+   *
+   * Pure world geometry, computed once: probe a thin band just beyond each
+   * end face and see whether any other road covers it. A free end is a dead
+   * end or the outer face of a ring corner and wants a kerb across it; an
+   * end that butts into another road must stay open, because a kerb there
+   * is exactly the dark bar across the asphalt that made the network read
+   * as a chain of separate tiles.
+   */
+  private computeEndCaps(): void {
+    const PROBE = 6;
+    const covered = (r: Rect, self: RoadSlab): boolean =>
+      this.slabs.some((o) => o !== self && rectsIntersect(o.rect, r));
+    for (const s of this.slabs) {
+      const r = s.rect;
+      if (s.vertical) {
+        s.capLo = !covered({ x: r.x, y: r.y - PROBE, w: r.w, h: PROBE }, s);
+        s.capHi = !covered({ x: r.x, y: r.y + r.h, w: r.w, h: PROBE }, s);
+      } else {
+        s.capLo = !covered({ x: r.x - PROBE, y: r.y, w: PROBE, h: r.h }, s);
+        s.capHi = !covered({ x: r.x + r.w, y: r.y, w: PROBE, h: r.h }, s);
+      }
+    }
   }
 
   /**
@@ -482,18 +546,22 @@ export class GameMap {
   }
 
   /**
-   * A junction is where a vertical and a horizontal slab cross *through*
-   * each other. Overlaps that merely touch a slab's end — the four corners
-   * where the ring roads meet themselves — are not junctions, and must not
-   * get stop lines or zebra crossings painted across them.
+   * Every box where a vertical and a horizontal slab overlap, tagged with
+   * the compass directions that leave it as road.
+   *
+   * One pass builds them all — crossroads, T-junctions and the corners
+   * where a ring road turns into itself — and the arm flags are what the
+   * renderer keys off, so no shape needs a coordinate written down for it.
+   *
+   * `junctions` stays what it always was: the four-way crossings, the only
+   * boxes that get traffic lights and signage. That subset is exactly the
+   * old "crosses through the interior of both slabs" test, so the generator
+   * (which draws from the seeded RNG here) lays the town out identically.
    */
   private findJunctions(): void {
-    const interior = (s: RoadSlab, ov: Rect): boolean => {
-      const r = s.rect;
-      return s.vertical
-        ? ov.y > r.y + 10 && ov.y + ov.h < r.y + r.h - 10
-        : ov.x > r.x + 10 && ov.x + ov.w < r.x + r.w - 10;
-    };
+    // The tolerance that used to define "interior": a slab has an arm on a
+    // side only if it reaches more than this far past the box.
+    const ARM = 10;
     for (let i = 0; i < this.slabs.length; i++) {
       for (let j = i + 1; j < this.slabs.length; j++) {
         const a = this.slabs[i]!;
@@ -507,13 +575,21 @@ export class GameMap {
         const oh = Math.min(v.rect.y + v.rect.h, h.rect.y + h.rect.h) - oy;
         if (ow <= 0 || oh <= 0) continue;
         const overlap: Rect = { x: ox, y: oy, w: ow, h: oh };
-        if (!interior(v, overlap) || !interior(h, overlap)) continue;
-        this.junctions.push({
+        const arms: JunctionArms = {
+          n: oy > v.rect.y + ARM,
+          s: oy + oh < v.rect.y + v.rect.h - ARM,
+          w: ox > h.rect.x + ARM,
+          e: ox + ow < h.rect.x + h.rect.w - ARM,
+        };
+        const box: JunctionBox = {
           v,
           h,
           overlap,
+          arms,
           zebra: worldHash(this.seed + 43, Math.round(ox), Math.round(oy)) % 3 !== 0,
-        });
+        };
+        this.boxes.push(box);
+        if (arms.n && arms.s && arms.e && arms.w) this.junctions.push(box);
       }
     }
   }
@@ -1421,11 +1497,18 @@ export class GameMap {
     }
 
     // 4. Sidewalks below the asphalt so the kerb tucks under the road edge.
+    //    Each band is told which of its edges faces the carriageway: the two
+    //    bands beside a road are mirror images, and drawing both the same
+    //    way round laid the dark earth shoulder against the asphalt on one
+    //    side of every street in the city.
     for (const slab of this.slabs) {
       for (const band of sideBands(slab)) {
-        if (!rectsIntersect(view, band)) continue;
-        const s = applyRect(cam, band);
-        drawSidewalkBand(ctx, s.x, s.y, s.w, s.h, band.x, band.y, slab.vertical, this.seed);
+        if (!rectsIntersect(view, band.rect)) continue;
+        const s = applyRect(cam, band.rect);
+        drawSidewalkBand(
+          ctx, s.x, s.y, s.w, s.h, band.rect.x, band.rect.y,
+          band.vertical, band.kerbAtHigh, this.seed,
+        );
       }
     }
 
@@ -1442,7 +1525,7 @@ export class GameMap {
     }
     for (const slab of byWidth) {
       const s = applyRect(cam, slab.rect);
-      drawRoadDeck(ctx, s.x, s.y, s.w, s.h, slab.vertical, slab.cls);
+      drawRoadDeck(ctx, s.x, s.y, s.w, s.h, slab.vertical, slab.cls, slab.capLo, slab.capHi);
     }
     for (const slab of byWidth) {
       const s = applyRect(cam, slab.rect);
@@ -1453,16 +1536,29 @@ export class GameMap {
       );
     }
 
-    // 6. Junction paint.
-    for (const j of this.junctions) {
-      if (!rectsIntersect(view, j.overlap)) continue;
-      const o = applyRect(cam, j.overlap);
-      const v = applyRect(cam, j.v.rect);
-      const hr = applyRect(cam, j.h.rect);
-      drawJunctionPaint(ctx, o.x, o.y, o.w, o.h, v.x, v.w, hr.y, hr.h, j.zebra);
+    // 6. Junction paint — every box, painted from its own topology, so a
+    //    crossroads, a T and a ring corner all come out of one code path.
+    for (const b of this.boxes) {
+      if (!rectsIntersect(view, b.overlap)) continue;
+      const o = applyRect(cam, b.overlap);
+      const v = applyRect(cam, b.v.rect);
+      const hr = applyRect(cam, b.h.rect);
+      drawJunctionPaint(ctx, o.x, o.y, o.w, o.h, v.x, v.w, hr.y, hr.h, b.arms, b.zebra);
     }
 
-    // 7. Litter.
+    // 7. Street-lamp pools — light that falls on the ground, under
+    //    everything that stands on it.
+    // The margin has to clear the pool's own radius (54px, thrown 40px
+    // below the post), or a lamp just off screen drops its pool the moment
+    // it is culled and the light pops as the camera moves.
+    for (const lamp of this.streetLamps) {
+      if (lamp.x < view.x - 120 || lamp.x > view.x + view.w + 120) continue;
+      if (lamp.y < view.y - 120 || lamp.y > view.y + view.h + 120) continue;
+      const sp = cam.apply(lamp);
+      drawStreetLampPool(ctx, sp.x, sp.y);
+    }
+
+    // 8. Litter.
     this.drawScatterDecals(ctx, cam, vw, vh);
   }
 
@@ -1747,19 +1843,46 @@ function pickVehicle(rng: Rng, d: District): ObstacleKind {
   return "bus";
 }
 
-/** The two sidewalk bands flanking a road slab. */
-function sideBands(s: RoadSlab): Rect[] {
+/**
+ * A footway beside (or across the end of) a road, with the edge that faces
+ * the asphalt recorded so the kerb can be laid on the right side of it.
+ */
+interface SidewalkBand {
+  rect: Rect;
+  vertical: boolean;
+  /** True when the kerb belongs on the band's high edge (right / bottom). */
+  kerbAtHigh: boolean;
+}
+
+/**
+ * The footways around a road slab: one down each long side, plus one across
+ * any end that no other carriageway continues, so a dead-end street and the
+ * outer face of a ring corner finish in a pavement instead of stopping in
+ * mid-air.
+ */
+function sideBands(s: RoadSlab): SidewalkBand[] {
   const r = s.rect;
+  const out: SidewalkBand[] = [];
   if (s.vertical) {
-    return [
-      { x: r.x - SIDEWALK, y: r.y, w: SIDEWALK, h: r.h },
-      { x: r.x + r.w, y: r.y, w: SIDEWALK, h: r.h },
-    ];
+    out.push({ rect: { x: r.x - SIDEWALK, y: r.y, w: SIDEWALK, h: r.h }, vertical: true, kerbAtHigh: true });
+    out.push({ rect: { x: r.x + r.w, y: r.y, w: SIDEWALK, h: r.h }, vertical: true, kerbAtHigh: false });
+    if (s.capLo) {
+      out.push({ rect: { x: r.x - SIDEWALK, y: r.y - SIDEWALK, w: r.w + 2 * SIDEWALK, h: SIDEWALK }, vertical: false, kerbAtHigh: true });
+    }
+    if (s.capHi) {
+      out.push({ rect: { x: r.x - SIDEWALK, y: r.y + r.h, w: r.w + 2 * SIDEWALK, h: SIDEWALK }, vertical: false, kerbAtHigh: false });
+    }
+    return out;
   }
-  return [
-    { x: r.x, y: r.y - SIDEWALK, w: r.w, h: SIDEWALK },
-    { x: r.x, y: r.y + r.h, w: r.w, h: SIDEWALK },
-  ];
+  out.push({ rect: { x: r.x, y: r.y - SIDEWALK, w: r.w, h: SIDEWALK }, vertical: false, kerbAtHigh: true });
+  out.push({ rect: { x: r.x, y: r.y + r.h, w: r.w, h: SIDEWALK }, vertical: false, kerbAtHigh: false });
+  if (s.capLo) {
+    out.push({ rect: { x: r.x - SIDEWALK, y: r.y - SIDEWALK, w: SIDEWALK, h: r.h + 2 * SIDEWALK }, vertical: true, kerbAtHigh: true });
+  }
+  if (s.capHi) {
+    out.push({ rect: { x: r.x + r.w, y: r.y - SIDEWALK, w: SIDEWALK, h: r.h + 2 * SIDEWALK }, vertical: true, kerbAtHigh: false });
+  }
+  return out;
 }
 
 function applyRect(cam: Camera, r: Rect): Rect {

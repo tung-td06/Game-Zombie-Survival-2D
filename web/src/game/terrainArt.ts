@@ -17,7 +17,7 @@
 //   6. scattered litter decals
 // ─────────────────────────────────────────────────────────────────────────
 
-import { cellHash, px, rect, worldHash } from "./pixelArt";
+import { px, rect, smoothNoise, worldHash } from "./pixelArt";
 import {
   GROUND,
   districtAt,
@@ -64,6 +64,13 @@ function h01(h: number): number {
  * split matters: hashing the screen position re-rolls every lobe each time
  * the camera moves 8px, which makes every lot, lawn and apron on the map
  * pulse and flicker while the player runs.
+ *
+ * One flat disc per lobe, deliberately. Softening each lobe's rim — by
+ * stacking nested discs, or by a live radial gradient — was measured at
+ * +40% and +130% on the whole ground layer respectively, and the gradient
+ * also dithers against the DEVICE pixel grid, which makes the ground crawl
+ * as the camera moves. The lobes are already low-alpha and heavily
+ * overlapped, so the rim is faint; it is not worth that.
  */
 function blob(
   ctx: CanvasRenderingContext2D,
@@ -94,13 +101,136 @@ function blob(
 
 // ── 1. terrain tiles ───────────────────────────────────────────────────
 
+/** How many brightness steps a district ramp is resolved into. */
+const RAMP_STEPS = 48;
+/** How many shading steps either side of the untouched base tone. */
+const WASH_STEPS = 12;
+
+const RAMP_RGB: Partial<Record<District, readonly (readonly [number, number, number])[]>> = {};
+/** Precomposed ground colours for one district: [tone][shade] -> CSS colour. */
+const GROUND_LUT: Partial<Record<District, readonly (readonly string[])[]>> = {};
+
+function parseHex(c: string): [number, number, number] {
+  const n = parseInt(c.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function lumaOf(c: readonly number[]): number {
+  return c[0]! * 0.299 + c[1]! * 0.587 + c[2]! * 0.114;
+}
+
+function rampRgb(d: District): readonly (readonly [number, number, number])[] {
+  const cached = RAMP_RGB[d];
+  if (cached) return cached;
+  const stops = GROUND[d].base.map(parseHex).sort((a, b) => lumaOf(a) - lumaOf(b));
+  const out: [number, number, number][] = [];
+  for (let i = 0; i < RAMP_STEPS; i++) {
+    const t = (i / (RAMP_STEPS - 1)) * (stops.length - 1);
+    const k = Math.min(stops.length - 2, Math.floor(t));
+    const f = t - k;
+    const a = stops[k]!;
+    const b = stops[k + 1]!;
+    out.push([
+      Math.round(a[0] + (b[0] - a[0]) * f),
+      Math.round(a[1] + (b[1] - a[1]) * f),
+      Math.round(a[2] + (b[2] - a[2]) * f),
+    ]);
+  }
+  RAMP_RGB[d] = out;
+  return out;
+}
+
+/**
+ * A district's four base tones, sorted by brightness and resolved into a
+ * CONTINUOUS ramp of `RAMP_STEPS` colours.
+ *
+ * The ground tone is a smooth field, so it needs a smooth palette to land
+ * on. Picking one of four authored tones per 64px tile — in the order they
+ * happen to be written in district.ts, which is not brightness order — drew
+ * the ground as a checkerboard of squares jumping up to fourteen levels
+ * between neighbours. Sorted and interpolated, one step of this ramp is at
+ * most a single 8-bit level, so the tone moves across the map without any
+ * step a viewer can see, and it still only ever uses the district's own
+ * authored colours at the ends of the ramp.
+ */
+export function ramp(d: District): readonly string[] {
+  return rampRgb(d).map((c) => `rgb(${c[0]},${c[1]},${c[2]})`);
+}
+
+/**
+ * Every ground colour a district can paint, with the wash already
+ * composited into the base tone.
+ *
+ * Doing the blend once, into a table, is what keeps the finer quads cheap:
+ * a quad that lays a base tone and then a translucent wash over it costs
+ * two fills, two `fillStyle` changes and a `globalAlpha` round trip. Off
+ * the table it is a single fill of one flat colour — so 32px quads cost
+ * about what the old flat 64px tile plus its separate wash pass did.
+ */
+function groundLut(d: District): readonly (readonly string[])[] {
+  const cached = GROUND_LUT[d];
+  if (cached) return cached;
+  const tones = rampRgb(d);
+  // The district's wash tone, as a colour plus the alpha it is used at.
+  const w = GROUND[d].wash;
+  const parts = w
+    .slice(w.indexOf('(') + 1, w.lastIndexOf(')'))
+    .split(',')
+    .map((v) => parseFloat(v.trim()));
+  const wash = [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0];
+  const washA = parts[3] ?? 0.1;
+  const mix = (base: number, over: number, a: number) => Math.round(base + (over - base) * a);
+  const out: string[][] = [];
+  for (let i = 0; i < RAMP_STEPS; i++) {
+    const base = tones[i]!;
+    const row: string[] = [];
+    for (let j = -WASH_STEPS; j <= WASH_STEPS; j++) {
+      const n = j / WASH_STEPS;
+      let c: readonly number[] = base;
+      if (n < 0) {
+        const a = -n * 0.1;
+        c = [mix(base[0], 0, a), mix(base[1], 0, a), mix(base[2], 0, a)];
+      } else if (n > 0) {
+        const a = n * washA;
+        c = [mix(base[0], wash[0]!, a), mix(base[1], wash[1]!, a), mix(base[2], wash[2]!, a)];
+      }
+      row.push(`rgb(${c[0]},${c[1]},${c[2]})`);
+    }
+    out.push(row);
+  }
+  GROUND_LUT[d] = out;
+  return out;
+}
+
+/**
+ * Ground shading at a world point, in [-1, 1]: negative darkens, positive
+ * lays the district's wash tone, zero leaves the base alone.
+ *
+ * Two smooth noise octaves with a dead band around the middle, so most of
+ * the map is untouched base tone and the shaded areas fade in and out
+ * instead of switching on at a cell edge. Continuity is the whole point:
+ * the wash this replaces was `hash(128px cell) % 10 < 4`, which stepped
+ * from nothing to 13% black across one pixel on every cell boundary and
+ * strewed the open ground with hard-edged dark rectangles.
+ */
+export function washAt(seed: number, x: number, y: number): number {
+  return washFrom(smoothNoise(seed + 2029, x, y, 352), smoothNoise(seed + 3167, x, y, 160));
+}
+
+function washFrom(low: number, high: number): number {
+  const n = low * 0.74 + high * 0.26;
+  if (n < 0.42) return -Math.min(1, (0.42 - n) / 0.34);
+  if (n > 0.56) return Math.min(1, (n - 0.56) / 0.34);
+  return 0;
+}
+
 /**
  * One 64px ground tile. `wx`/`wy` are the tile's world origin (multiples of
  * TILE); `sx`/`sy` its current screen position.
  *
  * Three stacked frequencies keep the ground from reading flat:
- *   • the district base ramp, picked per tile,
- *   • a 128px block wash (soft meadow / stain patches),
+ *   • the district base ramp, sampled per 32px quad from a smooth field,
+ *   • a continuous low-frequency wash (soft meadow / stain patches),
  *   • per-tile flecks and one piece of micro-detail.
  */
 export function drawTerrainTile(
@@ -113,15 +243,34 @@ export function drawTerrainTile(
 ): void {
   const d = districtAt(wx + TILE / 2, wy + TILE / 2);
   const pal = GROUND[d];
-  const th = worldHash(seed + 1013, wx, wy);
-  rect(ctx, sx, sy, TILE, TILE, pal.base[th % 4]!);
 
-  // 128px low-frequency wash — the "which part of the block am I on" layer.
-  const bh = cellHash(seed + 2029, 128, wx, wy);
-  const bk = bh % 10;
-  if (bk < 4) {
-    ctx.fillStyle = bk === 0 ? "rgba(0,0,0,0.13)" : pal.wash;
-    ctx.fillRect(sx, sy, TILE, TILE);
+  // Base tone and low-frequency wash, both sampled from CONTINUOUS world
+  // noise and laid down in 32px quads.
+  //
+  // Neither is decided once per cell any more. The tone used to be one of
+  // four authored colours picked by `hash(tile) % 4`, and the wash a
+  // 13%-black flood switched on by `hash(128px cell) % 10 < 4` — two hard
+  // per-cell decisions stacked on the same grid, which is what strewed
+  // every park, lot and plaza on the map with dark rectangles. Both fields
+  // are still pure functions of world position, so the ground stays glued
+  // to the world and never crawls under the camera.
+  //
+  // The two octaves double as the tone field, so a quad costs two noise
+  // samples and one flat fill of an already-composited colour.
+  const lut = groundLut(d);
+  const Q = TILE / 2;
+  for (let qy = 0; qy < 2; qy++) {
+    for (let qx = 0; qx < 2; qx++) {
+      const qwx = wx + qx * Q + Q / 2;
+      const qwy = wy + qy * Q + Q / 2;
+      const low = smoothNoise(seed + 2029, qwx, qwy, 352);
+      const high = smoothNoise(seed + 3167, qwx, qwy, 160);
+      const tone = Math.min(RAMP_STEPS - 1, ((low * 0.55 + high * 0.45) * RAMP_STEPS) | 0);
+      const shade =
+        WASH_STEPS +
+        Math.max(-WASH_STEPS, Math.min(WASH_STEPS, Math.round(washFrom(low, high) * WASH_STEPS)));
+      rect(ctx, sx + qx * Q, sy + qy * Q, Q, Q, lut[tone]![shade]!);
+    }
   }
 
   // Coarse flecks — soil clods, chipped paving, litter grit.
@@ -226,9 +375,26 @@ export function drawSurfacePatch(
     ctx.fillStyle = "rgba(88,86,80,0.10)";
     blob(ctx, cx, cy, rx * 0.55, ry * 0.55, seed + 17, wx, wy, 7);
     // Expansion-joint grid + a few parking bay stripes.
+    //
+    // The joints step on ONE 68px WORLD grid and are kept well inside the
+    // patch. Keying them to the patch's own corner gave every apron its own
+    // grid starting 40px in from its edge, which drew the hard rectangle
+    // that the soft blob underneath exists to avoid — and made two adjacent
+    // aprons read as two pasted tiles instead of one continuous slab.
     ctx.fillStyle = "rgba(14,14,12,0.20)";
-    for (let gx = sx + 40; gx < sx + w; gx += 68) ctx.fillRect(gx, sy + 6, 1, h - 12);
-    for (let gy = sy + 40; gy < sy + h; gy += 68) ctx.fillRect(sx + 6, gy, w - 12, 1);
+    const JOINT = 68;
+    const inx = Math.min(28, w * 0.14);
+    const iny = Math.min(28, h * 0.14);
+    const jx0 = sx - (((wx % JOINT) + JOINT) % JOINT);
+    const jy0 = sy - (((wy % JOINT) + JOINT) % JOINT);
+    for (let gx = jx0; gx < sx + w - inx; gx += JOINT) {
+      if (gx < sx + inx) continue;
+      ctx.fillRect(gx, sy + iny, 1, h - 2 * iny);
+    }
+    for (let gy = jy0; gy < sy + h - iny; gy += JOINT) {
+      if (gy < sy + iny) continue;
+      ctx.fillRect(sx + inx, gy, w - 2 * inx, 1);
+    }
     if (worldHash(seed + 23, wx, wy) % 3 === 0) {
       ctx.fillStyle = "rgba(206,200,176,0.22)";
       for (let i = 0; i < 5; i++) ctx.fillRect(sx + 18 + i * 28, sy + 20, 2, Math.min(56, h - 40));
@@ -344,6 +510,16 @@ export function drawCrater(
 /**
  * Paved sidewalk band beside a road: dirt shoulder, slabbed concrete with
  * joints, worn tone segments, and a kerb lip at the asphalt edge.
+ *
+ * `kerbAtHigh` says which of the band's two long edges faces the asphalt:
+ * true for a band on the road's low side (the kerb is at the band's far
+ * edge), false for a band on its high side (the kerb is at the band's near
+ * edge). It has to be told, because the two are mirror images and the
+ * function used to assume the first one always: every road on the map got a
+ * correct kerb on its north/west footway and an INVERTED one on the
+ * south/east footway, with the dark earth shoulder laid against the
+ * carriageway — the dark strip between road and pavement — and the pale
+ * kerb stone facing the buildings.
  */
 export function drawSidewalkBand(
   ctx: CanvasRenderingContext2D,
@@ -354,14 +530,26 @@ export function drawSidewalkBand(
   wx: number,
   wy: number,
   vertical: boolean,
+  kerbAtHigh: boolean,
   seed: number,
 ): void {
-  // Shoulder behind the slab (transition into the block).
-  rect(ctx, sx, sy, vertical ? 5 : w, vertical ? h : 5, "rgba(34,32,24,0.85)");
-  const px0 = vertical ? sx + 5 : sx;
-  const py0 = vertical ? sy : sy + 5;
-  const pw = vertical ? w - 5 : w;
-  const ph = vertical ? h : h - 5;
+  const SHOULDER = 5;
+  // Shoulder behind the slab (transition into the block) — always on the
+  // edge AWAY from the asphalt.
+  const shX = vertical && !kerbAtHigh ? sx + w - SHOULDER : sx;
+  const shY = !vertical && !kerbAtHigh ? sy + h - SHOULDER : sy;
+  rect(
+    ctx,
+    shX,
+    shY,
+    vertical ? SHOULDER : w,
+    vertical ? h : SHOULDER,
+    "rgba(34,32,24,0.85)",
+  );
+  const px0 = vertical && kerbAtHigh ? sx + SHOULDER : sx;
+  const py0 = !vertical && kerbAtHigh ? sy + SHOULDER : sy;
+  const pw = vertical ? w - SHOULDER : w;
+  const ph = vertical ? h : h - SHOULDER;
   rect(ctx, px0, py0, pw, ph, "#45463F");
 
   const span = vertical ? h : w;
@@ -420,24 +608,40 @@ export function drawSidewalkBand(
   }
   ctx.restore();
 
-  // Kerb: pale top face + dark shadow lip against the asphalt.
+  // Kerb: pale top face + dark shadow lip, always ON the asphalt side.
   if (vertical) {
-    rect(ctx, sx + w - 4, sy, 3, h, "#5A5B52");
-    rect(ctx, sx + w - 1, sy, 1, h, "#16170F");
+    const kx = kerbAtHigh ? sx + w - 4 : sx + 1;
+    rect(ctx, kx, sy, 3, h, "#5A5B52");
+    rect(ctx, kerbAtHigh ? sx + w - 1 : sx, sy, 1, h, "#16170F");
   } else {
-    rect(ctx, sx, sy + h - 4, w, 3, "#5A5B52");
-    rect(ctx, sx, sy + h - 1, w, 1, "#16170F");
+    const ky = kerbAtHigh ? sy + h - 4 : sy + 1;
+    rect(ctx, sx, ky, w, 3, "#5A5B52");
+    rect(ctx, sx, kerbAtHigh ? sy + h - 1 : sy, w, 1, "#16170F");
   }
 }
 
 // ── 4. roads ───────────────────────────────────────────────────────────
 
+/**
+ * ONE asphalt material for the whole network.
+ *
+ * [kerb shadow, carriageway, resurfaced].
+ *
+ * The classes differ only in BRIGHTNESS, by two levels a step, on a single
+ * hue. They used to differ in hue as well — the avenues and the beltway
+ * were a blue grey (#2E2F33) while the outer ring and the links were a
+ * green grey (#2B2C29 / #282926) — so every place a link met a ring, or an
+ * avenue met the circus, put a rectangle of visibly different-coloured
+ * asphalt in the middle of what is meant to be one continuous road. A road
+ * is a road: same aggregate, same tone, and only the wider ones read a
+ * little fresher.
+ */
 const ROAD_TONE: Record<RoadClass, [string, string, string]> = {
-  avenue: ["#1A1B1D", "#2E2F33", "#292A2E"],
-  belt: ["#191A1C", "#2C2D31", "#27282C"],
-  arterial: ["#191A1B", "#2A2B2E", "#252629"],
-  outer: ["#181917", "#2B2C29", "#262724"],
-  link: ["#171816", "#282926", "#232421"],
+  avenue: ["#1A1B1D", "#2E2F33", "#2C2D31"],
+  belt: ["#191A1C", "#2D2E32", "#2B2C30"],
+  arterial: ["#191A1C", "#2C2D31", "#2A2B2F"],
+  outer: ["#18191B", "#2B2C30", "#292A2E"],
+  link: ["#18191B", "#2A2B2F", "#28292D"],
 };
 
 /** Untouched asphalt left along the road on each side of a patch. */
@@ -477,10 +681,13 @@ export function drawRoadBase(
 
 /**
  * Asphalt pass 2 — the carriageway, inset by the 3px kerb shadow on the two
- * LONG sides only. The ends are deliberately left open: capping them is
- * what drew a dark bar straight across the road wherever one stretch ran
- * into the next. Where two carriageways meet, the neighbour's deck now
- * fills the joint exactly, leaving only a 3x3 kerb radius in each corner.
+ * LONG sides. An end is inset only when it is a genuinely FREE end — a dead
+ * end, or the outer face of a ring corner — which `GameMap` works out once
+ * from world geometry. Capping every end unconditionally is what drew a
+ * dark bar straight across the road wherever one stretch ran into the next;
+ * capping none of them left dead-end streets and ring corners finishing in
+ * a raw cut of asphalt with no kerb at all. Where two carriageways meet,
+ * the neighbour's deck fills the joint exactly.
  */
 export function drawRoadDeck(
   ctx: CanvasRenderingContext2D,
@@ -490,10 +697,14 @@ export function drawRoadDeck(
   h: number,
   vertical: boolean,
   cls: RoadClass,
+  capLo = false,
+  capHi = false,
 ): void {
   const tone = ROAD_TONE[cls][1];
-  if (vertical) rect(ctx, sx + 3, sy, w - 6, h, tone);
-  else rect(ctx, sx, sy + 3, w, h - 6, tone);
+  const lo = capLo ? 3 : 0;
+  const hi = capHi ? 3 : 0;
+  if (vertical) rect(ctx, sx + 3, sy + lo, w - 6, h - lo - hi, tone);
+  else rect(ctx, sx + lo, sy + 3, w - lo - hi, h - 6, tone);
 }
 
 /** Clip to a slab's runs (disjoint, sorted) and run `draw` inside them. */
@@ -580,30 +791,33 @@ export function drawRoadSlab(
       else ctx.fillRect(sx, sy + across * t - 6, w, 12);
     }
 
-    // Resurfacing patches — a strip of re-laid asphalt over a trench.
+    // Resurfacing patches — a stretch of re-laid asphalt over a trench.
     //
     // A patch is a LOCAL repair, so it is bounded on all four sides:
     //   • across  — a band of the carriageway, never kerb to kerb, so a
     //     patch can never become a bar spanning the whole road;
-    //   • along   — shorter than its 88px cell by at least PATCH_GAP, so two
-    //     patches in neighbouring cells can never abut into one long block;
-    //   • tone    — ROAD_TONE[cls][2], the class's own resurfaced-asphalt
-    //     colour, five levels off the carriageway. Painting a near-black
-    //     wash (rgba(16,16,18,0.42)) over it instead is what turned every
-    //     fourth cell of every road into a black rectangle;
-    //   • edge    — stepped, not straight, so it reads as a saw-cut trench
-    //     and not as a rectangle pasted on top of the road.
+    //   • along   — shorter than its 176px cell by at least PATCH_GAP, so
+    //     two patches in neighbouring cells can never abut into one block;
+    //   • tone    — ROAD_TONE[cls][2], two levels off the carriageway, and
+    //     re-speckled with the same aggregate as the road around it, so the
+    //     repair reads as ASPHALT of a slightly different age. Everything
+    //     louder than that — the old near-black wash, and the five-level
+    //     step that replaced it — comes out as a dark rectangle pasted on
+    //     the road, because a flat fill with a straight edge is a rectangle
+    //     however small the tonal step is;
+    //   • edge    — stepped on all FOUR sides, not just the two long ones,
+    //     so the boundary is a saw-cut and never a clean straight line.
     //
     // Size, offset and side all come from the cell's WORLD hash, so a patch
     // is the same wherever the camera is and whichever slab draws it.
-    for (let p = phase(88); p < span; p += 88) {
+    for (let p = phase(176); p < span; p += 176) {
       const hh = cellHash(907, p);
-      const fresh = hh % 4 === 0;
-      if (!fresh && hh % 9 !== 0) continue;
-      // Along-axis: 30…65px of the cell, leaving >= PATCH_GAP of untouched
+      const fresh = hh % 3 === 0;
+      if (!fresh && hh % 5 !== 0) continue;
+      // Along-axis: 40…110px of the cell, leaving >= PATCH_GAP of untouched
       // asphalt before the next cell's patch can start.
-      const len = 30 + (cellHash(1031, p) % (88 - PATCH_GAP - 30));
-      const lead = cellHash(1033, p) % Math.max(1, 88 - PATCH_GAP - len);
+      const len = 40 + (cellHash(1031, p) % (176 - PATCH_GAP - 40));
+      const lead = cellHash(1033, p) % Math.max(1, 176 - PATCH_GAP - len);
       // Across-axis: a band inset from both kerbs, at most 55% of the road.
       const bandMax = Math.max(PATCH_MIN_BAND, Math.round(across * 0.55));
       const band =
@@ -611,18 +825,21 @@ export function drawRoadSlab(
       const room = Math.max(0, across - 2 * PATCH_EDGE - band);
       const off = PATCH_EDGE + (room === 0 ? 0 : cellHash(1049, p) % room);
       const a = p + lead;
-      // Laid as strips whose two ends step in and out by a few pixels, so
-      // the repair reads as a saw-cut in the surface. A flat axis-aligned
-      // fill is what made the old patch read as a rectangle pasted on the
-      // road rather than as asphalt.
-      const tone = fresh ? ROAD_TONE[cls][2] : "rgba(96,92,82,0.10)";
+      const tone = fresh ? ROAD_TONE[cls][2] : "rgba(96,92,82,0.07)";
       const STRIP = 7;
+      // Ragged ends: the first and last few strips pull in, so the patch
+      // tapers instead of starting and stopping on a straight line.
+      const taper = (q: number) => {
+        const d = Math.min(q, len - q);
+        return d >= 3 * STRIP ? 0 : Math.round((1 - d / (3 * STRIP)) * band * 0.42);
+      };
       for (let q = 0; q < len; q += STRIP) {
         const jag = cellHash(1051 + q, p);
         const head = jag % 5;
         const tail = (jag >> 3) % 5;
-        const o0 = off + head;
-        const o1 = off + band - tail;
+        const t = taper(q);
+        const o0 = off + head + t;
+        const o1 = off + band - tail - t;
         const q1 = Math.min(len, q + STRIP);
         if (o1 <= o0) continue;
         if (vertical) {
@@ -630,6 +847,17 @@ export function drawRoadSlab(
         } else {
           rect(ctx, sx + a + q, sy + o0, q1 - q, o1 - o0, tone);
         }
+      }
+      // Re-lay the aggregate over the repair so it carries the same grain
+      // as the asphalt either side of it — the single thing that stops a
+      // patch reading as a flat block, whatever its tone.
+      if (!fresh) continue;
+      for (let q = 2; q < len; q += 9) {
+        const g = cellHash(1181 + q, p);
+        const o = off + 3 + (g % Math.max(1, band - 6));
+        const c = g % 3 === 0 ? "rgba(104,102,96,0.20)" : "rgba(10,10,12,0.24)";
+        if (vertical) px(ctx, sx + o, sy + a + q, c, 2);
+        else px(ctx, sx + a + q, sy + o, c, 2);
       }
     }
 
@@ -750,8 +978,35 @@ export function drawRoadSlab(
 }
 
 /**
- * Junction paint at a crossing: stop bars on every approach, and (on a
- * deterministic subset of junctions) a zebra crossing on each arm.
+ * Which compass directions leave a junction box as road. Worked out once by
+ * `GameMap` from world geometry — never from a coordinate written down by
+ * hand — so one code path renders every shape the network can make.
+ */
+export interface JunctionArms {
+  n: boolean;
+  s: boolean;
+  e: boolean;
+  w: boolean;
+}
+
+/**
+ * Paint for one box where a vertical and a horizontal carriageway meet.
+ *
+ * The box is rendered from its TOPOLOGY, not from what kind of road drew
+ * it, so the same function produces a crossroads, a T-junction, a corner
+ * and a dead end:
+ *
+ *   • an arm that carries road gets a stop bar and (on a deterministic
+ *     subset of junctions) a zebra crossing. Painting all four
+ *     unconditionally laid bars and crossings on bare ground wherever a
+ *     street only approached the box from two or three sides;
+ *   • a side with NO arm gets the carriageway's white edge line carried
+ *     straight across it. That is what makes a corner turn and a T close:
+ *     both approach roads stop their own edge lines at the box, so without
+ *     this the road's edge simply vanishes for the width of the junction;
+ *   • a box with fewer than three arms is a corner, not a junction: traffic
+ *     does not have to give way to anything, so it gets the edge lines and
+ *     no bars.
  */
 export function drawJunctionPaint(
   ctx: CanvasRenderingContext2D,
@@ -763,26 +1018,37 @@ export function drawJunctionPaint(
   vw: number,
   hy: number,
   hh: number,
+  arms: JunctionArms,
   zebra: boolean,
 ): void {
+  const edge = "rgba(216,214,204,0.42)";
+  // Carry the road edge past every closed side of the box.
+  if (!arms.n) rect(ctx, ox, oy + 7, ow, 2, edge);
+  if (!arms.s) rect(ctx, ox, oy + oh - 9, ow, 2, edge);
+  if (!arms.w) rect(ctx, ox + 7, oy, 2, oh, edge);
+  if (!arms.e) rect(ctx, ox + ow - 9, oy, 2, oh, edge);
+
+  const count = (arms.n ? 1 : 0) + (arms.s ? 1 : 0) + (arms.e ? 1 : 0) + (arms.w ? 1 : 0);
+  if (count < 3) return;
+
   const bar = "rgba(224,222,212,0.50)";
-  // Stop bars: across each approach, just outside the junction box.
-  rect(ctx, vx + 6, oy - 12, vw - 12, 5, bar);
-  rect(ctx, vx + 6, oy + oh + 7, vw - 12, 5, bar);
-  rect(ctx, ox - 12, hy + 6, 5, hh - 12, bar);
-  rect(ctx, ox + ow + 7, hy + 6, 5, hh - 12, bar);
+  // Stop bars: across each approach that exists, just outside the box.
+  if (arms.n) rect(ctx, vx + 6, oy - 12, vw - 12, 5, bar);
+  if (arms.s) rect(ctx, vx + 6, oy + oh + 7, vw - 12, 5, bar);
+  if (arms.w) rect(ctx, ox - 12, hy + 6, 5, hh - 12, bar);
+  if (arms.e) rect(ctx, ox + ow + 7, hy + 6, 5, hh - 12, bar);
   if (!zebra) return;
-  const stripe = "rgba(232,229,218,0.72)";
-  ctx.fillStyle = stripe;
+
+  ctx.fillStyle = "rgba(232,229,218,0.72)";
   const cols = Math.floor((vw - 12) / 16);
   for (let i = 0; i < cols; i++) {
-    ctx.fillRect(vx + 8 + i * 16, oy - 34, 9, 18);
-    ctx.fillRect(vx + 8 + i * 16, oy + oh + 16, 9, 18);
+    if (arms.n) ctx.fillRect(vx + 8 + i * 16, oy - 34, 9, 18);
+    if (arms.s) ctx.fillRect(vx + 8 + i * 16, oy + oh + 16, 9, 18);
   }
   const rows = Math.floor((hh - 12) / 16);
   for (let i = 0; i < rows; i++) {
-    ctx.fillRect(ox - 34, hy + 8 + i * 16, 18, 9);
-    ctx.fillRect(ox + ow + 16, hy + 8 + i * 16, 18, 9);
+    if (arms.w) ctx.fillRect(ox - 34, hy + 8 + i * 16, 18, 9);
+    if (arms.e) ctx.fillRect(ox + ow + 16, hy + 8 + i * 16, 18, 9);
   }
 }
 
@@ -871,8 +1137,16 @@ export function drawPathSegment(
 
 // ── 5. street furniture that lives on the ground layer ─────────────────
 
-/** Street lamp with a warm pool of light on the road beneath it. */
-export function drawStreetLamp(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+/**
+ * The warm pool a street lamp throws on the ground.
+ *
+ * Drawn with the GROUND, not with the lamp: light that lands on the road
+ * belongs under everything that stands on the road. Painting it at the end
+ * of the obstacle pass — where the whole lamp used to be drawn — washed a
+ * soft circle of lamplight over the front of every building and every
+ * parked car within 54px of a lamp post.
+ */
+export function drawStreetLampPool(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   const gx = x + 5;
   const gy = y + 40;
   const grad = ctx.createRadialGradient(gx, gy, 2, gx, gy, 54);
@@ -883,6 +1157,10 @@ export function drawStreetLamp(ctx: CanvasRenderingContext2D, x: number, y: numb
   ctx.beginPath();
   ctx.arc(gx, gy, 54, 0, Math.PI * 2);
   ctx.fill();
+}
+
+/** The lamp itself: cast shadow, post, cowl and bulb. */
+export function drawStreetLamp(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   // Cast shadow of the pole.
   rect(ctx, x + 2, y + 34, 6, 12, "rgba(0,0,0,0.22)");
   // Pole + fluted highlight.

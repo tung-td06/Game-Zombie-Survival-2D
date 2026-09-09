@@ -51,9 +51,53 @@ export function getPixelArtAtlas(ctx: CanvasRenderingContext2D): PixelArtAtlas {
   return atlas;
 }
 
+/**
+ * Pixel-snapped filled rectangle.
+ *
+ * The two EDGES are rounded, never the origin and the size independently.
+ * Rounding size on its own is what let abutting fills disagree: a rect at
+ * x=10.4 w=20.4 became [10, 30) while its neighbour at x=30.8 became
+ * [31, ...), leaving a one-pixel hairline of whatever was underneath — the
+ * seam between road stretches, terrain tiles and sidewalk bands. Snapping
+ * x0 and x1 instead means neighbours always share an edge exactly, because
+ * they round the SAME number to the same pixel.
+ *
+ * For whole-number sizes this is identical to the old behaviour
+ * (round(x + n) === round(x) + n), so no sprite changes shape.
+ */
 export function rect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string): void {
+  const x0 = Math.round(x);
+  const y0 = Math.round(y);
+  const x1 = Math.round(x + w);
+  const y1 = Math.round(y + h);
+  if (x1 <= x0 || y1 <= y0) return;
   ctx.fillStyle = color;
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+}
+
+/**
+ * Smooth value noise in [0, 1) on a lattice of `period` world pixels.
+ *
+ * Pure function of WORLD position and the seed, and — unlike a per-cell
+ * hash — CONTINUOUS: the lattice corners are hashed and the value between
+ * them is smoothstep-interpolated. That is the difference between ground
+ * shading that mottles and ground shading that comes out as a checkerboard
+ * of hard-edged rectangles, which is what a `hash(cell) % 10 < 4` decision
+ * always produces at the cell boundary.
+ */
+export function smoothNoise(seed: number, x: number, y: number, period: number): number {
+  const gx = Math.floor(x / period);
+  const gy = Math.floor(y / period);
+  const fx = x / period - gx;
+  const fy = y / period - gy;
+  const sx = fx * fx * (3 - 2 * fx);
+  const sy = fy * fy * (3 - 2 * fy);
+  const v = (ix: number, iy: number) => pixelVariant(seed, ix, iy, 1024) / 1024;
+  const a = v(gx, gy);
+  const b = v(gx + 1, gy);
+  const c = v(gx, gy + 1);
+  const d = v(gx + 1, gy + 1);
+  return (a + (b - a) * sx) * (1 - sy) + (c + (d - c) * sx) * sy;
 }
 
 export function px(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, size = PIXEL): void {
@@ -270,18 +314,26 @@ export function drawPixelLight(
   ctx.save();
   ctx.fillStyle = "rgba(5, 8, 15, " + Math.min(0.55, darkness) + ")";
   ctx.fillRect(0, 0, width, height);
+  // Cut the light back out of the darkness with a smooth radial falloff.
+  //
+  // This used to be four concentric discs of flat alpha, which left a set
+  // of hard-edged rings around every light — a stepped edge is exactly what
+  // reads as an artificial shape rather than as light. One gradient gives
+  // the same total brightness with a continuous edge.
   ctx.globalCompositeOperation = "destination-out";
   for (const light of lights) {
     const radius = Math.max(8, light.radius);
     const intensity = light.intensity ?? 1;
-    for (let ring = 1; ring <= 4; ring++) {
-      const r = radius * (ring / 4);
-      ctx.globalAlpha = (0.07 + (ring === 4 ? 0.18 : 0)) * intensity;
-      ctx.fillStyle = "#FFFFFF";
-      ctx.beginPath();
-      ctx.arc(Math.round(light.pos.x), Math.round(light.pos.y), Math.round(r), 0, Math.PI * 2);
-      ctx.fill();
-    }
+    const cx = Math.round(light.pos.x);
+    const cy = Math.round(light.pos.y);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    grad.addColorStop(0, `rgba(255,255,255,${Math.min(1, 0.46 * intensity)})`);
+    grad.addColorStop(0.5, `rgba(255,255,255,${Math.min(1, 0.26 * intensity)})`);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.globalCompositeOperation = "source-over";
   for (const light of lights) {
