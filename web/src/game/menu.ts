@@ -1295,7 +1295,7 @@ export class MenuSystem {
       );
 
       // Description — two wrapped lines inside the card.
-      const descLines = wrapLines(ctx, def.desc, 9, uCardW - 16);
+      const descLines = wrapLines(ctx, def.desc, 9, uCardW - 72);
       let descY = cY + 27;
       for (const line of descLines.slice(0, 2)) {
         drawText(ctx, line, cX + 8, descY, 9, color("ui_dim"), "left", "top");
