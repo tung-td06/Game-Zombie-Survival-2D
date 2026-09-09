@@ -2,10 +2,18 @@
 // The game_saves row serves two roles: the Continue-run SNAPSHOT (level, xp,
 // wave, player_data, ...) written ONLY by an explicit Save Game, and the
 // account Skill Tree mirror (skill_points + skill_* columns) which level-ups
-// sync immediately. A fire-and-forget level-up sync can carry a mid-level-up
-// XP value and land AFTER a Save, so the sync must NEVER write level/xp — or
-// the snapshot gets corrupted and Continue restores an XP that was never
-// actually saved.
+// sync immediately.
+//
+// xp is still owned exclusively by SAVE GAME: a fire-and-forget level-up sync
+// can carry a mid-level-up XP value and land AFTER a Save, so the sync must
+// never write xp — or the snapshot gets corrupted and Continue restores an XP
+// that was never actually saved.
+//
+// level IS written by the sync, MAX-guarded (it may only move forward). If
+// the stored level were allowed to lag behind the spent skills, the row would
+// violate the earned-points invariant `skill_points + sum(skills) <= level-1`
+// against the stored level, and after Continue every level-up point would be
+// clamped to 0 — the skill pick would become unclickable.
 import { describe, test, expect } from "vitest";
 import { syncSkillState, saveGameSave, getGameSave } from "@/lib/db-core";
 
@@ -14,7 +22,11 @@ interface CapturedCall {
   values: unknown[];
 }
 
-function capturingD1() {
+/**
+ * A D1 fake that records prepared statements and serves a configurable row
+ * for SELECT reads (used to simulate a pre-existing stored level).
+ */
+function capturingD1(storedRow: Record<string, any> | null = null) {
   const calls: CapturedCall[] = [];
   const db = {
     prepare(sql: string) {
@@ -23,7 +35,8 @@ function capturingD1() {
           calls.push({ sql, values });
           return {
             run: async () => ({ meta: { changes: 1 } }),
-            first: async () => null,
+            first: async () =>
+              sql.trim().startsWith("SELECT") ? storedRow : null,
           };
         },
       };
@@ -32,8 +45,16 @@ function capturingD1() {
   return { db, calls };
 }
 
+/** The skill-state sync's upsert call (saveGameSave's insert also contains
+ * skill_points, so discriminate on player_data which only the save carries). */
+function syncWrite(calls: CapturedCall[]): CapturedCall | undefined {
+  return calls.find(
+    (c) => c.sql.includes("skill_points") && !c.sql.includes("player_data")
+  );
+}
+
 describe("syncSkillState D1 — level/xp ownership", () => {
-  test("the skill-state sync never writes level/xp columns", async () => {
+  test("the skill-state sync writes level (MAX-guarded) but never xp", async () => {
     const { db, calls } = capturingD1();
     await syncSkillState(db, "p1", {
       level: 15,
@@ -42,25 +63,25 @@ describe("syncSkillState D1 — level/xp ownership", () => {
       skills: { damage: 1 },
     });
 
-    expect(calls.length).toBe(1);
-    const { sql, values } = calls[0]!;
-    // level/xp must not appear in the INSERT column list or the SET clauses.
-    expect(sql).not.toMatch(/\blevel\b/);
-    expect(sql).not.toMatch(/\bxp\b/);
-    // skill_points + skills are still persisted.
-    expect(sql).toContain("skill_points");
-    expect(sql).toContain("skill_damage");
-    // Bound values carry no level/xp (player_id, skill_points, skills, timestamps).
-    expect(values[0]).toBe("p1");
-    expect(values[1]).toBe(1); // skill_points
-    expect(values[2]).toBe(1); // skill_damage
-    // player_id + skill_points + 12 skill columns + created_at + updated_at
-    expect(values.length).toBe(16);
+    // The upsert carries level + skill columns (the first call is the read).
+    const write = syncWrite(calls);
+    expect(write).toBeDefined();
+    // xp must never appear in the write — SAVE GAME owns the snapshot.
+    expect(write!.sql).not.toMatch(/\bxp\b/);
+    // level IS part of the write so the stored invariant can't break.
+    expect(write!.sql).toContain("level");
+    // Bound values: player_id, level, skill_points, skills, timestamps.
+    expect(write!.values[0]).toBe("p1");
+    expect(write!.values[1]).toBe(15); // level
+    expect(write!.values[2]).toBe(1); // skill_points
+    expect(write!.values[3]).toBe(1); // skill_damage
+    // player_id + level + skill_points + 12 skill columns + created_at + updated_at
+    expect(write!.values.length).toBe(17);
   });
 
-  test("save snapshot level/xp survives a later skill-state sync", async () => {
-    // Save Game first: writes the snapshot.
-    const { db, calls } = capturingD1();
+  test("a late sync never regresses the saved snapshot's level", async () => {
+    // Save Game first: writes the snapshot (level 14).
+    const { db, calls } = capturingD1({ level: 14 });
     await saveGameSave(db, "p1", {
       save_version: 1,
       level: 14,
@@ -69,25 +90,28 @@ describe("syncSkillState D1 — level/xp ownership", () => {
       money: 900,
       player: { x: 100, y: 200, hp: 80, maxHp: 100, xp: 1238 },
     });
-    // Level-up sync afterwards: must not touch level/xp columns.
-    await syncSkillState(db, "p1", {
+    // A stale sync from BEFORE the save (lower level) landing after it must
+    // not drag the stored level below the snapshot.
+    const result = await syncSkillState(db, "p1", {
+      level: 13,
+      xp: 5,
+      skill_points: 1,
+      skills: { damage: 1 },
+    });
+    expect(result.level).toBe(14);
+    expect(syncWrite(calls)!.values[1]).toBe(14); // level = MAX(14, 13)
+  });
+
+  test("a sync from a real level-up after the save raises the stored level", async () => {
+    const { db, calls } = capturingD1({ level: 14 });
+    const result = await syncSkillState(db, "p1", {
       level: 15,
       xp: 38,
       skill_points: 1,
       skills: { damage: 1 },
     });
-
-    // Discriminate the two UPSERTs: the save payload carries player_data and
-    // the full snapshot; the skill-state sync carries only skill columns.
-    const saveCall = calls.find((c) => c.sql.includes("player_data"));
-    const syncCall = calls.find(
-      (c) => c.sql.includes("skill_points") && !c.sql.includes("player_data")
-    );
-    expect(saveCall).toBeDefined();
-    expect(syncCall).toBeDefined();
-    // The sync's columns/SET clauses exclude level and xp.
-    expect(syncCall!.sql).not.toMatch(/\blevel\b/);
-    expect(syncCall!.sql).not.toMatch(/\bxp\b/);
+    expect(result.level).toBe(15);
+    expect(syncWrite(calls)!.values[1]).toBe(15);
   });
 
   test("getGameSave (D1) still reads the snapshot xp column", async () => {

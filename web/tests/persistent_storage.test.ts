@@ -308,10 +308,10 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     _resetCacheForTests();
     const fetched = await getSkillState(null, created.id);
     expect(fetched).not.toBeNull();
-    // level/xp are NOT persisted by the skill-state sync: they belong to the
-    // Continue snapshot and only an explicit SAVE GAME may write them. The
-    // row created by this sync therefore keeps the schema defaults.
-    expect(fetched?.level).toBe(1);
+    // The sync persists level (MAX-guarded — it tracks the run so the stored
+    // earned-points invariant can never break) but NEVER xp: xp belongs to
+    // the Continue snapshot and only an explicit SAVE GAME may write it.
+    expect(fetched?.level).toBe(6);
     expect(fetched?.xp).toBe(0);
     // The Skill Tree columns (points + skills) ARE persisted by the sync, and
     // stored values are returned untouched (they were validated at write time).
@@ -407,7 +407,7 @@ describe("Persistent JSON storage (no D1 binding)", () => {
     expect(aAfter?.skills.damage).toBe(5);
   });
 
-  it("level/xp columns are owned by SAVE GAME — skill-state syncs never overwrite them", async () => {
+  it("xp is owned by SAVE GAME — syncs never overwrite it, but level tracks the run", async () => {
     const username = "xpowns";
     const password = "Password123!";
     const hash = await hashPassword(password);
@@ -422,12 +422,21 @@ describe("Persistent JSON storage (no D1 binding)", () => {
       money: 900,
       player: { x: 100, y: 200, hp: 80, maxHp: 100, xp: 1238 },
     });
-    // 2. Player levels up afterwards: the skill-state sync must NOT touch
-    //    level/xp (only the Skill Tree columns), or a fire-and-forget sync
-    //    could corrupt the Continue snapshot with an XP that was never saved.
+    // 2. Player levels up afterwards. The sync may RAISE level (MAX guard —
+    //    the player really is level 15 now) but must never touch xp: a
+    //    fire-and-forget sync carrying a mid-level-up XP value must not be
+    //    able to corrupt the snapshot's XP.
     await syncSkillState(null, created.id, {
       level: 15,
       xp: 38,
+      skill_points: 1,
+      skills: { damage: 1 },
+    });
+    // 3. A stale sync (lower level, from BEFORE the save) landing late must
+    //    not drag level back down either.
+    await syncSkillState(null, created.id, {
+      level: 13,
+      xp: 2,
       skill_points: 1,
       skills: { damage: 1 },
     });
@@ -436,11 +445,63 @@ describe("Persistent JSON storage (no D1 binding)", () => {
 
     const save = await getGameSave(null, created.id);
     expect(save).not.toBeNull();
-    expect(save?.level).toBe(14); // snapshot, untouched by the sync
-    expect(save?.xp).toBe(1238); // snapshot, untouched by the sync
+    expect(save?.level).toBe(15); // MAX(14, 15, 13) — never regressed
+    expect(save?.xp).toBe(1238); // snapshot, untouched by the syncs
     // The Skill Tree columns still received the fresh state.
     expect(save?.skill_points).toBe(1);
     expect(save?.skills?.damage).toBe(1);
+  });
+
+  it("keeps the stored level current so skill picks still work after Continue", async () => {
+    const username = "skillfix";
+    const password = "Password123!";
+    const hash = await hashPassword(password);
+    const created = await createPlayer(null, username, hash);
+
+    // Level 2: first point earned, spent on damage.
+    await syncSkillState(null, created.id, {
+      level: 2,
+      xp: 0,
+      skill_points: 1,
+      skills: {},
+    });
+    const first = await upgradeSkill(null, created.id, "damage");
+    expect(first.ok).toBe(true);
+
+    // Level up to 3: +1 point, spent on crit_ch.
+    await syncSkillState(null, created.id, {
+      level: 3,
+      xp: 0,
+      skill_points: 1,
+      skills: { damage: 1 },
+    });
+    const second = await upgradeSkill(null, created.id, "crit_ch");
+    expect(second.ok).toBe(true);
+
+    const st = await getSkillState(null, created.id);
+    // The stored level must track the run (it used to stay at the last SAVE
+    // value, i.e. 2 here). With a stale stored level, Continue would restore
+    // level 2 while the row already has 2 skills spent — every later level-up
+    // point gets clamped to 0 and the skill pick becomes unclickable.
+    expect(st?.level).toBe(3);
+    expect(st?.skill_points).toBe(0);
+    expect(st?.skills.damage).toBe(1);
+    expect(st?.skills.crit_ch).toBe(1);
+
+    // Continue-style restore (level 3, both skills, 0 points) then a level-up
+    // to 4: the newly earned point must be spendable.
+    await syncSkillState(null, created.id, {
+      level: 4,
+      xp: 0,
+      skill_points: 1,
+      skills: { damage: 1, crit_ch: 1 },
+    });
+    const spend = await upgradeSkill(null, created.id, "speed");
+    expect(spend.ok).toBe(true);
+    if (spend.ok) {
+      expect(spend.state.skill_points).toBe(0);
+      expect(spend.state.skills.speed).toBe(1);
+    }
   });
 
   it("an existing save survives unless explicitly overwritten (New Game never resets it)", async () => {

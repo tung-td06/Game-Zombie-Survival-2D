@@ -338,6 +338,18 @@ export async function psSyncSkillState(
   playerId: string,
   state: SkillState
 ): Promise<SkillState> {
+  if (!isNodeRuntime()) return state;
+  // Mirror db-core's syncSkillState (see the comment there): xp stays owned
+  // by SAVE GAME so a fire-and-forget sync can never corrupt the Continue
+  // snapshot, while level IS updated — MAX-guarded — so the stored level can
+  // never fall behind the spent skills and the earned-points invariant
+  // skill_points + sum(skills) <= level - 1 holds against the stored row.
+  const before = await loadAll();
+  const storedLevel = Math.max(
+    1,
+    Math.floor(Number(before.game_saves[playerId]?.level) || 1)
+  );
+  const level = Math.max(storedLevel, state.level);
   await mutate((data) => {
     const now = Date.now();
     const existing = data.game_saves[playerId];
@@ -356,15 +368,15 @@ export async function psSyncSkillState(
       created_at: now,
       updated_at: now,
     };
-    // level/xp are intentionally NOT touched: the same row also stores the
-    // Continue-run snapshot and only an explicit SAVE GAME may write level/xp
-    // (a level-up sync could otherwise land after a Save and corrupt it).
+    // xp is intentionally NOT touched (SAVE GAME owns the Continue snapshot);
+    // level is MAX-guarded so it can only move forward.
+    save.level = level;
     save.skill_points = state.skill_points;
     save.skills = { ...state.skills };
     save.updated_at = now;
     data.game_saves[playerId] = save;
   });
-  return state;
+  return { ...state, level };
 }
 
 /**

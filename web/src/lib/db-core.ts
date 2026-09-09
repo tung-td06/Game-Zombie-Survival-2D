@@ -1111,25 +1111,48 @@ export async function syncSkillState(
   if (!db) {
     const m = await loadPersistent();
     if (!m) return state;
-    await m.psSyncSkillState(playerId, state);
-    return state;
+    return m.psSyncSkillState(playerId, state);
   }
   const now = Date.now();
+
+  // The same row also holds the Continue-run snapshot, and SAVE GAME must
+  // remain the ONLY writer of xp — a fire-and-forget level-up sync (which can
+  // carry a mid-level-up XP value) can land after a Save and corrupt the
+  // snapshot, making Continue restore an XP value that was never saved. That
+  // protection is why xp is never written below.
+  //
+  // `level` IS written here, MAX-guarded (it may only move forward, never
+  // regress the snapshot). This is what keeps the earned-points invariant
+  // `skill_points + sum(skills) <= level - 1` consistent against the STORED
+  // row: if the stored level goes stale (it used to only advance on SAVE
+  // GAME), the row silently accumulates more spent points than the stored
+  // level allows, so after Continue the player is restored with a level that
+  // can no longer justify their skills, the next level-up point is clamped to
+  // 0, and every skill pick fails with "Not enough skill points" — the
+  // level-up selection becomes unclickable.
+  let storedLevel = 1;
+  try {
+    const row = await db
+      .prepare("SELECT level FROM game_saves WHERE player_id = ?")
+      .bind(playerId)
+      .first<{ level?: number }>();
+    if (row && typeof row.level === "number" && Number.isFinite(row.level)) {
+      storedLevel = Math.max(1, Math.floor(row.level));
+    }
+  } catch (err) {
+    console.warn("D1 syncSkillState read error:", err);
+  }
+  const level = Math.max(storedLevel, state.level);
+
   const skillVals = SKILL_COLUMNS.map((col) => {
     const uid = Object.keys(SKILL_CATALOG).find(
       (k) => SKILL_CATALOG[k]!.column === col
     )!;
     return state.skills[uid] ?? 0;
   });
-  // NOTE: `level`/`xp` are deliberately NOT written here. The same row also
-  // holds the Continue-run snapshot, and SAVE GAME must be the ONLY writer
-  // of level/xp — otherwise a fire-and-forget level-up sync (which can carry
-  // a mid-level-up XP value) can land after a Save and corrupt the snapshot,
-  // making Continue restore an XP value that was never actually saved.
-  // `state.level` is still used by normalizeSkillState to validate/clamp
-  // skill_points; it is just not persisted by this statement.
   const cols = [
     "player_id",
+    "level",
     "skill_points",
     ...SKILL_COLUMNS,
     "created_at",
@@ -1149,6 +1172,7 @@ export async function syncSkillState(
       )
       .bind(
         playerId,
+        level,
         state.skill_points,
         ...skillVals,
         now,
@@ -1159,7 +1183,9 @@ export async function syncSkillState(
     console.warn("D1 syncSkillState error:", err);
     throw new Error("Failed to persist skill state");
   }
-  return state;
+  // Report the level that was actually persisted (the MAX of the stored and
+  // incoming levels) so the API response never claims a lower stored value.
+  return { ...state, level };
 }
 
 export type SkillUpgradeResult =
