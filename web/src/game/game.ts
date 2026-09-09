@@ -41,6 +41,7 @@ import {
   RESOLUTIONS,
   SCREEN_HEIGHT,
   SCREEN_WIDTH,
+  WAVE_INTERMISSION,
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from "./settings";
@@ -1881,6 +1882,20 @@ export class Game {
       this.zombies = restored;
     }
 
+    // Guard: a save whose wave is "active" but has nothing left to spawn
+    // AND no alive enemies is a completion-pending snapshot (or a legacy
+    // save). Letting that wave "complete" on the first frame after Continue
+    // would grant its XP/coin reward a second time — the reward, if earned,
+    // is already included in the saved xp/coins. Move on to intermission.
+    if (
+      this.waveManager.state === "active" &&
+      this.waveManager.to_spawn === 0 &&
+      this.zombies.length === 0
+    ) {
+      this.waveManager.state = "intermission";
+      this.waveManager.timer = WAVE_INTERMISSION;
+    }
+
     // 6. Restore Loot drops
     this.loots = dbSave.world_data?.loot?.map((l: any) => new Loot(l.pos, l.kind, l.amount, l.payload)) ?? [];
 
@@ -1925,7 +1940,16 @@ export class Game {
 
     this.toasts = [];
     this.waveBanner = null;
-    this.quests.bind(this);
+    // Restore which quests were already completed+rewarded so Continue never
+    // re-completes them (and never re-grants their XP/coin rewards).
+    const completedQuests: string[] = Array.isArray(
+      dbSave.progression_data?.quests
+    )
+      ? (dbSave.progression_data.quests as unknown[]).filter(
+          (q): q is string => typeof q === "string",
+        )
+      : [];
+    this.quests.bind(this, completedQuests);
     this.achievements = new AchievementSystem(this.save.achievements);
     this.inRunContext = true;
     this.state = PLAYING;
@@ -2002,6 +2026,11 @@ export class Game {
         elapsed: this.elapsed,
         timeOfDay: this.timeOfDay,
         stats: this.stats,
+        // Quests completed AND rewarded during this run. Restored on Continue
+        // so their rewards are granted exactly once per run — without this,
+        // every Continue re-completed them against the restored stats and
+        // re-awarded XP/coins (loaded XP = saved XP + N).
+        quests: this.quests.all.filter((q) => q.done).map((q) => q.id),
         waveManager: {
           state: this.waveManager.state,
           timer: this.waveManager.timer,

@@ -216,6 +216,59 @@ function check(name, cond, extra) {
   g = await readGame();
   check("Continue restores Level 5, XP 0 (not Level 4 / XP 95)", g.level === 5 && g.xp === 0, g);
 
+  // ------------------------------------------------------------------ Test 6
+  // Quest rewards must be granted exactly ONCE per run. A quest completed
+  // and rewarded before SAVE GAME must never re-complete (and re-grant its
+  // XP/coins) right after CONTINUE — the restored stats already satisfy its
+  // target, so without persisting completion the loaded XP would be
+  // saved XP + sum(completed quest rewards).
+  console.log("\n== Test 6: completed quest must not be re-rewarded after Continue ==");
+  // Current run state: level 5 / XP 0 (from Test 5's continue).
+  await page.evaluate(() => {
+    const g = window.__game;
+    // Keep the idle player alive for the duration of this test.
+    g.player.maxHp = 1e9;
+    g.player.hp = 1e9;
+    // Only kill_50 (target 50, +150 XP / +300 coins) is satisfied by this.
+    g.stats.kills = 50;
+  });
+  // Let the game loop run so quests.update() completes kill_50 exactly once.
+  let qXp = 0;
+  let qCoins = 0;
+  for (let i = 0; i < 60; i++) {
+    const done = await page.evaluate(() =>
+      window.__game.quests?.all?.find((q) => q.id === "kill_50")?.done ?? false
+    );
+    if (done) {
+      const s = await readGame();
+      qXp = s.xp;
+      qCoins = s.coins;
+      break;
+    }
+    await page.waitForTimeout(150);
+  }
+  check("quest kill_50 granted its +150 XP reward during play", qXp >= 150, { qXp });
+  check("quest kill_50 granted its +300 coins reward during play", qCoins >= 300, { qCoins });
+  await page.evaluate(() => window.__game.doAction("save_game"));
+  for (let i = 0; i < 40; i++) {
+    const st = await page.evaluate(() => window.__game.saveButtonState);
+    if (st === "success") break;
+    await page.waitForTimeout(150);
+  }
+  await page.waitForTimeout(300);
+  const row6 = await dbRow();
+  check("DB row stores the exact XP at save time", row6 && row6.xp === qXp, { row6, qXp });
+  await goLobby();
+  await continueFromLobby();
+  // Let a few update frames run: this is where the re-reward used to land.
+  await page.waitForTimeout(1200);
+  const g6 = await readGame();
+  check("Continue restores XP unchanged (quest NOT re-rewarded)", g6.xp === qXp, { g6, qXp });
+  check("Continue restores coins unchanged (quest NOT re-rewarded)", g6.coins === qCoins, { g6, qCoins });
+  check("kill_50 stays done after Continue (never re-completed)", await page.evaluate(() =>
+    window.__game.quests?.all?.find((q) => q.id === "kill_50")?.done ?? false
+  ));
+
   await browser.close();
   console.log(failures === 0 ? "\nALL XP/LEVEL SAVE CHECKS PASSED ✅" : `\n${failures} FAILURES`);
   process.exit(failures === 0 ? 0 : 1);

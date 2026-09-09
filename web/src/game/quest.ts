@@ -17,7 +17,18 @@ export class QuestSystem {
   quests: Quest[] = [];
   private game: IGame | null = null;
 
-  bind(game: IGame): void {
+  /**
+   * (Re)build the run's quest board from the restored stats.
+   *
+   * `completedIds` restores which quests were already completed AND rewarded
+   * during this run (persisted by SAVE GAME). Without it, every Continue
+   * rebuilt the board with all quests `done: false` while the restored stats
+   * (kills, survival_time, boss_kills, ...) already satisfied their targets —
+   * so each Continue instantly re-completed the quests and re-granted their
+   * XP/coin rewards, inflating the loaded XP by the sum of every completed
+   * quest (loaded XP = saved XP + N, exactly the reported bug).
+   */
+  bind(game: IGame, completedIds: string[] = []): void {
     this.game = game;
     const stats = (k: string) => () =>
       (game.stats as unknown as Record<string, number>)[k] ?? 0;
@@ -78,6 +89,15 @@ export class QuestSystem {
         done: false,
       },
     ];
+    // A quest that was already completed (and rewarded) in a previous
+    // session of this run stays done — it must never re-complete after
+    // Continue, or its reward would be granted again.
+    if (completedIds.length > 0) {
+      const done = new Set(completedIds);
+      for (const q of this.quests) {
+        if (done.has(q.id)) q.done = true;
+      }
+    }
   }
 
   update(_game: IGame): void {
