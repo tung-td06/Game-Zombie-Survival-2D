@@ -76,7 +76,10 @@ export class InputManager {
   // through getAimWorld() and the existing mouseHeld path (fireHeld
   // mirrors mouseHeld into the same input surface).
   moveVec: Vec = { x: 0, y: 0 };
+  /** Fire held by the right AIM joystick (drag past its dead zone). */
   fireHeld = false;
+  /** Fire held by the dedicated FIRE button (pointerdown → pointerup). */
+  fireButtonHeld = false;
   weaponPressed: Set<WeaponSlot> = new Set();
   pausePressed = false;
   /** Touch bomb button — one-shot, cleared in endFrame() like keysPressed. */
@@ -177,6 +180,16 @@ export class InputManager {
   /** True if left mouse was just clicked this frame. */
   get mouseClicked(): boolean {
     return this.mousePressed.has(0);
+  }
+
+  /**
+   * True when any mobile fire device is held (aim stick or FIRE button).
+   * The touch HUD mirrors this into mouseDown[0] once per frame, so the
+   * existing weapon system sees exactly one "held left mouse" regardless
+   * of how many input devices contributed.
+   */
+  get isFiring(): boolean {
+    return this.fireHeld || this.fireButtonHeld;
   }
 
   /**

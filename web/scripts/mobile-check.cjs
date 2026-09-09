@@ -67,7 +67,7 @@ const BASE = `http://localhost:${process.env.PORT || 3213}`;
   const resumed = await page.evaluate(() => window.__game?.state);
   console.log("2) landscape: overlay gone, HUD shown, state:", resumed);
 
-  // 3) Left joystick → movement
+  // 3) Left joystick → movement (plus dead zone: tiny drag must not move)
   const joy = await page.locator('[data-testid="virtual-joystick"]').boundingBox();
   const joyCx = joy.x + joy.width / 2;
   const joyCy = joy.y + joy.height / 2;
@@ -81,6 +81,19 @@ const BASE = `http://localhost:${process.env.PORT || 3213}`;
   const moved = Math.hypot(p1.x - p0.x, p1.y - p0.y);
   console.log("3) moveVec:", JSON.stringify(moveVec), "| player travelled px:", moved.toFixed(1));
   await page.locator('[data-testid="virtual-joystick"]').dispatchEvent("pointerup", { pointerId: 1, pointerType: "touch", clientX: joyCx, clientY: joyCy - 45, bubbles: true });
+  await page.waitForTimeout(60);
+  // Dead zone: the stick radius is ring*0.27 - 12px and the dead zone is
+  // 15% of that radius (≈2-4px), so a 1px drag must output (0,0).
+  await page.locator('[data-testid="virtual-joystick"]').dispatchEvent("pointerdown", { pointerId: 9, pointerType: "touch", clientX: joyCx, clientY: joyCy, bubbles: true });
+  await page.locator('[data-testid="virtual-joystick"]').dispatchEvent("pointermove", { pointerId: 9, pointerType: "touch", clientX: joyCx + 1, clientY: joyCy, bubbles: true });
+  await page.waitForTimeout(60);
+  const deadVec = await page.evaluate(() => ({ ...window.__game.input.moveVec }));
+  await page.locator('[data-testid="virtual-joystick"]').dispatchEvent("pointerup", { pointerId: 9, pointerType: "touch", clientX: joyCx + 1, clientY: joyCy, bubbles: true });
+  must(
+    "joystick dead zone: tiny drag outputs (0,0)",
+    deadVec.x === 0 && deadVec.y === 0,
+    deadVec
+  );
 
   // 4) Right joystick → aim + fire
   const rj = await page.locator('[data-testid="right-joystick"]').boundingBox();
@@ -101,6 +114,52 @@ const BASE = `http://localhost:${process.env.PORT || 3213}`;
   await page.waitForTimeout(80);
   const fireAfterRelease = await page.evaluate(() => window.__game.input.fireHeld);
   console.log("   fireHeld after release:", fireAfterRelease);
+
+  // 4b) Dedicated FIRE button: hold → fires, release → stops.
+  const fb = await page.locator('[data-testid="fire-button"]').boundingBox();
+  must("fire button visible while PLAYING", !!fb && fb.width >= 44, fb && { w: Math.round(fb.width), h: Math.round(fb.height) });
+  const fbCx = fb.x + fb.width / 2;
+  const fbCy = fb.y + fb.height / 2;
+  const f0 = await page.evaluate(() => window.__game.stats.shots_fired);
+  await page.locator('[data-testid="fire-button"]').dispatchEvent("pointerdown", { pointerId: 4, pointerType: "touch", clientX: fbCx, clientY: fbCy, bubbles: true });
+  await page.waitForTimeout(400);
+  const f1 = await page.evaluate(() => window.__game.stats.shots_fired);
+  const fireBtnHeld = await page.evaluate(() => ({
+    btn: window.__game.input.fireButtonHeld,
+    mouse: window.__game.input.mouseDown.has(0),
+  }));
+  await page.locator('[data-testid="fire-button"]').dispatchEvent("pointerup", { pointerId: 4, pointerType: "touch", clientX: fbCx, clientY: fbCy, bubbles: true });
+  await page.waitForTimeout(200);
+  const f2 = await page.evaluate(() => window.__game.stats.shots_fired);
+  const fireBtnReleased = await page.evaluate(() => ({
+    btn: window.__game.input.fireButtonHeld,
+    mouse: window.__game.input.mouseDown.has(0),
+    isFiring: window.__game.input.isFiring,
+  }));
+  must("FIRE button hold increases shots_fired", f1 > f0, { f0, f1 });
+  must("FIRE button maps into the shared mouseHeld surface", fireBtnHeld.btn === true && fireBtnHeld.mouse === true, fireBtnHeld);
+  must("FIRE button release stops firing", f2 === f1 && !fireBtnReleased.btn && !fireBtnReleased.mouse && !fireBtnReleased.isFiring, { f2, fireBtnReleased });
+
+  // 4c) Aim stick + FIRE button together: releasing the stick must NOT
+  // stop the fire button's hold (two independent fire sources, one surface).
+  await page.locator('[data-testid="right-joystick"]').dispatchEvent("pointerdown", { pointerId: 5, pointerType: "touch", clientX: rjCx, clientY: rjCy, bubbles: true });
+  await page.locator('[data-testid="right-joystick"]').dispatchEvent("pointermove", { pointerId: 5, pointerType: "touch", clientX: rjCx - 50, clientY: rjCy, bubbles: true });
+  await page.locator('[data-testid="fire-button"]').dispatchEvent("pointerdown", { pointerId: 6, pointerType: "touch", clientX: fbCx, clientY: fbCy, bubbles: true });
+  await page.waitForTimeout(100);
+  await page.locator('[data-testid="right-joystick"]').dispatchEvent("pointerup", { pointerId: 5, pointerType: "touch", clientX: rjCx - 50, clientY: rjCy, bubbles: true });
+  await page.waitForTimeout(100);
+  const comboHold = await page.evaluate(() => ({
+    stick: window.__game.input.fireHeld,
+    btn: window.__game.input.fireButtonHeld,
+    firing: window.__game.input.isFiring,
+  }));
+  await page.locator('[data-testid="fire-button"]').dispatchEvent("pointerup", { pointerId: 6, pointerType: "touch", clientX: fbCx, clientY: fbCy, bubbles: true });
+  await page.waitForTimeout(80);
+  must(
+    "releasing aim stick keeps FIRE button firing (multitouch)",
+    comboHold.stick === false && comboHold.btn === true && comboHold.firing === true,
+    comboHold
+  );
 
   // 5) Bomb button → bombs decrement
   const b0 = await page.evaluate(() => window.__game.player.bombs);
@@ -130,6 +189,7 @@ const BASE = `http://localhost:${process.env.PORT || 3213}`;
     "combat controls hidden while paused",
     !(await vis('[data-testid="virtual-joystick"]')) &&
       !(await vis('[data-testid="right-joystick"]')) &&
+      !(await vis('[data-testid="fire-button"]')) &&
       !(await vis('[data-testid="weapon-switch-button"]')) &&
       !(await vis('[data-testid="bomb-button"]')) &&
       !(await vis('[data-testid="reload-button"]')) &&
@@ -152,6 +212,7 @@ const BASE = `http://localhost:${process.env.PORT || 3213}`;
     "combat controls visible again after resume",
     (await vis('[data-testid="virtual-joystick"]')) &&
       (await vis('[data-testid="right-joystick"]')) &&
+      (await vis('[data-testid="fire-button"]')) &&
       (await vis('[data-testid="weapon-switch-button"]')) &&
       (await vis('[data-testid="bomb-button"]')) &&
       (await vis('[data-testid="reload-button"]'))

@@ -11,6 +11,9 @@ interface Props {
   onChange: (vec: Vec) => void;
   size?: number;
   thumbSize?: number;
+  /** Dead zone as a fraction of the max stick radius (0..1). Inside it the
+      output is (0,0) so a resting thumb never nudges the player. */
+  deadZone?: number;
 }
 
 const RING_INSET = 12;
@@ -19,6 +22,7 @@ export default function VirtualJoystick({
   onChange,
   size = 130,
   thumbSize = 60,
+  deadZone = 0.15,
 }: Props) {
   const ringRef = useRef<HTMLDivElement | null>(null);
   const thumbRef = useRef<HTMLDivElement | null>(null);
@@ -48,7 +52,13 @@ export default function VirtualJoystick({
       if (thumbRef.current) {
         thumbRef.current.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
       }
-      onChange({ x: tx / RADIUS, y: ty / RADIUS });
+      const nx = tx / RADIUS;
+      const ny = ty / RADIUS;
+      if (len > deadZone * RADIUS) {
+        onChange({ x: nx, y: ny });
+      } else {
+        onChange({ x: 0, y: 0 });
+      }
     };
 
     const onDown = (e: PointerEvent) => {
@@ -97,7 +107,7 @@ export default function VirtualJoystick({
       ring.removeEventListener("pointerup", onUp);
       ring.removeEventListener("pointercancel", onUp);
     };
-  }, [onChange, RADIUS]);
+  }, [onChange, RADIUS, deadZone]);
 
   return (
     <div

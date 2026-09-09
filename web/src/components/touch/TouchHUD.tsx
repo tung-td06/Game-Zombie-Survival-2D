@@ -26,6 +26,7 @@ import type { InputManager } from "@/game/input";
 import type { Game } from "@/game/game";
 import VirtualJoystick from "./VirtualJoystick";
 import RightJoystick from "./RightJoystick";
+import FireButton from "./FireButton";
 import ReloadButton from "./ReloadButton";
 import BombButton from "./BombButton";
 import WeaponSwitchButton from "./WeaponSwitchButton";
@@ -37,9 +38,14 @@ interface Props {
 }
 
 /** Clamped touch-target sizes driven by the smaller viewport dimension. */
-function computeControlSizes(): { joystick: number; thumb: number; button: number } {
+function computeControlSizes(): {
+  joystick: number;
+  thumb: number;
+  button: number;
+  fire: number;
+} {
   if (typeof window === "undefined") {
-    return { joystick: 120, thumb: 56, button: 60 };
+    return { joystick: 120, thumb: 56, button: 60, fire: 80 };
   }
   const vw = window.innerWidth;
   const vh = window.innerHeight;
@@ -47,7 +53,9 @@ function computeControlSizes(): { joystick: number; thumb: number; button: numbe
   const joystick = Math.round(Math.max(96, Math.min(150, base * 0.3)));
   const thumb = Math.round(joystick * 0.46);
   const button = Math.round(Math.max(52, Math.min(72, base * 0.15)));
-  return { joystick, thumb, button };
+  // FIRE is the primary combat control: always larger than the rest.
+  const fire = Math.round(Math.max(64, Math.min(100, button * 1.35)));
+  return { joystick, thumb, button, fire };
 }
 
 function useControlSizes() {
@@ -83,22 +91,22 @@ export default function TouchHUD({ input, gameRef }: Props) {
   useEffect(() => {
     let raf = 0;
     const tick = () => {
+      // VirtualJoystick already zeroes its output inside its dead zone, so
+      // the vec maps straight onto the movement keys (player.ts:215-216).
       const v = input.moveVec;
-      const dead = 0.15;
-      const fx = Math.abs(v.x) > dead ? v.x : 0;
-      const fy = Math.abs(v.y) > dead ? v.y : 0;
-      if (fx < 0) input.keysDown.add(left);
+      if (v.x < 0) input.keysDown.add(left);
       else input.keysDown.delete(left);
-      if (fx > 0) input.keysDown.add(right);
+      if (v.x > 0) input.keysDown.add(right);
       else input.keysDown.delete(right);
-      if (fy < 0) input.keysDown.add(up);
+      if (v.y < 0) input.keysDown.add(up);
       else input.keysDown.delete(up);
-      if (fy > 0) input.keysDown.add(down);
+      if (v.y > 0) input.keysDown.add(down);
       else input.keysDown.delete(down);
 
-      // fireHeld mirrors mouseDown[0] (mouseHeld) so Player.update()
-      // at player.ts:149 picks it up unchanged.
-      if (input.fireHeld) input.mouseDown.add(0);
+      // isFiring (aim-stick drag OR the FIRE button) mirrors mouseDown[0]
+      // (mouseHeld) so Player.update() at player.ts:282 picks it up
+      // unchanged — one shared firing surface for every input device.
+      if (input.isFiring) input.mouseDown.add(0);
       else input.mouseDown.delete(0);
 
       void reload;
@@ -108,7 +116,7 @@ export default function TouchHUD({ input, gameRef }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [input, left, right, up, down, reload]);
 
-  const { joystick, thumb, button } = useControlSizes();
+  const { joystick, thumb, button, fire } = useControlSizes();
   const safeTop = "max(16px, env(safe-area-inset-top))";
   const safeRight = "max(16px, env(safe-area-inset-right))";
   const safeBottom = "max(16px, env(safe-area-inset-bottom))";
@@ -139,6 +147,7 @@ export default function TouchHUD({ input, gameRef }: Props) {
     if (wasPlayingRef.current && !inPlay) {
       input.moveVec = { x: 0, y: 0 };
       input.fireHeld = false;
+      input.fireButtonHeld = false;
       input.bombPressed = false;
       input.reloadPressed = false;
       for (const k of [left, right, up, down]) input.keysDown.delete(k);
@@ -210,12 +219,28 @@ export default function TouchHUD({ input, gameRef }: Props) {
         <ReloadButton input={input} gameRef={gameRef} size={button} />
       </div>
 
-      {/* Right joystick — aim + fire (bottom-right) */}
+      {/* FIRE — big held-to-fire button in the very corner (right of the
+          aim stick). Hidden unless actively playing. */}
       <div
         style={{
           position: "absolute",
           bottom: safeBottom,
           right: safeRight,
+          pointerEvents: "auto",
+          display: inPlay ? undefined : "none",
+        }}
+      >
+        <FireButton input={input} size={fire} />
+      </div>
+
+      {/* Right joystick — aim (bottom-right, beside the FIRE button). Dragging
+          past its dead zone also fires, so a single thumb can do both; the
+          FIRE button is for steady holding while aiming independently. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: safeBottom,
+          right: `calc(${safeRight} + ${fire}px + 12px)`,
           pointerEvents: "auto",
           display: inPlay ? undefined : "none",
         }}
@@ -229,7 +254,7 @@ export default function TouchHUD({ input, gameRef }: Props) {
         style={{
           position: "absolute",
           bottom: safeBottom,
-          right: `calc(${safeRight} + ${joystick}px + 14px)`,
+          right: `calc(${safeRight} + ${fire}px + 12px + ${joystick}px + 14px)`,
           display: inPlay ? "flex" : "none",
           flexDirection: "column",
           gap: 12,
