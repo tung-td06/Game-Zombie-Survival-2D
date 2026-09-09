@@ -245,11 +245,11 @@ describe("Game smoke", () => {
     expect(p.level).toBe(1);
     expect(p.xp).toBe(0);
     expect(p.skillPoints).toBe(0);
-    // UFO FLEET purchases are PERMANENT account unlocks (kept across runs):
-    // the seeded profile owned the drone, so the fresh run keeps it active.
-    expect(p.hasDrone).toBe(true);
-    expect(p.ownedUFOs).toEqual(["drone"]);
-    expect(p.activeUFO).toBe("drone");
+    // NEW GAME always resets UFO to zero — no inheritance from old saves.
+    // The seeded profile owned the drone, but New Game starts fresh.
+    expect(p.hasDrone).toBe(false);
+    expect(p.ownedUFOs).toEqual([]);
+    expect(p.activeUFO).toBe("");
     expect(Object.keys(p.weapons.weapons)).toEqual(["pistol"]);
     expect(p.weapons.currentId).toBe("pistol");
     expect(p.upgradeLevels).toEqual({});
@@ -260,10 +260,10 @@ describe("Game smoke", () => {
     expect(stored.coins).toBe(0);
     expect(stored.unlocked_weapons).toEqual(["pistol"]);
     expect(stored.weapon_upgrades).toEqual({});
-    // Permanent UFO ownership is preserved through the reset.
-    expect(stored.has_drone).toBe(true);
-    expect(stored.owned_ufos).toEqual(["drone"]);
-    expect(stored.active_ufo).toBe("drone");
+    // NEW GAME resets UFO ownership — players must purchase fresh each run.
+    expect(stored.has_drone).toBe(false);
+    expect(stored.owned_ufos).toEqual([]);
+    expect(stored.active_ufo).toBe("");
     expect(stored.player_level).toBe(1);
     expect(stored.xp).toBe(0);
     // Account-level stats are preserved.

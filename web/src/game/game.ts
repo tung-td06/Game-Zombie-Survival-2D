@@ -88,6 +88,8 @@ export function createNewGameState(): {
     skillPoints: number;
     upgradeLevels: Record<string, number>;
     hasDrone: boolean;
+    ownedUFOs: string[];
+    activeUFO: string;
     bombs: number;
   };
   weapons: {
@@ -139,6 +141,8 @@ export function createNewGameState(): {
       skillPoints: 0,
       upgradeLevels: {},
       hasDrone: false,
+      ownedUFOs: [],
+      activeUFO: "",
       bombs: BOMB_START_COUNT,
     },
     weapons: {
@@ -1575,9 +1579,9 @@ export class Game {
     this.player.skillPoints = 0;
     this.player.upgradeLevels = {};
     this.recomputeSkillBonuses();
-    // UFO FLEET ownership is a PERMANENT account unlock (one-time purchases
-    // kept across runs), so a fresh run starts with the equipped saucer.
-    this.player.setUFOs(this.save.data.owned_ufos, this.save.data.active_ufo);
+    // NEW GAME always starts with ZERO UFOs — no inheritance from old saves.
+    // UFO purchases must be made fresh each run (Continue restores saved UFOs).
+    this.player.setUFOs(fresh.player.ownedUFOs, fresh.player.activeUFO);
     this.player.bombs = BOMB_START_COUNT;
 
     if (this.networkMode === "single") {
@@ -1652,7 +1656,10 @@ export class Game {
     d.coins = 0;
     d.unlocked_weapons = ["pistol"];
     d.weapon_upgrades = {};
-    // UFO ownership is a permanent unlock — never cleared by New Game.
+    // NEW GAME resets UFO ownership — players start with zero UFOs.
+    d.owned_ufos = [];
+    d.active_ufo = "";
+    d.has_drone = false;
     d.player_level = 1;
     d.xp = 0;
     d.player_upgrades = {};
@@ -1713,8 +1720,9 @@ export class Game {
       weaponMods: dbSave.weapon_data?.mods ?? {},
       username: this.username,
     });
-    // UFO FLEET is permanent, so Continue merges the saved unlocks with the
-    // local profile (a UFO bought after the last Save Game must not vanish).
+    // UFO FLEET is restored from the database save. If the player bought any
+    // UFO after the last Save Game (localStorage might have newer purchases),
+    // merge them so those purchases are not lost.
     const savedUFOs: string[] = Array.isArray(pData.ownedUFOs)
       ? pData.ownedUFOs
       : pData.hasDrone
@@ -1972,7 +1980,7 @@ export class Game {
         xp: this.player.xp,
         skillPoints: this.player.skillPoints,
         upgradeLevels: this.player.upgradeLevels,
-        // UFO FLEET — permanent unlocks, persisted with every explicit save.
+        // UFO FLEET — purchased UFOs are saved with the run state.
         ownedUFOs: this.player.ownedUFOs,
         activeUFO: this.player.activeUFO,
         hasDrone: this.player.hasDrone,
