@@ -31,7 +31,10 @@ export default function PauseButton({ input, size = 44 }: Props) {
         );
       }}
       style={{
-        width: size + 12,
+        // The size IS the full hit target — the zone reserves exactly this
+        // square (hudLayout pause rect), so rendering anything wider here
+        // would stick past the reserved gutter and off the right edge.
+        width: size,
         height: size,
         background: "rgba(0,0,0,0.55)",
         border: "2px solid rgba(255,255,255,0.4)",

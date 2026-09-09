@@ -64,6 +64,16 @@ export interface IGame {
   upgrades: import("./upgrade").UpgradeSystem;
   menus: import("./menu").MenuSystem;
   input: import("./input").InputManager;
+  /** True on touch-primary devices — the canvas HUD switches to the compact
+      touch layout (zones shared with the React controls via ./hudLayout). */
+  isTouchMode: boolean;
+  /** CSS safe-area insets (px, 0 on desktop) applied to the canvas HUD. */
+  safeInsets: { top: number; right: number; bottom: number; left: number };
+  /** Current canvas viewport height in CSS px. */
+  viewH: number;
+  /** Canvas HUD zone rects drawn last frame (touch mode only) — used by the
+      e2e overlap checks to prove controls never collide with the HUD. */
+  hudRects: { zone: string; x: number; y: number; w: number; h: number }[];
   score: number;
   combo: number;
   comboTimer: number;

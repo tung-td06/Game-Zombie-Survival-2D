@@ -7,6 +7,7 @@ import { WEAPON_ORDER } from "./weapon";
 import { ufoDef } from "./ufo";
 import type { IGame } from "./types";
 import { MINIMAP_SIZE } from "./settings";
+import { hudZones, touchMinimapSize, PAUSE_GUTTER } from "./hudLayout";
 
 const FONT = "bold 16px ui-monospace, monospace";
 const FONT_SM = "bold 13px ui-monospace, monospace";
@@ -99,6 +100,35 @@ export function computeHudBlock(game: IGame, w: number): {
   const scoreStr = fmtInt(game.score);
   const moneyStr = "$" + fmtInt(game.player!.coins);
 
+  // ── Touch layout (mobile landscape): smaller fonts, always stacked, and
+  //    shifted LEFT past the reserved pause-button gutter at the top-right,
+  //    so the pause control can never sit on top of the score panel.
+  if (game.isTouchMode) {
+    const labelFont = 10;
+    const valueFont = 13;
+    const padX = 10;
+    const padY = 8;
+    const gapY = 6;
+    const widthOf = (fontSize: number, text: string): number =>
+      text.length * fontSize * 0.6;
+    const cell1 =
+      Math.max(widthOf(labelFont, "SCORE"), widthOf(valueFont, scoreStr)) +
+      padX * 2;
+    const cell2 =
+      Math.max(widthOf(labelFont, "MONEY"), widthOf(valueFont, moneyStr)) +
+      padX * 2;
+    // Touch minimap shrinks with the viewport height (see hudLayout).
+    const mini = touchMinimapSize(game.viewH);
+    const hudW = Math.max(cell1, cell2, mini + 6, 100);
+    const margin = 10 + (game.safeInsets.right || 0);
+    const x = w - margin - PAUSE_GUTTER - hudW;
+    const y = 10 + (game.safeInsets.top || 0);
+    const rowH = labelFont + 4 + valueFont + 4;
+    const h = padY + rowH + gapY + rowH + padY;
+    return { x, y, w: hudW, h, stacked: true, mapY: y + h + 6, cell1, cell2 };
+  }
+
+  // ── Desktop layout (unchanged) ──────────────────────────────────────────
   // Fonts: labels stay compact, values are the hierarchy anchor. Values
   // shrink slightly on small screens but never below a readable floor.
   const labelFont = w < 760 ? 11 : 12;
@@ -152,6 +182,12 @@ function drawHudPanel(
 }
 
 export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, hgt: number): void {
+  // Touch-primary devices get the compact zone-based layout (shared with the
+  // React touch controls via ./hudLayout) — desktop keeps the classic HUD.
+  if (game.isTouchMode) {
+    drawHudTouch(ctx, game, w, hgt);
+    return;
+  }
   const p = game.player!;
   drawPanel(ctx, 16, 14, 330, 118);
   const hpFrac = Math.max(0, p.hp / p.maxHp);
@@ -314,6 +350,141 @@ export function drawHud(ctx: CanvasRenderingContext2D, game: IGame, w: number, h
   }
 }
 
+/**
+ * Compact touch-mode HUD. Everything is positioned by the SHARED zone
+ * geometry (./hudLayout): top-left HP panel, top-center wave, top-right
+ * score/money (with the pause gutter reserved), and a slim ammo/time strip
+ * in the horizontal gap between the left and right control zones. The
+ * bottom weapon panel / bomb pouch / corner clock are replaced by the
+ * touch controls themselves (weapon button, bomb button, reload) — nothing
+ * is drawn where a joystick, aim stick or FIRE lives.
+ */
+function drawHudTouch(
+  ctx: CanvasRenderingContext2D,
+  game: IGame,
+  w: number,
+  hgt: number,
+): void {
+  const p = game.player!;
+  const z = hudZones(w, hgt, game.safeInsets);
+  const hudRects = game.hudRects;
+  hudRects.length = 0;
+
+  // ── Top-left: HP / ARMOR / LV / XP (compact) ──────────────────────────
+  const tl = z.topLeft;
+  drawPanel(ctx, tl.x, tl.y, tl.w, tl.h);
+  const barX = tl.x + 10;
+  const barW = tl.w - 20;
+  const hpFrac = Math.max(0, Math.min(1, p.hp / p.maxHp));
+  ctx.fillStyle = "#28101C";
+  roundRect(ctx, barX, tl.y + 10, barW, 20, 4);
+  ctx.fill();
+  ctx.fillStyle = "#DC323C";
+  if (hpFrac > 0) {
+    roundRect(ctx, barX, tl.y + 10, barW * hpFrac, 20, 4);
+    ctx.fill();
+  }
+  drawText(
+    ctx,
+    `HP ${Math.floor(p.hp)} / ${Math.floor(p.maxHp)}`,
+    barX + barW / 2,
+    tl.y + 20,
+    13,
+    "#FFFFFF",
+    "center",
+    "middle",
+  );
+  const armorFrac = Math.max(0, Math.min(1, p.armor / 100));
+  ctx.fillStyle = "#101E2C";
+  roundRect(ctx, barX, tl.y + 34, barW, 10, 4);
+  ctx.fill();
+  ctx.fillStyle = color("ui_blue");
+  if (armorFrac > 0) {
+    roundRect(ctx, barX, tl.y + 34, barW * armorFrac, 10, 4);
+    ctx.fill();
+  }
+  drawText(
+    ctx,
+    `ARMOR ${Math.floor(p.armor)}`,
+    barX + barW - 4,
+    tl.y + 39,
+    10,
+    "#FFFFFF",
+    "right",
+    "middle",
+  );
+  drawText(ctx, `LV ${p.level}`, barX, tl.y + 56, 13);
+  const xpFrac = Math.max(0, Math.min(1, p.xp / p.xpNeeded));
+  ctx.fillStyle = "#14241A";
+  roundRect(ctx, barX + 56, tl.y + 54, barW - 56, 10, 4);
+  ctx.fill();
+  ctx.fillStyle = color("xp");
+  if (xpFrac > 0) {
+    roundRect(ctx, barX + 56, tl.y + 54, (barW - 56) * xpFrac, 10, 4);
+    ctx.fill();
+  }
+  drawText(
+    ctx,
+    `XP ${Math.floor(p.xp)}/${Math.floor(p.xpNeeded)}`,
+    barX + barW - 4,
+    tl.y + 59,
+    9,
+    color("ui_dim"),
+    "right",
+    "middle",
+  );
+  hudRects.push({ zone: "topLeft", x: tl.x, y: tl.y, w: tl.w, h: tl.h });
+
+  // ── Top-center: WAVE + counter ────────────────────────────────────────
+  const wm = game.waveManager;
+  const sub =
+    wm.state === "active"
+      ? `${wm.to_spawn + game.zombies.length} / ${wm.waveTotalEnemies} LEFT`
+      : `NEXT IN ${Math.max(0, Math.floor(wm.timer))}s`;
+  drawText(ctx, `WAVE ${Math.max(1, wm.wave)}`, z.wave.x, z.wave.y, 18, undefined, "center");
+  drawText(ctx, sub, z.wave.x, z.wave.y + 21, 11, color("ui_dim"), "center");
+  hudRects.push({ zone: "wave", x: z.wave.x - 64, y: z.wave.y, w: 128, h: 34 });
+
+  // ── Top-right: SCORE / MONEY (pause gutter reserved) ──────────────────
+  const block = computeHudBlock(game, w);
+  const padX = 10;
+  const padY = 8;
+  const gapY = 6;
+  const labelFont = 10;
+  const valueFont = 13;
+  const rowH = labelFont + 4 + valueFont + 4;
+  drawHudPanel(ctx, block.x, block.y, block.w, block.h);
+  const labelY = block.y + padY;
+  const valueY = labelY + labelFont + 4;
+  const cellX1 = block.x + padX;
+  const cellX2 = block.x + padX;
+  drawText(ctx, "SCORE", cellX1, labelY, labelFont, color("ui_dim"), "left", "top");
+  drawText(ctx, fmtInt(game.score), cellX1, valueY, valueFont, color("ui_gold"), "left", "top");
+  drawText(ctx, "MONEY", cellX2, labelY + rowH + gapY, labelFont, color("ui_dim"), "left", "top");
+  drawText(ctx, "$" + fmtInt(p.coins), cellX2, valueY + rowH + gapY, valueFont, color("ui_green"), "left", "top");
+  hudRects.push({ zone: "score", x: block.x, y: block.y, w: block.w, h: block.h });
+
+  // ── Bottom center: weapon + ammo + time strip (between the control zones)
+  const strip = z.bottomStrip;
+  if (strip.w > 70) {
+    const wep = p.weapons.current;
+    const line1 = wep.reloading
+      ? `RELOADING ${Math.min(99, Math.floor(((wep as unknown as { reloadTotal: number }).reloadTotal - (wep as unknown as { reloadTimer: number }).reloadTimer) / Math.max(0.01, (wep as unknown as { reloadTotal: number }).reloadTotal) * 100))}%`
+      : `${wep.ammo} / ${wep.reserve}`;
+    drawPanel(ctx, strip.x, strip.y, strip.w, strip.h, "rgba(16,18,14,0.72)");
+    drawText(ctx, wep.name, strip.x + 8, strip.y + 5, 11);
+    drawText(ctx, line1, strip.x + strip.w - 8, strip.y + 4, 14, undefined, "right");
+    const icon = game.isNight() ? "NIGHT" : "DAY";
+    const col = game.isNight() ? "#9696E6" : color("ui_blue");
+    const time = `${formatTime(game.elapsed)}  ${icon}`;
+    drawText(ctx, time, strip.x + 8, strip.y + 24, 10, col);
+    if (game.showFps) {
+      drawText(ctx, `FPS ${game.fpsDisplay}`, strip.x + strip.w - 8, strip.y + 24, 10, color("ui_dim"), "right");
+    }
+    hudRects.push({ zone: "bottomStrip", x: strip.x, y: strip.y, w: strip.w, h: strip.h });
+  }
+}
+
 /** Bomb counter beside the weapon panel: key hint + one pip per bomb. */
 function drawBombPouch(
   ctx: CanvasRenderingContext2D,
@@ -360,7 +531,11 @@ function wpanelRight(x: number, w: number): number {
 }
 
 export function drawMinimap(ctx: CanvasRenderingContext2D, game: IGame, screenW: number, scale: number): void {
-  const size = MINIMAP_SIZE * scale;
+  // Touch layout shrinks the map to 62.5% so it never reaches the bottom
+  // control cluster on short landscape screens; the panel keeps the same
+  // right gutter as the score block (pause button reserved).
+  const touch = game.isTouchMode;
+  const size = touch ? touchMinimapSize(game.viewH) * scale : MINIMAP_SIZE * scale;
   // Same panel block as the SCORE/MONEY HUD above: same width, same left
   // edge, one clear gap below — the map reads as the bottom half of a single
   // HUD unit instead of a detached floating square.
@@ -460,6 +635,15 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, game: IGame, screenW:
   ctx.strokeStyle = "#0A0A0C";
   ctx.lineWidth = 1;
   ctx.stroke();
+  if (touch) {
+    game.hudRects.push({
+      zone: "minimap",
+      x: panelX,
+      y: mapY - 3,
+      w: panelW,
+      h: size + 6,
+    });
+  }
 }
 
 export function drawCrosshair(

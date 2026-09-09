@@ -156,6 +156,15 @@ a:hover {
   }
 }
 
+/* Safe-area insets as CSS custom properties so the canvas HUD and the touch
+   controls can read them in JS (env() is not readable from script). */
+:root {
+  --zs-sat: env(safe-area-inset-top, 0px);
+  --zs-sar: env(safe-area-inset-right, 0px);
+  --zs-sab: env(safe-area-inset-bottom, 0px);
+  --zs-sal: env(safe-area-inset-left, 0px);
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    Game stage
    The canvas fills the viewport; everything below is inert chrome painted

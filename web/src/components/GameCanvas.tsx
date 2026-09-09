@@ -114,8 +114,10 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
     const dpr = renderScale();
 
     const resize = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
+      // Visual viewport tracks the mobile URL-bar collapse and pinch zoom;
+      // fall back to the layout viewport for older browsers.
+      const w = window.visualViewport?.width ?? window.innerWidth;
+      const h = window.visualViewport?.height ?? window.innerHeight;
       canvas.width = Math.floor(w * dpr);
       canvas.height = Math.floor(h * dpr);
       canvas.style.width = w + "px";
@@ -164,6 +166,30 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
       game.input.pointerLocked = document.pointerLockElement === canvas;
     };
     document.addEventListener("pointerlockchange", onPointerLock);
+
+    // Publish the touch-mode + safe-area contract the canvas HUD consumes:
+    // isTouchMode switches ui.ts to the compact zone layout (./hudLayout),
+    // safeInsets offset every HUD panel away from notches / gesture bars.
+    const readInsets = () => {
+      const cs = getComputedStyle(document.documentElement);
+      const px = (name: string): number => {
+        const v = parseFloat(cs.getPropertyValue(name).trim());
+        return Number.isFinite(v) ? v : 0;
+      };
+      return {
+        top: px("--zs-sat"),
+        right: px("--zs-sar"),
+        bottom: px("--zs-sab"),
+        left: px("--zs-sal"),
+      };
+    };
+    const applyLayoutContract = () => {
+      game.isTouchMode = isMobileRef.current;
+      game.safeInsets = readInsets();
+    };
+    applyLayoutContract();
+    window.addEventListener("resize", applyLayoutContract);
+    window.addEventListener("orientationchange", applyLayoutContract);
     
     const onContextMenu = (e: Event) => e.preventDefault();
     canvas.addEventListener("contextmenu", onContextMenu);
@@ -240,6 +266,8 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
         vv.removeEventListener("scroll", resize);
       }
       document.removeEventListener("pointerlockchange", onPointerLock);
+      window.removeEventListener("resize", applyLayoutContract);
+      window.removeEventListener("orientationchange", applyLayoutContract);
       canvas.removeEventListener("contextmenu", onContextMenu);
       canvas.removeEventListener("click", onClick);
       window.removeEventListener("keydown", onEvent);

@@ -494,6 +494,14 @@ export class Game {
     return isDebug();
   }
 
+  // ── Mobile layout contract (set by GameCanvas) ────────────────────────
+  /** True on touch-primary devices — see ./hudLayout for the shared zones. */
+  isTouchMode = false;
+  /** CSS safe-area insets in px (0 on desktop). */
+  safeInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  /** Canvas HUD zones drawn last frame (touch mode only) — overlap checks. */
+  hudRects: { zone: string; x: number; y: number; w: number; h: number }[] = [];
+
   toggleFullscreen() {
     const st = this.save.settings;
     st.fullscreen = !st.fullscreen;

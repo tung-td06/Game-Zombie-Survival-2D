@@ -3,27 +3,32 @@
 // TouchHUD composes the mobile controls and wires them into the existing
 // InputManager — no game-core changes. Twin-stick layout:
 //
-//   • LEFT joystick  → movement (moveVec → WASD key surface)
-//   • RELOAD button  → one-shot reloadPressed (existing R-key surface)
-//   • RIGHT joystick → aim + fire (aimOverride + fireHeld → existing weapon)
-//   • WEAPON button  → cycles owned weapons (next_weapon binding)
-//   • BOMB button    → one-shot bombPressed (existing F-key surface)
-//   • PAUSE button   → real Escape keydown (existing pause manager)
+//   • LEFT row     → JOYSTICK (move) · WEAPON (cycle) · RELOAD
+//   • RIGHT column → BOMB above FIRE · AIM stick · FIRE (corner)
+//   • PAUSE        → top-right, inside the reserved pause gutter
 //
-// Controls only react during real gameplay: joysticks / fire / weapon / bomb
-// / reload are hidden whenever the game is not PLAYING (pause menus, upgrade
-// picks, game over, boot), so they never sit over the canvas menus. They stay
-// MOUNTED (display:none), which preserves the last aim direction and joystick
-// state across a pause — returning to the game never auto-fires or auto-moves.
-// The PAUSE button stays available while paused so the player can resume.
+// EVERY position comes from the shared zone geometry in @/game/hudLayout —
+// the same module the canvas HUD (ui.ts) uses — so a control can never
+// overlap a canvas HUD panel (HP, wave, score, minimap) or the bottom
+// ammo/time strip by construction, at any viewport size. Safe-area insets
+// are applied by the zones (notches, gesture bars, rounded corners).
 //
-// Sizes scale with the viewport (clamped touch targets); safe-area insets
-// keep everything clear of notches and gesture bars.
+// Controls only react during real gameplay: joystick / aim / fire / weapon
+// / bomb / reload are hidden whenever the game is not PLAYING (pause menus,
+// upgrade picks, game over, boot). They stay MOUNTED (display:none), which
+// preserves the last aim direction and joystick state across a pause —
+// returning to the game never auto-fires or auto-moves. The PAUSE button
+// stays available while paused so the player can resume.
 
 import type { RefObject } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InputManager } from "@/game/input";
 import type { Game } from "@/game/game";
+import {
+  computeControlSizes,
+  hudZones,
+  type SafeInsets,
+} from "@/game/hudLayout";
 import VirtualJoystick from "./VirtualJoystick";
 import RightJoystick from "./RightJoystick";
 import FireButton from "./FireButton";
@@ -37,55 +42,63 @@ interface Props {
   gameRef: RefObject<Game | null>;
 }
 
-/** Clamped touch-target sizes driven by the smaller viewport dimension. */
-function computeControlSizes(): {
-  joystick: number;
-  thumb: number;
-  button: number;
-  fire: number;
-} {
+function readInsets(): SafeInsets {
   if (typeof window === "undefined") {
-    return { joystick: 120, thumb: 56, button: 60, fire: 80 };
+    return { top: 0, right: 0, bottom: 0, left: 0 };
   }
-  // Prefer the VISUAL viewport (tracks the mobile URL-bar collapse and
-  // pinch zoom); fall back to the layout viewport for older browsers.
-  const vw = window.visualViewport?.width ?? window.innerWidth;
-  const vh = window.visualViewport?.height ?? window.innerHeight;
-  const base = Math.min(vw, vh); // landscape → the height; portrait → width
-  const joystick = Math.round(Math.max(96, Math.min(150, base * 0.3)));
-  const thumb = Math.round(joystick * 0.46);
-  const button = Math.round(Math.max(52, Math.min(72, base * 0.15)));
-  // FIRE is the primary combat control: always larger than the rest.
-  const fire = Math.round(Math.max(64, Math.min(100, button * 1.35)));
-  return { joystick, thumb, button, fire };
+  const cs = getComputedStyle(document.documentElement);
+  const px = (name: string): number => {
+    const v = cs.getPropertyValue(name).trim();
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+  return {
+    top: px("--zs-sat"),
+    right: px("--zs-sar"),
+    bottom: px("--zs-sab"),
+    left: px("--zs-sal"),
+  };
 }
 
-function useControlSizes() {
-  // Synchronous first measurement: the sizes are correct from the very
-  // first client render — resize only RE-measures when the viewport
-  // actually changes, it is never required for the controls to appear.
-  const [sizes, setSizes] = useState(computeControlSizes);
+function viewport(): { w: number; h: number } {
+  if (typeof window === "undefined") {
+    return { w: 0, h: 0 };
+  }
+  // Visual viewport tracks the mobile URL-bar collapse and pinch zoom;
+  // fall back to the layout viewport for older browsers.
+  return {
+    w: window.visualViewport?.width ?? window.innerWidth,
+    h: window.visualViewport?.height ?? window.innerHeight,
+  };
+}
+
+function useLayout() {
+  const [layout, setLayout] = useState(() => {
+    const { w, h } = viewport();
+    return { w, h, zones: hudZones(w, h, readInsets()), sizes: computeControlSizes(w, h) };
+  });
   useEffect(() => {
-    const onResize = () => setSizes(computeControlSizes());
-    window.addEventListener("resize", onResize);
-    window.addEventListener("orientationchange", onResize);
-    // Mobile URL-bar collapse / pinch zoom change the VISUAL viewport; keep
-    // the touch targets sized to the real visible area.
+    const recompute = () => {
+      const { w, h } = viewport();
+      setLayout({ w, h, zones: hudZones(w, h, readInsets()), sizes: computeControlSizes(w, h) });
+    };
+    window.addEventListener("resize", recompute);
+    window.addEventListener("orientationchange", recompute);
     const vv = window.visualViewport;
     if (vv) {
-      vv.addEventListener("resize", onResize);
-      vv.addEventListener("scroll", onResize);
+      vv.addEventListener("resize", recompute);
+      vv.addEventListener("scroll", recompute);
     }
     return () => {
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("orientationchange", onResize);
+      window.removeEventListener("resize", recompute);
+      window.removeEventListener("orientationchange", recompute);
       if (vv) {
-        vv.removeEventListener("resize", onResize);
-        vv.removeEventListener("scroll", onResize);
+        vv.removeEventListener("resize", recompute);
+        vv.removeEventListener("scroll", recompute);
       }
     };
   }, []);
-  return sizes;
+  return layout;
 }
 
 const PAUSE_STATES = [
@@ -97,7 +110,10 @@ const PAUSE_STATES = [
 ];
 
 export default function TouchHUD({ input, gameRef }: Props) {
-  // Mirror joystick → WASD keys so player.ts:97-98 keeps working.
+  const { zones, sizes } = useLayout();
+  const c = zones.controls;
+
+  // Mirror joystick → WASD keys so player.ts:215-216 keeps working.
   const left = useMemo(() => input.bindings["left"], [input]);
   const right = useMemo(() => input.bindings["right"], [input]);
   const up = useMemo(() => input.bindings["up"], [input]);
@@ -128,15 +144,9 @@ export default function TouchHUD({ input, gameRef }: Props) {
       void reload;
       raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(tick);
+    tick();
     return () => cancelAnimationFrame(raf);
   }, [input, left, right, up, down, reload]);
-
-  const { joystick, thumb, button, fire } = useControlSizes();
-  const safeTop = "max(16px, env(safe-area-inset-top))";
-  const safeRight = "max(16px, env(safe-area-inset-right))";
-  const safeBottom = "max(16px, env(safe-area-inset-bottom))";
-  const safeLeft = "max(16px, env(safe-area-inset-left))";
 
   // Game-state gating (see header comment). The initial value is read
   // synchronously from the game (which exists by the time this mounts —
@@ -187,109 +197,108 @@ export default function TouchHUD({ input, gameRef }: Props) {
         // game layer.
         zIndex: 20,
         pointerEvents: "none",
-        paddingBottom: safeBottom,
-        paddingLeft: safeLeft,
-        paddingRight: safeRight,
-        paddingTop: safeTop,
         boxSizing: "border-box",
         userSelect: "none",
         WebkitUserSelect: "none",
         WebkitTapHighlightColor: "transparent",
       }}
     >
-      {/* Pause — top-right. Stays mounted while paused so it doubles as
-          RESUME (its Escape keydown toggles PAUSED → PLAYING). */}
+      {/* Pause — top-right, inside the reserved pause gutter so it can never
+          cover the canvas SCORE/MONEY panel or minimap. Stays mounted while
+          paused so it doubles as RESUME (its Escape keydown toggles
+          PAUSED → PLAYING). */}
       <div
         style={{
           position: "absolute",
-          top: safeTop,
-          right: safeRight,
+          left: c.pause.x,
+          top: c.pause.y,
           pointerEvents: "auto",
           display: showPause ? undefined : "none",
         }}
       >
-        <PauseButton input={input} size={button} />
+        <PauseButton input={input} size={c.pause.w} />
       </div>
 
-      {/* Left joystick — movement (bottom-left) */}
+      {/* LEFT ZONE — joystick (move), then WEAPON and RELOAD in a row. */}
       <div
         style={{
           position: "absolute",
-          bottom: safeBottom,
-          left: safeLeft,
+          left: c.joystick.x,
+          top: c.joystick.y,
           pointerEvents: "auto",
           display: inPlay ? undefined : "none",
         }}
       >
         <VirtualJoystick
-          size={joystick}
-          thumbSize={thumb}
+          size={c.joystick.w}
+          thumbSize={sizes.thumb}
           onChange={(vec) => {
             input.moveVec = vec;
           }}
         />
       </div>
-
-      {/* Reload — just right of the movement joystick, still under the left
-          thumb. Hidden unless actively playing. */}
       <div
         style={{
           position: "absolute",
-          bottom: safeBottom,
-          left: `calc(${safeLeft} + ${joystick}px + 14px)`,
+          left: c.weapon.x,
+          top: c.weapon.y,
           pointerEvents: "auto",
           display: inPlay ? undefined : "none",
         }}
       >
-        <ReloadButton input={input} gameRef={gameRef} size={button} />
+        <WeaponSwitchButton input={input} gameRef={gameRef} size={c.weapon.w} />
       </div>
-
-      {/* FIRE — big held-to-fire button in the very corner (right of the
-          aim stick). Hidden unless actively playing. */}
       <div
         style={{
           position: "absolute",
-          bottom: safeBottom,
-          right: safeRight,
+          left: c.reload.x,
+          top: c.reload.y,
           pointerEvents: "auto",
           display: inPlay ? undefined : "none",
         }}
       >
-        <FireButton input={input} size={fire} />
+        <ReloadButton input={input} gameRef={gameRef} size={c.reload.w} />
       </div>
 
-      {/* Right joystick — aim (bottom-right, beside the FIRE button). Dragging
-          past its dead zone also fires, so a single thumb can do both; the
-          FIRE button is for steady holding while aiming independently. */}
+      {/* RIGHT ZONE — BOMB above FIRE at the corner, AIM left of FIRE. */}
       <div
         style={{
           position: "absolute",
-          bottom: safeBottom,
-          right: `calc(${safeRight} + ${fire}px + 12px)`,
+          left: c.bomb.x,
+          top: c.bomb.y,
           pointerEvents: "auto",
           display: inPlay ? undefined : "none",
         }}
       >
-        <RightJoystick input={input} gameRef={gameRef} size={joystick} thumbSize={thumb} />
+        <BombButton input={input} gameRef={gameRef} size={c.bomb.w} />
       </div>
-
-      {/* Action buttons — Weapon above Bomb, just left of the right joystick
-          so they never overlap it and stay reachable mid-combat. */}
       <div
         style={{
           position: "absolute",
-          bottom: safeBottom,
-          right: `calc(${safeRight} + ${fire}px + 12px + ${joystick}px + 14px)`,
-          display: inPlay ? "flex" : "none",
-          flexDirection: "column",
-          gap: 12,
-          alignItems: "center",
+          left: c.fire.x,
+          top: c.fire.y,
           pointerEvents: "auto",
+          display: inPlay ? undefined : "none",
         }}
       >
-        <WeaponSwitchButton input={input} gameRef={gameRef} size={button} />
-        <BombButton input={input} gameRef={gameRef} size={button} />
+        <FireButton input={input} size={c.fire.w} />
+      </div>
+      <div
+        style={{
+          position: "absolute",
+          left: c.aim.x,
+          top: c.aim.y,
+          pointerEvents: "auto",
+          display: inPlay ? undefined : "none",
+        }}
+      >
+        <RightJoystick
+          input={input}
+          gameRef={gameRef}
+          size={c.aim.w}
+          thumbSize={sizes.thumb}
+        />
       </div>
     </div>
   );
-}
+}
