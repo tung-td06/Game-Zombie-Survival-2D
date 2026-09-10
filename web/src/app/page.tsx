@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DEFAULT_SAVE, SaveManager, type SaveData } from "@/game/save";
 import { AudioManager } from "@/game/audio";
 import { BestiarySection } from "@/components/bestiary/BestiarySection";
+import { WeaponUFOSection } from "@/components/weapons/WeaponUFOSection";
 
 interface LeaderboardEntry {
   rank: number;
@@ -826,6 +827,10 @@ export default function Home() {
                 gameplay uses (stats from /data/zombies.json, wave gates from
                 enemyGates). Read-only: never touches save/gameplay. */}
             <BestiarySection />
+
+            {/* Weapon & UFO info — shop-style pixel-art icons, stats from
+                /data/weapons.json, UFO catalog from ufo.ts. Read-only. */}
+            <WeaponUFOSection />
           </section>
 
           {/* RIGHT COLUMN — Tabs + Content */}
