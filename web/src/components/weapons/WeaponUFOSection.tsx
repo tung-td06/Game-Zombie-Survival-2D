@@ -1,9 +1,8 @@
-﻿"use client";
+"use client";
 
-// Lobby THONG TIN VU KHI & UFO -- a READ-ONLY reference panel placed below
-// the Bestiary in the left column. Weapon icons are drawn with the same pixel-
-// art style used in the in-game shop (ui.ts -> drawShopIcon). UFO cards mirror
-// the UFO_CATALOG from ufo.ts. Clicking a weapon row opens a detail modal.
+// Lobby THÔNG TIN VŨ KHÍ & UFO -- a READ-ONLY reference panel placed in the lobby.
+// Weapon icons are drawn with the same pixel-art style used in the in-game shop.
+// UFO cards mirror the UFO_CATALOG from ufo.ts. Clicking a weapon row opens a detail modal.
 
 import { useEffect, useState } from "react";
 import { UFO_CATALOG, type UfoDef } from "@/game/ufo";
@@ -139,7 +138,7 @@ function UFOIcon({ tint, glow, size = 56 }: { tint: string; glow: string; size?:
 function StatBadge({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
     <span style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:1, minWidth:48 }}>
-      <span style={{ fontSize:9, color:C.dim, letterSpacing:1, textTransform:"uppercase" }}>{label}</span>
+      <span style={{ fontSize:9, color:C.dim, letterSpacing:0.5, textTransform:"uppercase" }}>{label}</span>
       <span style={{ fontSize:"0.78rem", fontWeight:800, color, fontVariantNumeric:"tabular-nums" }}>{value}</span>
     </span>
   );
@@ -148,7 +147,7 @@ function StatBadge({ label, value, color }: { label: string; value: string | num
 const ELEM_COLORS: Record<string,string> = { fire:"#FF9C4A", plasma:"#C58BFF", pierce:"#5ADCFF" };
 function ElemBadge({ elem }: { elem: string }) {
   const color = ELEM_COLORS[elem] ?? C.gold;
-  const labels: Record<string,string> = { fire:"FIRE", plasma:"PLASMA", pierce:"PIERCE" };
+  const labels: Record<string,string> = { fire:"LỬA", plasma:"PLASMA", pierce:"XUYÊN" };
   return (
     <span style={{ fontSize:9, fontWeight:700, letterSpacing:1, color,
       border:`1px solid ${color}55`, borderRadius:3, padding:"1px 6px",
@@ -165,7 +164,7 @@ function WeaponRow({ id, data, onClick }: { id: string; data: WeaponData; onClic
   return (
     <button type="button" onClick={onClick}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      aria-label={`Xem chi tiet ${data.name}`}
+      aria-label={`Xem chi tiết ${data.name}`}
       style={{
         display:"grid", gridTemplateColumns:"auto 1fr", gap:10,
         alignItems:"center", width:"100%", boxSizing:"border-box",
@@ -188,19 +187,19 @@ function WeaponRow({ id, data, onClick }: { id: string; data: WeaponData; onClic
           <span style={{ flexShrink:0, fontSize:10, fontWeight:700, color:priceColor,
             border:`1px solid ${priceColor}44`, borderRadius:3, padding:"1px 6px",
             backgroundColor:`${priceColor}10`, whiteSpace:"nowrap" }}>
-            {isFree ? "FREE" : `${data.price.toLocaleString()}`}
+            {isFree ? "MIỄN PHÍ" : `${data.price.toLocaleString()} xu`}
           </span>
         </div>
         <div style={{ display:"flex", flexWrap:"wrap", alignItems:"center", gap:"4px 10px", marginTop:5 }}>
-          <StatBadge label="DMG" value={data.damage} color={C.red}/>
-          <StatBadge label="MAG" value={data.magazine} color={C.cyan}/>
-          <StatBadge label="RLD" value={`${data.reload_time}s`} color={C.textSoft}/>
-          <StatBadge label="RNG" value={data.range ?? "N/A"} color={C.gold}/>
+          <StatBadge label="SÁT THƯƠNG" value={data.damage} color={C.red}/>
+          <StatBadge label="BĂNG ĐẠN" value={data.magazine} color={C.cyan}/>
+          <StatBadge label="THAY ĐẠN" value={`${data.reload_time}s`} color={C.textSoft}/>
+          <StatBadge label="TẦM BẮN" value={data.range ?? "N/A"} color={C.gold}/>
           {data.elem && <ElemBadge elem={data.elem}/>}
           {data.auto && (
             <span style={{ fontSize:9, fontWeight:700, letterSpacing:1, color:C.green,
               border:`1px solid ${C.green}44`, borderRadius:3, padding:"1px 5px",
-              backgroundColor:`${C.green}12` }}>AUTO</span>
+              backgroundColor:`${C.green}12` }}>TỰ ĐỘNG</span>
           )}
         </div>
       </div>
@@ -220,7 +219,7 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
       style={{ position:"fixed", inset:0, zIndex:130, backgroundColor:"rgba(8,8,10,0.72)",
         display:"flex", alignItems:"center", justifyContent:"center",
         padding:16, boxSizing:"border-box", animation:"zs-settings-fade 0.15s ease-out" }}>
-      <div role="dialog" aria-modal="true" aria-label={`Chi tiet vu khi ${data.name}`}
+      <div role="dialog" aria-modal="true" aria-label={`Chi tiết vũ khí ${data.name}`}
         onClick={(e) => e.stopPropagation()}
         style={{ width:"100%", maxWidth:480, maxHeight:"min(88vh,660px)", overflowY:"auto",
           boxSizing:"border-box", backgroundColor:C.panel,
@@ -228,7 +227,7 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
           boxShadow:"0 0 34px rgba(255,200,80,0.2),0 10px 44px rgba(0,0,0,0.7)",
           padding:"20px 22px 22px", animation:"zs-settings-pop 0.18s ease-out" }}>
         <div style={{ display:"flex", justifyContent:"flex-end", marginBottom:4 }}>
-          <button type="button" onClick={onClose} aria-label="Dong"
+          <button type="button" onClick={onClose} aria-label="Đóng"
             style={{ width:30, height:30, borderRadius:4,
               border:`1px solid ${C.border}`, backgroundColor:"transparent",
               color:C.dim, cursor:"pointer", fontSize:14, fontFamily:"inherit" }}
@@ -250,13 +249,13 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
               color: isFree ? C.green : C.gold,
               border:`1px solid ${isFree ? C.green : C.gold}55`, borderRadius:3,
               padding:"2px 8px", backgroundColor:`${isFree ? C.green : C.gold}14` }}>
-              {isFree ? "FREE - STARTING WEAPON" : `${data.price.toLocaleString()} coins`}
+              {isFree ? "MIỄN PHÍ - VŨ KHÍ KHỞI ĐẦU" : `${data.price.toLocaleString()} xu`}
             </span>
             {data.elem && <ElemBadge elem={data.elem}/>}
             {data.auto && (
               <span style={{ fontSize:10, fontWeight:700, letterSpacing:1.5, color:C.green,
                 border:`1px solid ${C.green}55`, borderRadius:3, padding:"2px 8px",
-                backgroundColor:`${C.green}14` }}>AUTO-FIRE</span>
+                backgroundColor:`${C.green}14` }}>BẮN TỰ ĐỘNG</span>
             )}
           </div>
         </div>
@@ -264,33 +263,43 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
           background:"linear-gradient(90deg,rgba(255,200,80,0),rgba(255,200,80,0.5),rgba(255,200,80,0))"}}/>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"6px 12px" }}>
           {[
-            {label:"SAT THUONG (DMG)", value:data.damage, color:C.red},
-            {label:"CO DAN (MAG)", value:data.magazine, color:C.cyan},
-            {label:"TOC BAN (FIRE RATE)", value:`${data.fire_rate}s`, color:C.gold},
-            {label:"NAP DAN (RELOAD)", value:`${data.reload_time}s`, color:C.textSoft},
-            {label:"TAM BAN (RANGE)", value:data.range ?? "N/A", color:C.orange},
-            {label:"DO CHINH XAC", value:`${data.spread_deg}`, color:C.green},
-            {label:"CRIT CHANCE", value:`${Math.round(data.critical_chance*100)}%`, color:C.red},
-            {label:"CRIT MULT", value:`x${data.critical_multiplier}`, color:C.gold},
+            {label:"SÁT THƯƠNG", value:data.damage, color:C.red},
+            {label:"BĂNG ĐẠN", value:data.magazine, color:C.cyan},
+            {label:"TỐC ĐỘ BẮN", value:`${data.fire_rate}s`, color:C.gold},
+            {label:"THỜI GIAN THAY ĐẠN", value:`${data.reload_time}s`, color:C.textSoft},
+            {label:"TẦM BẮN", value:data.range ?? "N/A", color:C.orange},
+            {label:"ĐỘ CHÍNH XÁC", value:`${data.spread_deg}°`, color:C.green},
+            {label:"TỶ LỆ CHÍ MẠNG", value:`${Math.round(data.critical_chance*100)}%`, color:C.red},
+            {label:"SÁT THƯƠNG CHÍ MẠNG", value:`x${data.critical_multiplier}`, color:C.gold},
           ].map(({label,value,color}) => (
             <div key={label} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
               gap:6, padding:"5px 10px", backgroundColor:C.panelDeep,
               border:`1px solid ${C.borderSoft}`, borderRadius:5 }}>
-              <span style={{ fontSize:9, letterSpacing:1, color:C.dim }}>{label}</span>
-              <span style={{ fontSize:"0.82rem", fontWeight:800, color, fontVariantNumeric:"tabular-nums" }}>{value}</span>
+              <span style={{ fontSize:9, letterSpacing:0.5, color:C.dim, whiteSpace:"nowrap" }}>{label}</span>
+              <span style={{ fontSize:"0.82rem", fontWeight:800, color, fontVariantNumeric:"tabular-nums", flexShrink:0 }}>{value}</span>
             </div>
           ))}
         </div>
         <p style={{ margin:"14px 0 0", textAlign:"center", fontSize:10, color:"#5A5A55" }}>
-          Chi so lay tu /data/weapons.json - dong bo khi game cap nhat.
+          Chỉ số lấy từ /data/weapons.json - đồng bộ khi game cập nhật.
         </p>
       </div>
     </div>
   );
 }
 
+const UFO_DESC_VI: Record<string, string> = {
+  drone: "Drone chiến đấu xoay quanh tự động bắn zombie.",
+  wasp: "Đĩa bay tấn công nhanh với lớp vỏ mạ vàng.",
+  phantom: "Tàu đánh chặn tàng hình, khó phát hiện trong bóng tối.",
+  goliath: "Đĩa bay hỗ trợ hạng nặng với lớp vỏ đỏ chiến đấu.",
+  vulture: "Tàu hộ tống độc hại với quầng sáng xanh lá.",
+  sentinel: "Vệ sĩ mẫu thử nghiệm với lớp vỏ màu bạc trắng.",
+};
+
 function UFOCard({ def }: { def: UfoDef }) {
   const [hover, setHover] = useState(false);
+  const desc = UFO_DESC_VI[def.id] ?? def.desc;
   return (
     <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px",
@@ -305,10 +314,10 @@ function UFOCard({ def }: { def: UfoDef }) {
           <span style={{ fontSize:9, fontWeight:700, color:C.gold,
             border:`1px solid ${C.gold}44`, borderRadius:3, padding:"1px 5px",
             backgroundColor:`${C.gold}10`, whiteSpace:"nowrap" }}>
-            {def.price.toLocaleString()} coins
+            {def.price.toLocaleString()} xu
           </span>
         </div>
-        <p style={{ margin:"3px 0 0", fontSize:"0.72rem", color:C.dim, lineHeight:1.4 }}>{def.desc}</p>
+        <p style={{ margin:"3px 0 0", fontSize:"0.72rem", color:C.dim, lineHeight:1.4 }}>{desc}</p>
       </div>
     </div>
   );
@@ -325,7 +334,7 @@ export function WeaponUFOSection() {
     setError(null);
     loadWeapons()
       .then((data) => { if (alive) setWeapons(data); })
-      .catch(() => { if (alive) setError("Khong tai duoc du lieu vu khi."); });
+      .catch(() => { if (alive) setError("Không tải được dữ liệu vũ khí."); });
     return () => { alive = false; };
   }, []);
 
@@ -336,10 +345,10 @@ export function WeaponUFOSection() {
         <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", gap:8, marginBottom:10 }}>
           <h2 style={{ margin:0, fontSize:13, fontWeight:700, letterSpacing:2,
             color:C.gold, textTransform:"uppercase" }}>
-            THONG TIN VU KHI &amp; UFO
+            THÔNG TIN VŨ KHÍ &amp; UFO
           </h2>
           <span style={{ fontSize:10, letterSpacing:1, color:C.dim, whiteSpace:"nowrap" }}>
-            {tab === "weapons" ? `${WEAPON_ORDER.length} VU KHI` : `${UFO_CATALOG.length} UFO`}
+            {tab === "weapons" ? `${WEAPON_ORDER.length} VŨ KHÍ` : `${UFO_CATALOG.length} UFO`}
           </span>
         </div>
         {/* Sub-tabs */}
@@ -351,7 +360,7 @@ export function WeaponUFOSection() {
                 color: tab===t ? C.gold : C.dim, fontWeight:700, fontSize:"0.72rem",
                 letterSpacing:1.5, cursor:"pointer", fontFamily:"inherit",
                 textTransform:"uppercase", transition:"color 0.15s, border-bottom-color 0.15s" }}>
-              {t === "weapons" ? "VU KHI" : "UFO FLEET"}
+              {t === "weapons" ? "VŨ KHÍ" : "ĐỘI UFO"}
             </button>
           ))}
         </div>
@@ -363,7 +372,7 @@ export function WeaponUFOSection() {
             <div style={{ padding:20, textAlign:"center", color:C.dim, fontSize:"0.82rem" }}>{error}</div>
           ) : !weapons ? (
             <div style={{ padding:"24px 20px", textAlign:"center", color:C.dim }}>
-              DANG TAI DU LIEU VU KHI...
+              ĐANG TẢI DỮ LIỆU VŨ KHÍ...
             </div>
           ) : (
             WEAPON_ORDER.map((id) => {
@@ -378,8 +387,8 @@ export function WeaponUFOSection() {
       </div>
       <p style={{ margin:0, padding:"6px 14px 14px", fontSize:10, color:"#5A5A55", lineHeight:1.5 }}>
         {tab === "weapons"
-          ? "Bam vao vu khi de xem chi tiet. Mua tai SHOP trong game."
-          : "UFO tu dong ban quanh nguoi choi. Toi da 4 UFO. Mua tai SHOP trong game."}
+          ? "Bấm vào vũ khí để xem chi tiết. Mua tại SHOP trong game."
+          : "UFO tự động bắn quanh người chơi. Tối đa 4 UFO. Mua tại SHOP trong game."}
       </p>
       {selected && <WeaponModal id={selected.id} data={selected.data} onClose={() => setSelected(null)}/>}
     </div>

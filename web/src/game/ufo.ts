@@ -31,7 +31,7 @@ export const UFO_CATALOG: UfoDef[] = [
   {
     id: "drone",
     name: "UFO DRONE",
-    desc: "Orbiting combat drone that auto-fires at zombies.",
+    desc: "Drone chiến đấu xoay quanh tự động bắn zombie.",
     price: DRONE_PRICE,
     tint: "#8FE8FF",
     glow: "rgba(140, 230, 255, 0.45)",
@@ -39,7 +39,7 @@ export const UFO_CATALOG: UfoDef[] = [
   {
     id: "wasp",
     name: "WASP",
-    desc: "Fast strike saucer with a golden hull.",
+    desc: "Đĩa bay tấn công nhanh với lớp vỏ mạ vàng.",
     price: 15000,
     tint: "#FFD76A",
     glow: "rgba(255, 215, 106, 0.45)",
@@ -47,7 +47,7 @@ export const UFO_CATALOG: UfoDef[] = [
   {
     id: "phantom",
     name: "PHANTOM",
-    desc: "Stealth interceptor, hard to spot in the dark.",
+    desc: "Tàu đánh chặn tàng hình, khó phát hiện trong bóng tối.",
     price: 20000,
     tint: "#C58BFF",
     glow: "rgba(197, 139, 255, 0.45)",
@@ -55,7 +55,7 @@ export const UFO_CATALOG: UfoDef[] = [
   {
     id: "goliath",
     name: "GOLIATH",
-    desc: "Heavy support saucer with a red war hull.",
+    desc: "Đĩa bay hỗ trợ hạng nặng với lớp vỏ đỏ chiến đấu.",
     price: 25000,
     tint: "#FF6B6B",
     glow: "rgba(255, 107, 107, 0.45)",
@@ -63,7 +63,7 @@ export const UFO_CATALOG: UfoDef[] = [
   {
     id: "vulture",
     name: "VULTURE",
-    desc: "Toxic escort with a sickly green corona.",
+    desc: "Tàu hộ tống độc hại với quầng sáng xanh lá.",
     price: 30000,
     tint: "#8CFF8C",
     glow: "rgba(140, 255, 140, 0.45)",
@@ -71,7 +71,7 @@ export const UFO_CATALOG: UfoDef[] = [
   {
     id: "sentinel",
     name: "SENTINEL",
-    desc: "Prototype guardian with a silver-white hull.",
+    desc: "Vệ sĩ mẫu thử nghiệm với lớp vỏ màu bạc trắng.",
     price: 35000,
     tint: "#E8F4FF",
     glow: "rgba(232, 244, 255, 0.45)",
