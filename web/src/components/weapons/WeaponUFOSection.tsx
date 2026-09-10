@@ -410,6 +410,11 @@ function UFOSelectCard({
             {def.price.toLocaleString()} xu
           </span>
         </div>
+        <p style={{
+          margin: "3px 0 0", fontSize: "0.7rem", color: C.dim,
+          lineHeight: 1.4, fontStyle: "italic",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        }}>{def.desc}</p>
       </div>
     </button>
   );
