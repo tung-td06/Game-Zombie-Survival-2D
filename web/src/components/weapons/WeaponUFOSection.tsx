@@ -167,7 +167,7 @@ function WeaponRow({ id, data, onClick }: { id: string; data: WeaponData; onClic
   return (
     <button type="button" onClick={onClick}
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      aria-label={`Xem chi tiet ${data.name}`}
+      aria-label={`Xem chi tiết ${data.name}`}
       style={{
         display: "grid", gridTemplateColumns: "auto 1fr", gap: 10,
         alignItems: "center", width: "100%", boxSizing: "border-box",
@@ -230,7 +230,7 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 16, boxSizing: "border-box", animation: "zs-settings-fade 0.15s ease-out"
       }}>
-      <div role="dialog" aria-modal="true" aria-label={`Chi tiet vu khi ${data.name}`}
+      <div role="dialog" aria-modal="true" aria-label={`Chi tiết vũ khí ${data.name}`}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: "100%", maxWidth: 480, maxHeight: "min(88vh,660px)", overflowY: "auto",
@@ -240,7 +240,7 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
           padding: "20px 22px 22px", animation: "zs-settings-pop 0.18s ease-out"
         }}>
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
-          <button type="button" onClick={onClose} aria-label="Dong"
+          <button type="button" onClick={onClose} aria-label="Đóng"
             style={{
               width: 30, height: 30, borderRadius: 4,
               border: `1px solid ${C.border}`, backgroundColor: "transparent",
@@ -288,14 +288,14 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
         }} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px" }}>
           {[
-            { label: "SAT THUONG (DMG)", value: data.damage, color: C.red },
-            { label: "CO DAN (MAG)", value: data.magazine, color: C.cyan },
-            { label: "TOC BAN (FIRE RATE)", value: `${data.fire_rate}s`, color: C.gold },
-            { label: "NAP DAN (RELOAD)", value: `${data.reload_time}s`, color: C.textSoft },
-            { label: "TAM BAN (RANGE)", value: data.range ?? "N/A", color: C.orange },
-            { label: "DO CHINH XAC", value: `${data.spread_deg}`, color: C.green },
-            { label: "CRIT CHANCE", value: `${Math.round(data.critical_chance * 100)}%`, color: C.red },
-            { label: "CRIT MULT", value: `x${data.critical_multiplier}`, color: C.gold },
+            { label: "SÁT THƯƠNG (DMG)", value: data.damage, color: C.red },
+            { label: "CỠ ĐẠN (MAG)", value: data.magazine, color: C.cyan },
+            { label: "TỐC BẮN (FIRE RATE)", value: `${data.fire_rate}s`, color: C.gold },
+            { label: "NẠP ĐẠN (RELOAD)", value: `${data.reload_time}s`, color: C.textSoft },
+            { label: "TẦM BẮN (RANGE)", value: data.range ?? "N/A", color: C.orange },
+            { label: "ĐỘ CHÍNH XÁC", value: `${data.spread_deg}°`, color: C.green },
+            { label: "TỶ LỆ CRIT", value: `${Math.round(data.critical_chance * 100)}%`, color: C.red },
+            { label: "SÁT THƯƠNG CRIT", value: `x${data.critical_multiplier}`, color: C.gold },
           ].map(({ label, value, color }) => (
             <div key={label} style={{
               display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -308,7 +308,7 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
           ))}
         </div>
         <p style={{ margin: "14px 0 0", textAlign: "center", fontSize: 10, color: "#5A5A55" }}>
-          Chi so lay tu /data/weapons.json - dong bo khi game cap nhat.
+          Chỉ số lấy từ /data/weapons.json - đồng bộ khi game cập nhật.
         </p>
       </div>
     </div>
@@ -355,7 +355,7 @@ export function WeaponUFOSection() {
     setError(null);
     loadWeapons()
       .then((data) => { if (alive) setWeapons(data); })
-      .catch(() => { if (alive) setError("Khong tai duoc du lieu vu khi."); });
+      .catch(() => { if (alive) setError("Không tải được dữ liệu vũ khí."); });
     return () => { alive = false; };
   }, []);
 
@@ -368,10 +368,10 @@ export function WeaponUFOSection() {
             margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: 2,
             color: C.gold, textTransform: "uppercase"
           }}>
-            THONG TIN VU KHI &amp; UFO
+            THÔNG TIN VŨ KHÍ &amp; UFO
           </h2>
           <span style={{ fontSize: 10, letterSpacing: 1, color: C.dim, whiteSpace: "nowrap" }}>
-            {tab === "weapons" ? `${WEAPON_ORDER.length} VU KHI` : `${UFO_CATALOG.length} UFO`}
+            {tab === "weapons" ? `${WEAPON_ORDER.length} VŨ KHÍ` : `${UFO_CATALOG.length} UFO`}
           </span>
         </div>
         {/* Sub-tabs */}
@@ -385,7 +385,7 @@ export function WeaponUFOSection() {
                 letterSpacing: 1.5, cursor: "pointer", fontFamily: "inherit",
                 textTransform: "uppercase", transition: "color 0.15s, border-bottom-color 0.15s"
               }}>
-              {t === "weapons" ? "VU KHI" : "UFO FLEET"}
+              {t === "weapons" ? "VŨ KHÍ" : "ĐỘI UFO"}
             </button>
           ))}
         </div>
@@ -397,7 +397,7 @@ export function WeaponUFOSection() {
             <div style={{ padding: 20, textAlign: "center", color: C.dim, fontSize: "0.82rem" }}>{error}</div>
           ) : !weapons ? (
             <div style={{ padding: "24px 20px", textAlign: "center", color: C.dim }}>
-              DANG TAI DU LIEU VU KHI...
+              ĐANG TẢI DỮ LIỆU VŨ KHÍ...
             </div>
           ) : (
             WEAPON_ORDER.map((id) => {
@@ -412,8 +412,8 @@ export function WeaponUFOSection() {
       </div>
       <p style={{ margin: 0, padding: "6px 14px 14px", fontSize: 10, color: "#5A5A55", lineHeight: 1.5 }}>
         {tab === "weapons"
-          ? "Bam vao vu khi de xem chi tiet. Mua tai SHOP trong game."
-          : "UFO tu dong ban quanh nguoi choi. Toi da 4 UFO. Mua tai SHOP trong game."}
+          ? "Bấm vào vũ khí để xem chi tiết. Mua tại SHOP trong game."
+          : "UFO tự động bắn quanh người chơi. Tối đa 4 UFO. Mua tại SHOP trong game."}
       </p>
       {selected && <WeaponModal id={selected.id} data={selected.data} onClose={() => setSelected(null)} />}
     </div>
