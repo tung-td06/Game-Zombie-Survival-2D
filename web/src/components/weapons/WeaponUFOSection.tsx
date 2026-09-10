@@ -1,12 +1,14 @@
 "use client";
 
-// Lobby THONG TIN VU KHI & UFO -- a READ-ONLY reference panel placed below
+// Lobby THONG TIN VU KHI & UFO — a READ-ONLY reference panel placed below
 // the Bestiary in the left column. Weapon icons are drawn with the same pixel-
 // art style used in the in-game shop (ui.ts -> drawShopIcon). UFO cards mirror
 // the UFO_CATALOG from ufo.ts. Clicking a weapon row opens a detail modal.
+// Clicking a UFO card shows its detailed stat panel (no modal — inline detail).
 
 import { useEffect, useState } from "react";
 import { UFO_CATALOG, type UfoDef } from "@/game/ufo";
+import { UFO_EXT_CATALOG, UFO_STAT_MAX, type UfoExtInfo } from "@/game/ufoInfo";
 import { WEAPON_ORDER } from "@/game/weapon";
 import { loadWeapons, type WeaponData } from "@/game/data";
 
@@ -36,6 +38,8 @@ const cardBase: React.CSSProperties = {
   boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
   boxSizing: "border-box",
 };
+
+// ─── Weapon Icon SVG ────────────────────────────────────────────────────────
 
 interface WeaponIconProps { id: string; size?: number; }
 
@@ -114,6 +118,8 @@ function WeaponIcon({ id, size = 72 }: WeaponIconProps) {
   );
 }
 
+// ─── UFO SVG Icon ───────────────────────────────────────────────────────────
+
 function UFOIcon({ tint, glow, size = 56 }: { tint: string; glow: string; size?: number }) {
   const uid = `ug-${tint.replace("#", "").slice(0, 6)}`;
   return (
@@ -135,6 +141,8 @@ function UFOIcon({ tint, glow, size = 56 }: { tint: string; glow: string; size?:
     </svg>
   );
 }
+
+// ─── Weapon components ──────────────────────────────────────────────────────
 
 function StatBadge({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
@@ -315,34 +323,429 @@ function WeaponModal({ id, data, onClose }: { id: string; data: WeaponData; onCl
   );
 }
 
-function UFOCard({ def }: { def: UfoDef }) {
-  const [hover, setHover] = useState(false);
+// ─── UFO Section ─────────────────────────────────────────────────────────────
+
+/** Stat bar row — label + animated fill bar + value text. */
+function StatBar({
+  label, value, max, color,
+}: {
+  label: string; value: number; max: number; color: string;
+}) {
+  const pct = Math.min(100, Math.round((value / max) * 100));
   return (
-    <div onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      style={{
-        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
-        backgroundColor: hover ? `${def.tint}10` : "transparent",
-        border: `1px solid ${hover ? def.tint + "66" : C.borderSoft}`,
-        borderLeft: `3px solid ${hover ? def.tint : "#2A2C26"}`,
-        borderRadius: 6, transition: "all 0.15s ease", cursor: "default"
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 9, letterSpacing: 1, color: C.dim, textTransform: "uppercase" }}>{label}</span>
+        <span style={{ fontSize: "0.75rem", fontWeight: 800, color, fontVariantNumeric: "tabular-nums" }}>{value}</span>
+      </div>
+      <div style={{
+        height: 5, borderRadius: 3, backgroundColor: "rgba(255,255,255,0.07)",
+        overflow: "hidden", position: "relative"
       }}>
-      <UFOIcon tint={def.tint} glow={def.glow} size={48} />
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
-          <span style={{ fontWeight: 700, fontSize: "0.78rem", letterSpacing: 1, color: def.tint }}>{def.name}</span>
-          <span style={{
-            fontSize: 9, fontWeight: 700, color: C.gold,
-            border: `1px solid ${C.gold}44`, borderRadius: 3, padding: "1px 5px",
-            backgroundColor: `${C.gold}10`, whiteSpace: "nowrap"
-          }}>
-            {def.price.toLocaleString()} coins
-          </span>
-        </div>
-        <p style={{ margin: "3px 0 0", fontSize: "0.72rem", color: C.dim, lineHeight: 1.4 }}>{def.desc}</p>
+        <div style={{
+          height: "100%", width: `${pct}%`, borderRadius: 3,
+          backgroundColor: color,
+          boxShadow: `0 0 6px ${color}88`,
+          transition: "width 0.4s cubic-bezier(0.4,0,0.2,1)",
+        }} />
       </div>
     </div>
   );
 }
+
+/** Small selectable UFO card in the left list. */
+function UFOSelectCard({
+  def, ext, isSelected, onClick,
+}: {
+  def: UfoDef; ext: UfoExtInfo | undefined; isSelected: boolean; onClick: () => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const active = isSelected || hover;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-label={`Xem chi tiết ${def.name}`}
+      aria-pressed={isSelected}
+      style={{
+        display: "flex", alignItems: "center", gap: 10, padding: "8px 10px",
+        width: "100%", boxSizing: "border-box", textAlign: "left",
+        fontFamily: "inherit", cursor: "pointer",
+        backgroundColor: isSelected ? `${def.tint}18` : hover ? `${def.tint}0C` : "transparent",
+        border: `1px solid ${active ? def.tint + "80" : C.borderSoft}`,
+        borderLeft: `3px solid ${active ? def.tint : "#2A2C26"}`,
+        borderRadius: 6,
+        boxShadow: isSelected ? `0 0 12px ${def.tint}30` : "none",
+        transition: "all 0.18s ease",
+        outline: "none",
+      }}>
+      <UFOIcon tint={def.tint} glow={def.glow} size={44} />
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
+          <span style={{
+            fontWeight: 700, fontSize: "0.76rem", letterSpacing: 1,
+            color: active ? def.tint : C.textSoft,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            transition: "color 0.18s ease"
+          }}>{def.name}</span>
+          {isSelected && (
+            <span style={{
+              fontSize: 8, fontWeight: 700, letterSpacing: 1,
+              color: def.tint, border: `1px solid ${def.tint}55`,
+              borderRadius: 3, padding: "1px 5px",
+              backgroundColor: `${def.tint}18`, whiteSpace: "nowrap", flexShrink: 0
+            }}>ĐÃ CHỌN</span>
+          )}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
+          {ext && (
+            <span style={{ fontSize: 9, color: ext.rarityColor, fontWeight: 700, letterSpacing: 0.5 }}>
+              {ext.rarity}
+            </span>
+          )}
+          <span style={{ fontSize: 9, color: C.dim }}>·</span>
+          <span style={{ fontSize: 9, color: C.gold, fontVariantNumeric: "tabular-nums" }}>
+            {def.price.toLocaleString()} xu
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/** Full detail panel shown on the right when a UFO is selected. */
+function UFODetailPanel({ def, ext, onClose }: { def: UfoDef; ext: UfoExtInfo | undefined; onClose: () => void }) {
+  if (!ext) {
+    // Fallback: minimal info from catalog only
+    return (
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontWeight: 900, fontSize: "1rem", color: def.tint, letterSpacing: 2 }}>
+            🛸 {def.name}
+          </span>
+          <button type="button" onClick={onClose}
+            style={{ background: "none", border: "none", color: C.dim, cursor: "pointer", fontSize: 14 }}
+            aria-label="Đóng">✕</button>
+        </div>
+        <p style={{ margin: 0, fontSize: "0.8rem", color: C.textSoft }}>{def.desc}</p>
+      </div>
+    );
+  }
+
+  const MAX = UFO_STAT_MAX;
+
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", gap: 0,
+      animation: "ufo-detail-in 0.22s ease-out",
+    }}>
+      {/* --- Header --- */}
+      <div style={{
+        padding: "14px 16px 12px",
+        background: `linear-gradient(135deg, ${def.tint}18 0%, transparent 60%)`,
+        borderBottom: `1px solid ${C.border}`,
+        display: "flex", alignItems: "flex-start", gap: 12
+      }}>
+        {/* Big UFO icon */}
+        <div style={{
+          flexShrink: 0, padding: 8, borderRadius: 10,
+          border: `1px solid ${def.tint}40`,
+          backgroundColor: `${def.tint}12`,
+          boxShadow: `0 0 20px ${def.tint}30`,
+        }}>
+          <UFOIcon tint={def.tint} glow={def.glow} size={64} />
+        </div>
+        {/* Title block */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3 style={{
+              margin: 0, fontSize: "1.05rem", fontWeight: 900, letterSpacing: 2,
+              color: def.tint, textTransform: "uppercase"
+            }}>🛸 {def.name}</h3>
+            <button type="button" onClick={onClose} aria-label="Đóng chi tiết UFO"
+              style={{
+                background: "none", border: `1px solid ${C.border}`, borderRadius: 4,
+                color: C.dim, cursor: "pointer", fontSize: 12, padding: "2px 7px",
+                fontFamily: "inherit", lineHeight: 1.6,
+                transition: "color 0.15s, border-color 0.15s",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = C.red; e.currentTarget.style.borderColor = C.red; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = C.dim; e.currentTarget.style.borderColor = C.border; }}>
+              ✕
+            </button>
+          </div>
+          {/* Badges */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 6px", marginTop: 6 }}>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 1, color: ext.rarityColor,
+              border: `1px solid ${ext.rarityColor}55`, borderRadius: 3, padding: "2px 7px",
+              backgroundColor: `${ext.rarityColor}18`,
+            }}>{ext.rarity.toUpperCase()}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 1, color: C.cyan,
+              border: `1px solid ${C.cyan}44`, borderRadius: 3, padding: "2px 7px",
+              backgroundColor: `${C.cyan}12`,
+            }}>{ext.type.toUpperCase()}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 1, color: C.gold,
+              border: `1px solid ${C.gold}44`, borderRadius: 3, padding: "2px 7px",
+              backgroundColor: `${C.gold}12`,
+            }}>CẤP ĐỘ ≥ {ext.levelReq}</span>
+            <span style={{
+              fontSize: 9, fontWeight: 700, letterSpacing: 1, color: C.green,
+              border: `1px solid ${C.green}44`, borderRadius: 3, padding: "2px 7px",
+              backgroundColor: `${C.green}12`,
+            }}>{def.price.toLocaleString()} xu</span>
+          </div>
+        </div>
+      </div>
+
+      {/* --- Body scrollable area --- */}
+      <div style={{ padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+
+        {/* --- Combat Stats --- */}
+        <section>
+          <SectionHeading label="⚔️ CHỈ SỐ CHIẾN ĐẤU" color={C.red} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6 }}>
+            <StatBar label="❤️ Máu (HP)" value={ext.hp} max={MAX.hp} color="#FF6B6B" />
+            <StatBar label="⚔️ Sát thương" value={ext.damage} max={MAX.damage} color={C.red} />
+            <StatBar label="🔥 Tốc độ bắn (phát/s)" value={ext.fireRate} max={MAX.fireRate} color={C.orange} />
+            <StatBar label="📏 Tầm tấn công" value={ext.attackRange} max={MAX.attackRange} color={C.gold} />
+            <StatBar label="🚀 Tốc độ đạn" value={ext.projectileSpeed} max={MAX.projectileSpeed} color={C.cyan} />
+            <StatBar label="🎯 Tỷ lệ chí mạng (%)" value={ext.critChance} max={MAX.critChance} color="#FF9C4A" />
+          </div>
+        </section>
+
+        <Divider color={def.tint} />
+
+        {/* --- Movement Stats --- */}
+        <section>
+          <SectionHeading label="🚀 CHỈ SỐ DI CHUYỂN" color={C.cyan} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6 }}>
+            <StatBar label="🔄 Tốc độ quỹ đạo (°/s)" value={ext.orbitSpeed} max={MAX.orbitSpeed} color={C.cyan} />
+            <StatBar label="📡 Tầm phát hiện" value={ext.detectionRange} max={MAX.detectionRange} color="#5ADCFF" />
+          </div>
+        </section>
+
+        <Divider color={def.tint} />
+
+        {/* --- Defense Stats --- */}
+        <section>
+          <SectionHeading label="🛡️ CHỈ SỐ PHÒNG THỦ" color={C.green} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 6 }}>
+            <StatBar label="🛡️ Giáp" value={ext.armor} max={MAX.armor} color={C.green} />
+            <StatBar label="🔰 Giảm sát thương (%)" value={ext.damageReduction} max={MAX.damageReduction} color="#6EDC82" />
+          </div>
+        </section>
+
+        {/* --- Special Ability --- */}
+        {ext.specialAbility && (
+          <>
+            <Divider color={def.tint} />
+            <section>
+              <SectionHeading label="⚡ KHẢ NĂNG ĐẶC BIỆT" color={C.purple} />
+              <div style={{
+                marginTop: 8, padding: "12px 14px",
+                backgroundColor: `${C.purple}10`,
+                border: `1px solid ${C.purple}40`,
+                borderLeft: `3px solid ${C.purple}`,
+                borderRadius: 7,
+              }}>
+                <div style={{
+                  fontWeight: 900, fontSize: "0.85rem", letterSpacing: 1.5,
+                  color: C.purple, marginBottom: 6
+                }}>⚡ {ext.specialAbility.name}</div>
+                <p style={{ margin: "0 0 10px", fontSize: "0.76rem", color: C.textSoft, lineHeight: 1.5 }}>
+                  {ext.specialAbility.description}
+                </p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px" }}>
+                  {[
+                    ext.specialAbility.damage !== undefined && { label: "Sát thương", value: ext.specialAbility.damage, color: C.red },
+                    ext.specialAbility.cooldown !== undefined && { label: "Hồi chiêu", value: `${ext.specialAbility.cooldown}s`, color: C.gold },
+                    ext.specialAbility.radius !== undefined && { label: "Bán kính", value: `${ext.specialAbility.radius}px`, color: C.orange },
+                    ext.specialAbility.duration !== undefined && { label: "Thời gian", value: `${ext.specialAbility.duration}s`, color: C.cyan },
+                    ext.specialAbility.targets !== undefined && { label: "Mục tiêu", value: ext.specialAbility.targets || "N/A", color: C.textSoft },
+                    ext.specialAbility.effect && { label: "Hiệu ứng", value: ext.specialAbility.effect, color: C.purple },
+                  ].filter(Boolean).map((row) => {
+                    const r = row as { label: string; value: string | number; color: string };
+                    return (
+                      <div key={r.label} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        padding: "3px 8px", backgroundColor: C.panelDeep,
+                        border: `1px solid ${C.borderSoft}`, borderRadius: 4,
+                      }}>
+                        <span style={{ fontSize: 9, color: C.dim, letterSpacing: 0.5 }}>{r.label}</span>
+                        <span style={{ fontSize: "0.74rem", fontWeight: 800, color: r.color }}>{r.value}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        <Divider color={def.tint} />
+
+        {/* --- Description --- */}
+        <section>
+          <SectionHeading label="📖 MÔ TẢ" color={C.gold} />
+          <p style={{
+            margin: "8px 0 0", fontSize: "0.78rem", color: C.textSoft, lineHeight: 1.65,
+            padding: "10px 12px", backgroundColor: C.panelDeep,
+            border: `1px solid ${C.borderSoft}`, borderRadius: 6,
+            fontStyle: "italic",
+          }}>
+            {ext.description}
+          </p>
+        </section>
+
+        {/* --- Strengths & Weaknesses --- */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <section>
+            <SectionHeading label="✅ ĐIỂM MẠNH" color={C.green} />
+            <ul style={{ margin: "8px 0 0", padding: "10px 12px 10px 24px",
+              backgroundColor: `${C.green}08`, border: `1px solid ${C.green}28`,
+              borderLeft: `2px solid ${C.green}`, borderRadius: 6, listStyle: "disc" }}>
+              {ext.strengths.map((s) => (
+                <li key={s} style={{ fontSize: "0.72rem", color: C.green, marginBottom: 4, lineHeight: 1.4 }}>{s}</li>
+              ))}
+            </ul>
+          </section>
+          <section>
+            <SectionHeading label="❌ ĐIỂM YẾU" color={C.red} />
+            <ul style={{ margin: "8px 0 0", padding: "10px 12px 10px 24px",
+              backgroundColor: `${C.red}08`, border: `1px solid ${C.red}28`,
+              borderLeft: `2px solid ${C.red}`, borderRadius: 6, listStyle: "disc" }}>
+              {ext.weaknesses.map((w) => (
+                <li key={w} style={{ fontSize: "0.72rem", color: C.red, marginBottom: 4, lineHeight: 1.4 }}>{w}</li>
+              ))}
+            </ul>
+          </section>
+        </div>
+
+        <p style={{ margin: 0, fontSize: 9, color: "#5A5A55", textAlign: "center", lineHeight: 1.5 }}>
+          Thông tin đồng bộ từ bộ nhớ game. UFO tự động bắn quanh người chơi.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeading({ label, color }: { label: string; color: string }) {
+  return (
+    <div style={{
+      fontSize: 9, fontWeight: 800, letterSpacing: 1.5, color,
+      textTransform: "uppercase", paddingBottom: 4,
+      borderBottom: `1px solid ${color}30`,
+    }}>
+      {label}
+    </div>
+  );
+}
+
+function Divider({ color }: { color: string }) {
+  return (
+    <div style={{
+      height: 1,
+      background: `linear-gradient(90deg, transparent, ${color}30, transparent)`,
+    }} />
+  );
+}
+
+// ─── UFO Fleet Tab ────────────────────────────────────────────────────────────
+
+function UFOFleetTab() {
+  const [selectedId, setSelectedId] = useState<string>(UFO_CATALOG[0]?.id ?? "");
+
+  const selectedDef = UFO_CATALOG.find((u) => u.id === selectedId) ?? null;
+  const selectedExt = UFO_EXT_CATALOG.find((u) => u.id === selectedId);
+
+  const selectedIdx = UFO_CATALOG.findIndex((u) => u.id === selectedId);
+  const prevDef = selectedIdx > 0 ? UFO_CATALOG[selectedIdx - 1] : null;
+  const nextDef = selectedIdx < UFO_CATALOG.length - 1 ? UFO_CATALOG[selectedIdx + 1] : null;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+      {/* --- UFO List (always visible) --- */}
+      <div style={{ padding: "8px 10px 6px", display: "flex", flexDirection: "column", gap: 5 }}>
+        <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: 1.5, color: C.dim, marginBottom: 2 }}>
+          🛸 DANH SÁCH UFO ({UFO_CATALOG.length})
+        </div>
+        {UFO_CATALOG.map((def) => {
+          const ext = UFO_EXT_CATALOG.find((u) => u.id === def.id);
+          return (
+            <UFOSelectCard
+              key={def.id}
+              def={def}
+              ext={ext}
+              isSelected={selectedId === def.id}
+              onClick={() => setSelectedId(def.id)}
+            />
+          );
+        })}
+      </div>
+
+      {/* --- Detail panel --- */}
+      {selectedDef && (
+        <>
+          <div style={{
+            height: 1, margin: "4px 10px",
+            background: `linear-gradient(90deg, transparent, ${selectedDef.tint}40, transparent)`
+          }} />
+          <UFODetailPanel
+            def={selectedDef}
+            ext={selectedExt}
+            onClose={() => setSelectedId("")}
+          />
+          {/* Prev / Next navigation */}
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "6px 14px 10px", gap: 8,
+          }}>
+            <button type="button"
+              disabled={!prevDef}
+              onClick={() => prevDef && setSelectedId(prevDef.id)}
+              aria-label="UFO trước"
+              style={{
+                flex: 1, padding: "6px 0", fontFamily: "inherit", cursor: prevDef ? "pointer" : "not-allowed",
+                backgroundColor: prevDef ? `${prevDef.tint}12` : "transparent",
+                border: `1px solid ${prevDef ? prevDef.tint + "50" : C.borderSoft}`,
+                borderRadius: 5, color: prevDef ? prevDef.tint : C.dim,
+                fontSize: "0.72rem", fontWeight: 700, letterSpacing: 1,
+                transition: "all 0.15s ease",
+                opacity: prevDef ? 1 : 0.4,
+              }}>
+              ← {prevDef ? prevDef.name : "UFO TRƯỚC"}
+            </button>
+            <span style={{ fontSize: 9, color: C.dim, whiteSpace: "nowrap" }}>
+              {selectedIdx + 1} / {UFO_CATALOG.length}
+            </span>
+            <button type="button"
+              disabled={!nextDef}
+              onClick={() => nextDef && setSelectedId(nextDef.id)}
+              aria-label="UFO tiếp theo"
+              style={{
+                flex: 1, padding: "6px 0", fontFamily: "inherit", cursor: nextDef ? "pointer" : "not-allowed",
+                backgroundColor: nextDef ? `${nextDef.tint}12` : "transparent",
+                border: `1px solid ${nextDef ? nextDef.tint + "50" : C.borderSoft}`,
+                borderRadius: 5, color: nextDef ? nextDef.tint : C.dim,
+                fontSize: "0.72rem", fontWeight: 700, letterSpacing: 1,
+                transition: "all 0.15s ease",
+                opacity: nextDef ? 1 : 0.4,
+              }}>
+              {nextDef ? nextDef.name : "UFO TIẾP THEO"} →
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Main exported component ─────────────────────────────────────────────────
 
 export function WeaponUFOSection() {
   const [weapons, setWeapons] = useState<Record<string, WeaponData> | null>(null);
@@ -360,62 +763,71 @@ export function WeaponUFOSection() {
   }, []);
 
   return (
-    <div style={{ ...cardBase, width: "100%" }}>
-      {/* Header */}
-      <div style={{ padding: "18px 20px 0", borderBottom: `1px solid ${C.border}` }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-          <h2 style={{
-            margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: 2,
-            color: C.gold, textTransform: "uppercase"
-          }}>
-            THÔNG TIN VŨ KHÍ &amp; UFO
-          </h2>
-          <span style={{ fontSize: 10, letterSpacing: 1, color: C.dim, whiteSpace: "nowrap" }}>
-            {tab === "weapons" ? `${WEAPON_ORDER.length} VŨ KHÍ` : `${UFO_CATALOG.length} UFO`}
-          </span>
+    <>
+      {/* Inject keyframe for detail panel animation */}
+      <style>{`
+        @keyframes ufo-detail-in {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      <div style={{ ...cardBase, width: "100%" }}>
+        {/* Header */}
+        <div style={{ padding: "18px 20px 0", borderBottom: `1px solid ${C.border}` }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+            <h2 style={{
+              margin: 0, fontSize: 13, fontWeight: 700, letterSpacing: 2,
+              color: C.gold, textTransform: "uppercase"
+            }}>
+              THÔNG TIN VŨ KHÍ &amp; UFO
+            </h2>
+            <span style={{ fontSize: 10, letterSpacing: 1, color: C.dim, whiteSpace: "nowrap" }}>
+              {tab === "weapons" ? `${WEAPON_ORDER.length} VŨ KHÍ` : `${UFO_CATALOG.length} UFO`}
+            </span>
+          </div>
+          {/* Sub-tabs */}
+          <div style={{ display: "flex" }}>
+            {(["weapons", "ufos"] as const).map((t) => (
+              <button key={t} type="button" onClick={() => setTab(t)}
+                style={{
+                  flex: 1, padding: "8px 0", background: "transparent", border: "none",
+                  borderBottom: tab === t ? `2px solid ${C.gold}` : "2px solid transparent",
+                  color: tab === t ? C.gold : C.dim, fontWeight: 700, fontSize: "0.72rem",
+                  letterSpacing: 1.5, cursor: "pointer", fontFamily: "inherit",
+                  textTransform: "uppercase", transition: "color 0.15s, border-bottom-color 0.15s"
+                }}>
+                {t === "weapons" ? "VŨ KHÍ" : "ĐỘI UFO"}
+              </button>
+            ))}
+          </div>
         </div>
-        {/* Sub-tabs */}
-        <div style={{ display: "flex" }}>
-          {(["weapons", "ufos"] as const).map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)}
-              style={{
-                flex: 1, padding: "8px 0", background: "transparent", border: "none",
-                borderBottom: tab === t ? `2px solid ${C.gold}` : "2px solid transparent",
-                color: tab === t ? C.gold : C.dim, fontWeight: 700, fontSize: "0.72rem",
-                letterSpacing: 1.5, cursor: "pointer", fontFamily: "inherit",
-                textTransform: "uppercase", transition: "color 0.15s, border-bottom-color 0.15s"
-              }}>
-              {t === "weapons" ? "VŨ KHÍ" : "ĐỘI UFO"}
-            </button>
-          ))}
-        </div>
-      </div>
-      {/* Content */}
-      <div style={{ padding: "10px 10px 4px", display: "flex", flexDirection: "column", gap: 6 }}>
+
+        {/* Content */}
         {tab === "weapons" ? (
-          error ? (
-            <div style={{ padding: 20, textAlign: "center", color: C.dim, fontSize: "0.82rem" }}>{error}</div>
-          ) : !weapons ? (
-            <div style={{ padding: "24px 20px", textAlign: "center", color: C.dim }}>
-              ĐANG TẢI DỮ LIỆU VŨ KHÍ...
-            </div>
-          ) : (
-            WEAPON_ORDER.map((id) => {
-              const data = weapons[id];
-              if (!data) return null;
-              return <WeaponRow key={id} id={id} data={data} onClick={() => setSelected({ id, data })} />;
-            })
-          )
+          <div style={{ padding: "10px 10px 4px", display: "flex", flexDirection: "column", gap: 6 }}>
+            {error ? (
+              <div style={{ padding: 20, textAlign: "center", color: C.dim, fontSize: "0.82rem" }}>{error}</div>
+            ) : !weapons ? (
+              <div style={{ padding: "24px 20px", textAlign: "center", color: C.dim }}>
+                ĐANG TẢI DỮ LIỆU VŨ KHÍ...
+              </div>
+            ) : (
+              WEAPON_ORDER.map((id) => {
+                const data = weapons[id];
+                if (!data) return null;
+                return <WeaponRow key={id} id={id} data={data} onClick={() => setSelected({ id, data })} />;
+              })
+            )}
+            <p style={{ margin: 0, padding: "6px 4px 10px", fontSize: 10, color: "#5A5A55", lineHeight: 1.5 }}>
+              Bấm vào vũ khí để xem chi tiết. Mua tại SHOP trong game.
+            </p>
+          </div>
         ) : (
-          UFO_CATALOG.map((def) => <UFOCard key={def.id} def={def} />)
+          <UFOFleetTab />
         )}
+
+        {selected && <WeaponModal id={selected.id} data={selected.data} onClose={() => setSelected(null)} />}
       </div>
-      <p style={{ margin: 0, padding: "6px 14px 14px", fontSize: 10, color: "#5A5A55", lineHeight: 1.5 }}>
-        {tab === "weapons"
-          ? "Bấm vào vũ khí để xem chi tiết. Mua tại SHOP trong game."
-          : "UFO tự động bắn quanh người chơi. Tối đa 4 UFO. Mua tại SHOP trong game."}
-      </p>
-      {selected && <WeaponModal id={selected.id} data={selected.data} onClose={() => setSelected(null)} />}
-    </div>
+    </>
   );
 }
