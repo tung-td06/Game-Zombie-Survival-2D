@@ -828,12 +828,17 @@ export default function Home() {
                 enemyGates). Read-only: never touches save/gameplay. */}
             <BestiarySection />
 
-            {/* Weapon & UFO info — shop-style pixel-art icons, stats from
-                /data/weapons.json, UFO catalog from ufo.ts. Read-only. */}
-            <WeaponUFOSection />
           </section>
 
-          {/* RIGHT COLUMN — Tabs + Content */}
+          {/* RIGHT COLUMN — Tabs + Content + Weapon/UFO Info */}
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+              minWidth: 0,
+            }}
+          >
           <section
             style={{
               ...cardBase,
@@ -1526,6 +1531,11 @@ export default function Home() {
               )}
             </div>
           </section>
+
+            {/* Weapon & UFO info — shop-style pixel-art icons, stats from
+                /data/weapons.json, UFO catalog from ufo.ts. Read-only. */}
+            <WeaponUFOSection />
+          </div>
         </div>
       </div>
 
