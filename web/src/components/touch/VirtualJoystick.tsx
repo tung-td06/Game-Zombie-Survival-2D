@@ -3,6 +3,19 @@
 // Virtual joystick (bottom-left). Tracks ONE pointerId at a time via
 // Pointer Events so multi-touch with the fire button works: a second
 // finger on a different element keeps this one's captured touch alive.
+//
+// FIX — unstable onChange dep:
+//   The previous version listed `onChange` (an inline arrow function in
+//   TouchHUD) in the useEffect dependency array. Since TouchHUD re-renders
+//   on every visualViewport scroll/resize event (URL-bar animation fires
+//   many times per second), the effect was tearing down and re-adding
+//   event listeners continuously, creating brief gaps where pointermove
+//   events were missed and causing movement stutters.
+//
+//   Fix: store onChange + RADIUS in refs updated on every render and read
+//   them from inside the effect at call time. The effect now only runs
+//   once on mount (deadZone never changes at runtime), eliminating all
+//   listener churn.
 
 import { useEffect, useRef } from "react";
 import type { Vec } from "@/game/vec";
@@ -29,7 +42,19 @@ export default function VirtualJoystick({
   const captured = useRef<number | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
 
+  // Keep the latest callback and derived RADIUS in refs so the effect
+  // never needs to re-run when these values change between renders.
+  // The effect reads the ref at call time, so it always sees the
+  // current value without being listed as a dependency.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   const RADIUS = size / 2 - thumbSize / 2 - RING_INSET;
+  const radiusRef = useRef(RADIUS);
+  radiusRef.current = RADIUS;
+
+  const deadZoneRef = useRef(deadZone);
+  deadZoneRef.current = deadZone;
 
   useEffect(() => {
     const ring = ringRef.current;
@@ -39,25 +64,27 @@ export default function VirtualJoystick({
       if (thumbRef.current) {
         thumbRef.current.style.transform = "translate(-50%, -50%)";
       }
-      onChange({ x: 0, y: 0 });
+      onChangeRef.current({ x: 0, y: 0 });
     };
 
     const updateThumb = (cx: number, cy: number) => {
+      const R = radiusRef.current;
+      const DEAD = deadZoneRef.current;
       const dx = cx;
       const dy = cy;
       const len = Math.sqrt(dx * dx + dy * dy);
-      const k = len > RADIUS ? RADIUS / len : 1;
+      const k = len > R ? R / len : 1;
       const tx = dx * k;
       const ty = dy * k;
       if (thumbRef.current) {
         thumbRef.current.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
       }
-      const nx = tx / RADIUS;
-      const ny = ty / RADIUS;
-      if (len > deadZone * RADIUS) {
-        onChange({ x: nx, y: ny });
+      const nx = tx / R;
+      const ny = ty / R;
+      if (len > DEAD * R) {
+        onChangeRef.current({ x: nx, y: ny });
       } else {
-        onChange({ x: 0, y: 0 });
+        onChangeRef.current({ x: 0, y: 0 });
       }
     };
 
@@ -107,7 +134,11 @@ export default function VirtualJoystick({
       ring.removeEventListener("pointerup", onUp);
       ring.removeEventListener("pointercancel", onUp);
     };
-  }, [onChange, RADIUS, deadZone]);
+    // Empty dep array: onChange, RADIUS, and deadZone are all stored in
+    // refs (updated on every render) and read at call time — they must NOT
+    // be deps or the effect would re-run on every TouchHUD re-render (which
+    // happens on every visualViewport scroll during URL-bar animation).
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div

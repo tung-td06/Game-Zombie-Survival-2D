@@ -13,6 +13,19 @@
 // Releasing stops fire but keeps the last aimDirection so the player
 // keeps facing where they were aiming. No new firing system, no RAF tick —
 // only the game loop RAF is responsible for reading aim.
+//
+// ROOT-CAUSE FIX (stale origin):
+//   The previous version cached the ring center in `origin.current` at
+//   onDown time and reused it throughout the gesture. Any layout change
+//   while the gesture was active (mobile URL-bar collapse, safe-area
+//   update, orientation) moved the ring on screen but left origin stale,
+//   making subsequent onMove calls compute the wrong aim vector — causing
+//   the gun to snap to a completely different direction (often top-left).
+//
+//   Fix: every onMove call reads the CURRENT ring center directly from
+//   getBoundingClientRect() so the computed dx/dy is always relative to
+//   where the ring actually is on screen right now, regardless of layout
+//   changes that occurred after the gesture started.
 
 import { useEffect, useRef } from "react";
 import type { InputManager } from "@/game/input";
@@ -36,7 +49,6 @@ export default function RightJoystick({
   const ringRef = useRef<HTMLDivElement | null>(null);
   const thumbRef = useRef<HTMLDivElement | null>(null);
   const captured = useRef<number | null>(null);
-  const origin = useRef<{ x: number; y: number } | null>(null);
   const lastDir = useRef<{ x: number; y: number }>({ x: 1, y: 0 });
   // Store RADIUS in a ref so the pointer-event effect does not need it as a
   // dependency. Without this, any resize that changes `size` would cause the
@@ -44,6 +56,9 @@ export default function RightJoystick({
   // and drop the active aim — exactly one of the bug's triggers.
   const radiusRef = useRef(size / 2 - thumbSize / 2 - RING_INSET);
   radiusRef.current = size / 2 - thumbSize / 2 - RING_INSET;
+  // Store deadZone in a ref for the same reason.
+  const deadZoneRef = useRef(deadZone);
+  deadZoneRef.current = deadZone;
 
   useEffect(() => {
     const ring = ringRef.current;
@@ -57,6 +72,7 @@ export default function RightJoystick({
 
     const setStick = (dx: number, dy: number) => {
       const RADIUS = radiusRef.current;
+      const DEAD = deadZoneRef.current;
       const len = Math.hypot(dx, dy);
       const k = len > RADIUS ? RADIUS / len : 1;
       const tx = dx * k;
@@ -66,7 +82,7 @@ export default function RightJoystick({
       }
       // Zero-length guard: don't update aim when stick is at dead centre.
       if (len < 0.001) return;
-      if (len > deadZone * RADIUS) {
+      if (len > DEAD * RADIUS) {
         // Normalise and write directly — no RAF, no world-space computation.
         // InputManager.getAimWorld() computes the world point from the
         // CURRENT player position at game-loop time, so this direction
@@ -84,30 +100,35 @@ export default function RightJoystick({
     const onDown = (e: PointerEvent) => {
       if (captured.current !== null) return;
       captured.current = e.pointerId;
-      const rect = ring.getBoundingClientRect();
-      origin.current = {
-        x: rect.left + rect.width / 2,
-        y: rect.top + rect.height / 2,
-      };
       try {
         ring.setPointerCapture(e.pointerId);
       } catch {
         // some browsers throw if pointer is no longer down
       }
       ring.style.setProperty("--joy-active", "1");
-      setStick(e.clientX - origin.current.x, e.clientY - origin.current.y);
+      // Compute ring center at touch-start time.
+      const rect = ring.getBoundingClientRect();
+      setStick(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
     };
 
     const onMove = (e: PointerEvent) => {
-      if (captured.current !== e.pointerId || !origin.current) return;
+      if (captured.current !== e.pointerId) return;
       e.preventDefault();
-      setStick(e.clientX - origin.current.x, e.clientY - origin.current.y);
+      // Always read the CURRENT ring center from getBoundingClientRect().
+      // This is the root-cause fix: if the layout changed since onDown
+      // (URL-bar collapse, safe-area update, orientation change), the ring
+      // will have moved on screen. Using a cached origin from onDown would
+      // compute the aim vector relative to the OLD position and snap the gun
+      // to a wrong direction. Reading the rect fresh every move ensures the
+      // aim vector always reflects where the finger is relative to the ring
+      // as it appears RIGHT NOW.
+      const rect = ring.getBoundingClientRect();
+      setStick(e.clientX - (rect.left + rect.width / 2), e.clientY - (rect.top + rect.height / 2));
     };
 
     const onUp = (e: PointerEvent) => {
       if (captured.current !== e.pointerId) return;
       captured.current = null;
-      origin.current = null;
       try {
         ring.releasePointerCapture(e.pointerId);
       } catch {
@@ -133,11 +154,10 @@ export default function RightJoystick({
       ring.removeEventListener("pointercancel", onUp);
       stop();
     };
-    // IMPORTANT: radiusRef and deadZone are intentionally NOT listed as
-    // dependencies. radiusRef is a ref (mutable, no re-run needed), and
-    // deadZone is a static prop that never changes at runtime. Including
-    // RADIUS (the old derived value) caused this effect to re-run on every
-    // resize, which dropped pointer capture and broke active aim gestures.
+    // IMPORTANT: radiusRef, deadZoneRef are intentionally NOT listed as
+    // dependencies — they are refs (mutable, no re-run needed). `input` is
+    // the only real dependency: the game creates exactly one InputManager
+    // for its lifetime, so this effect effectively runs once on mount.
   }, [input]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
