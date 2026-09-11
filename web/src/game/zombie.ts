@@ -7,6 +7,7 @@ import {
   MAX_ALIVE_ZOMBIES,
   NIGHT_DAMAGE_BONUS,
   NIGHT_SPEED_BONUS,
+  SNIPER_RANGE,
   WORLD_HEIGHT,
   WORLD_WIDTH,
 } from "./settings";
@@ -876,10 +877,14 @@ export class BossZombie extends Zombie {
 
   protected barrage(game: IGame): void {
     const n = (this.data.barrage_bullets ?? 14) + (this.phase - 1) * 3;
+    // ABOMINATION barrage bullets travel at speed 300; give them a lifetime
+    // equal to SNIPER_RANGE / speed so they cover the full sniper distance.
+    const barrageSpeed = 300;
+    const barrageLifetime = SNIPER_RANGE / barrageSpeed;
     for (let i = 0; i < n; i++) {
       const ang = (Math.PI * 2 * i) / n;
       game.enemyBullets.push(
-        new Bullet(this.pos, ang, 300, this.damage * 0.6, "enemy"),
+        new Bullet(this.pos, ang, barrageSpeed, this.damage * 0.6, "enemy", false, 4, barrageLifetime),
       );
     }
     game.camera.shake(8);
@@ -955,10 +960,14 @@ export class NecromancerBossZombie extends BossZombie {
   protected override barrage(game: IGame): void {
     const n = this.data.barrage_bullets ?? 10;
     const spin = performance.now() / 1000;
+    // NECROMANCER KING barrage bullets travel at speed 280; give them a lifetime
+    // equal to SNIPER_RANGE / speed so they cover the full sniper distance.
+    const barrageSpeed = 280;
+    const barrageLifetime = SNIPER_RANGE / barrageSpeed;
     for (let i = 0; i < n; i++) {
       const ang = (Math.PI * 2 * i) / n + spin;
       game.enemyBullets.push(
-        new Bullet(this.pos, ang, 280, this.damage * 0.7, "enemy"),
+        new Bullet(this.pos, ang, barrageSpeed, this.damage * 0.7, "enemy", false, 4, barrageLifetime),
       );
     }
     game.camera.shake(8);

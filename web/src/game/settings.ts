@@ -24,6 +24,12 @@ export const PLAYER_RADIUS = 16;
 export const PLAYER_BASE_SPEED = 230.0;
 export const PLAYER_BASE_MAX_HP = 100.0;
 export const BULLET_LIFETIME = 1.6;
+/**
+ * Projectile range used by sniper-class weapons (mirrors weapons.json "sniper".range).
+ * ABOMINATION and NECROMANCER KING boss barrages use this as their projectile
+ * reach so their bullets travel the same distance as a sniper shot.
+ */
+export const SNIPER_RANGE = 1400;
 export const MAX_PARTICLES = 900;
 export const MAX_ALIVE_ZOMBIES = 200;
 

@@ -37,7 +37,7 @@
     "name": "ABOMINATION",
     "hp": 5000, "speed": 55, "damage": 40, "radius": 42,
     "attack_range": 78, "attack_cooldown": 1.4, "detection_range": 100000,
-    "barrage_interval": 6.0, "barrage_bullets": 14,
+    "barrage_interval": 3.0, "barrage_bullets": 14,
     "score": 5000, "coins": 500, "xp": 600
   },
   "crawler": {
@@ -57,7 +57,7 @@
     "name": "NECROMANCER KING",
     "hp": 8000, "speed": 50, "damage": 30, "radius": 44,
     "attack_range": 480, "attack_cooldown": 2.0, "detection_range": 100000,
-    "barrage_interval": 5.0, "barrage_bullets": 10,
+    "barrage_interval": 2.5, "barrage_bullets": 10,
     "projectile_speed": 380,
     "score": 8000, "coins": 800, "xp": 1000
   },
