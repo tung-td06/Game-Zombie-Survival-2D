@@ -51,15 +51,16 @@ export default function RightJoystick({
     if (!ring) return;
 
     const stop = () => {
+      // Only release fire — the persistent aimOverride tick keeps running so
+      // the last aimed direction is preserved for the FIRE button to consume.
       active.current = false;
       input.fireHeld = false;
-      cancelAnimationFrame(rafId.current);
     };
 
-    // Writes the aim override once per frame while the stick is held —
-    // no React state per pointermove, no object churn outside rAF.
+    // Writes the aim override every frame (persistent, mount → unmount).
+    // aimOverride is ALWAYS kept fresh so the FIRE button always reads the
+    // correct direction — no null fallback, no stale world-space position.
     const tick = () => {
-      if (!active.current) return;
       const game = gameRef.current;
       if (game?.player) {
         input.aimOverride = {
@@ -101,7 +102,6 @@ export default function RightJoystick({
       }
       ring.style.setProperty("--joy-active", "1");
       active.current = true;
-      rafId.current = requestAnimationFrame(tick);
       setStick(e.clientX - origin.current.x, e.clientY - origin.current.y);
     };
 
@@ -131,11 +131,15 @@ export default function RightJoystick({
     ring.addEventListener("pointermove", onMove);
     ring.addEventListener("pointerup", onUp);
     ring.addEventListener("pointercancel", onUp);
+    // Start the persistent aim tick immediately so aimOverride is valid
+    // before any joystick interaction (prevents null → top-left default).
+    rafId.current = requestAnimationFrame(tick);
     return () => {
       ring.removeEventListener("pointerdown", onDown);
       ring.removeEventListener("pointermove", onMove);
       ring.removeEventListener("pointerup", onUp);
       ring.removeEventListener("pointercancel", onUp);
+      cancelAnimationFrame(rafId.current);
       stop();
     };
   }, [input, gameRef, RADIUS, deadZone]);
