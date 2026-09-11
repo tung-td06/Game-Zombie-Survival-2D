@@ -38,16 +38,12 @@ export default function RightJoystick({
   const captured = useRef<number | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const lastDir = useRef<{ x: number; y: number }>({ x: 1, y: 0 });
-
-  const RADIUS = size / 2 - thumbSize / 2 - RING_INSET;
-
-  // Initialise aimDirection once on mount so it is never null before the
-  // player first touches the joystick (prevents fallback to mouse(0,0)).
-  useEffect(() => {
-    if (input.aimDirection === null) {
-      input.aimDirection = { ...lastDir.current };
-    }
-  }, [input]);
+  // Store RADIUS in a ref so the pointer-event effect does not need it as a
+  // dependency. Without this, any resize that changes `size` would cause the
+  // effect to re-run: the cleanup would call stop(), release pointer capture,
+  // and drop the active aim — exactly one of the bug's triggers.
+  const radiusRef = useRef(size / 2 - thumbSize / 2 - RING_INSET);
+  radiusRef.current = size / 2 - thumbSize / 2 - RING_INSET;
 
   useEffect(() => {
     const ring = ringRef.current;
@@ -60,6 +56,7 @@ export default function RightJoystick({
     };
 
     const setStick = (dx: number, dy: number) => {
+      const RADIUS = radiusRef.current;
       const len = Math.hypot(dx, dy);
       const k = len > RADIUS ? RADIUS / len : 1;
       const tx = dx * k;
@@ -67,6 +64,8 @@ export default function RightJoystick({
       if (thumbRef.current) {
         thumbRef.current.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
       }
+      // Zero-length guard: don't update aim when stick is at dead centre.
+      if (len < 0.001) return;
       if (len > deadZone * RADIUS) {
         // Normalise and write directly — no RAF, no world-space computation.
         // InputManager.getAimWorld() computes the world point from the
@@ -134,7 +133,12 @@ export default function RightJoystick({
       ring.removeEventListener("pointercancel", onUp);
       stop();
     };
-  }, [input, RADIUS, deadZone]);
+    // IMPORTANT: radiusRef and deadZone are intentionally NOT listed as
+    // dependencies. radiusRef is a ref (mutable, no re-run needed), and
+    // deadZone is a static prop that never changes at runtime. Including
+    // RADIUS (the old derived value) caused this effect to re-run on every
+    // resize, which dropped pointer capture and broke active aim gestures.
+  }, [input]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div

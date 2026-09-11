@@ -87,14 +87,25 @@ export class InputManager {
   /** Touch reload button — one-shot, cleared in endFrame() like keysPressed. */
   reloadPressed = false;
   /**
+   * True when running in touch/mobile mode. Set by the React shell once
+   * before the game loop starts. Controls which aim path getAimWorld() uses:
+   *   - isTouchMode=true  → aimDirection (normalized joystick vector)
+   *   - isTouchMode=false → mouseX / mouseY → camera.screenToWorld
+   * Keeping the two paths explicit prevents desktop mouse coords (which
+   * start at 0,0) from ever being used as a mobile aim fallback.
+   */
+  isTouchMode = false;
+  /**
    * Normalized aim direction set by the mobile right joystick.
-   * null means no mobile aim active — falls back to mouse.
    * This is a direction vector (length ≈ 1), NOT an absolute world position.
    * Storing a direction instead of a world-space point means it never goes
    * stale when the player moves between the joystick RAF tick and the game
    * loop tick.
+   *
+   * Default { x: 1, y: 0 } (pointing right) is a safe pre-touch value that
+   * is never used on desktop (isTouchMode=false bypasses this field).
    */
-  aimDirection: Vec | null = null;
+  aimDirection: Vec = { x: 1, y: 0 };
 
   constructor(bindings?: Partial<Record<Action, Key>>) {
     this.bindings = { ...DEFAULT_BINDINGS, ...bindings };
@@ -202,30 +213,42 @@ export class InputManager {
   /**
    * Resolve the current aim point in WORLD coordinates.
    *
-   * On mobile, the right joystick writes `aimDirection` — a normalized
-   * direction vector. This method computes the world-space point ON DEMAND
-   * from the caller's CURRENT player position, so it is always fresh and
-   * never stale regardless of when the joystick last fired.
+   * On mobile (isTouchMode=true), the right joystick writes `aimDirection`
+   * — a normalized direction vector. This method computes the world-space
+   * point ON DEMAND from the caller's CURRENT player position, so it is
+   * always fresh and never stale regardless of when the joystick last fired.
    *
-   * On desktop, falls back to mouse position translated by the camera.
+   * On desktop (isTouchMode=false), uses mouse position translated by the
+   * camera. The two paths are mutually exclusive — desktop mouse coords
+   * (which start at 0,0 and never update on touch devices) can NEVER leak
+   * into the mobile aim pipeline.
    *
-   * @param camera  Camera instance for screen→world conversion (desktop).
-   * @param playerPos  Current player world position. Required on mobile so
-   *   the aim world point tracks player movement exactly. On desktop this
-   *   parameter is ignored — the mouse cursor is already in screen space.
+   * @param camera     Camera instance for screen→world conversion (desktop).
+   * @param playerPos  Current player world position (required on mobile).
    */
   getAimWorld(camera: Camera, playerPos?: Vec): Vec {
-    if (this.aimDirection) {
-      // Compute world-space aim point from CURRENT player position + direction.
-      // Using a large distance (1000px) is sufficient for all angle calculations
-      // (Math.atan2 only needs direction, not magnitude).
+    if (this.isTouchMode) {
+      // Mobile path: aimDirection is always a valid normalized Vec.
+      // Compute world-space aim point from CURRENT player position + direction
+      // so it tracks the player exactly even after movement this frame.
+      // Guard: skip if direction is not finite (safety net for corrupt state).
+      const dx = this.aimDirection.x;
+      const dy = this.aimDirection.y;
+      if (Number.isFinite(dx) && Number.isFinite(dy)) {
+        const px = playerPos?.x ?? 0;
+        const py = playerPos?.y ?? 0;
+        return {
+          x: px + dx * 1000,
+          y: py + dy * 1000,
+        };
+      }
+      // aimDirection somehow became non-finite — return a point far to the
+      // right of the player so atan2 gives 0 (pointing right), not top-left.
       const px = playerPos?.x ?? 0;
       const py = playerPos?.y ?? 0;
-      return {
-        x: px + this.aimDirection.x * 1000,
-        y: py + this.aimDirection.y * 1000,
-      };
+      return { x: px + 1000, y: py };
     }
+    // Desktop path: mouse cursor in screen space → world space.
     return camera.screenToWorld({ x: this.mouseX, y: this.mouseY });
   }
 }

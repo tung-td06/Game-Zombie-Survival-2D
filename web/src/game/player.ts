@@ -255,7 +255,15 @@ export class Player {
     // Pass this.pos so getAimWorld() computes the mobile aim point from the
     // CURRENT player position (after movement) — never stale.
     const aimWorld = inp.getAimWorld(game.camera, this.pos);
-    this.angle = Math.atan2(aimWorld.y - this.pos.y, aimWorld.x - this.pos.x);
+    const aimDx = aimWorld.x - this.pos.x;
+    const aimDy = aimWorld.y - this.pos.y;
+    // Zero-distance guard: only update angle when the aim target is meaningfully
+    // far from the player. This prevents atan2(0, 0) = 0 from snapping the gun
+    // to the right when the aim point collapses onto the player position.
+    if (Math.hypot(aimDx, aimDy) > 0.001) {
+      this.angle = Math.atan2(aimDy, aimDx);
+    }
+
 
     this.emptyClickTimer = Math.max(0, this.emptyClickTimer - dt);
 

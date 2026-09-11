@@ -147,6 +147,13 @@ export default function GameCanvas({ mode, room, name, shouldContinue }: GameCan
     });
     gameRef.current = game;
     (window as unknown as { __game?: Game }).__game = game;
+    // Tell the InputManager which aim pipeline to use. This must be set
+    // before the game loop starts so the very first frame already uses the
+    // correct path (mobile → aimDirection; desktop → mouseX/mouseY).
+    // isMobileRef is used (not the closure-captured isMobile) so that if
+    // the value ever changes it stays in sync, but in practice isTouchMode
+    // is a one-time configuration flag that mirrors the device class.
+    game.input.isTouchMode = isMobileRef.current;
     resize();
     // Publish the game instance via state (not just the ref) so the touch
     // HUD — gated on `gameReady` — mounts the moment the game exists,
