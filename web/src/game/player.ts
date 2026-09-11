@@ -187,7 +187,7 @@ export class Player {
     }
     this.bombs -= 1;
     this.bombCooldown = BOMB_THROW_COOLDOWN;
-    const aim = game.input.getAimWorld(game.camera);
+    const aim = game.input.getAimWorld(game.camera, this.pos);
     game.grenades.push(Grenade.toward(this.pos, aim));
     game.audio.playSFX("player.dash", this.pos);
     this.recoilTimer = 0.09;
@@ -251,8 +251,10 @@ export class Player {
       }
     }
 
-    // Aim: touch auto-aim override (mobile) or mouse in world coords (desktop).
-    const aimWorld = inp.getAimWorld(game.camera);
+    // Aim: touch joystick direction (mobile) or mouse in world coords (desktop).
+    // Pass this.pos so getAimWorld() computes the mobile aim point from the
+    // CURRENT player position (after movement) — never stale.
+    const aimWorld = inp.getAimWorld(game.camera, this.pos);
     this.angle = Math.atan2(aimWorld.y - this.pos.y, aimWorld.x - this.pos.x);
 
     this.emptyClickTimer = Math.max(0, this.emptyClickTimer - dt);

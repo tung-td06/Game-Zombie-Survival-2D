@@ -86,8 +86,15 @@ export class InputManager {
   bombPressed = false;
   /** Touch reload button — one-shot, cleared in endFrame() like keysPressed. */
   reloadPressed = false;
-  /** World-space aim override (auto-aim) or null to fall back to mouse. */
-  aimOverride: Vec | null = null;
+  /**
+   * Normalized aim direction set by the mobile right joystick.
+   * null means no mobile aim active — falls back to mouse.
+   * This is a direction vector (length ≈ 1), NOT an absolute world position.
+   * Storing a direction instead of a world-space point means it never goes
+   * stale when the player moves between the joystick RAF tick and the game
+   * loop tick.
+   */
+  aimDirection: Vec | null = null;
 
   constructor(bindings?: Partial<Record<Action, Key>>) {
     this.bindings = { ...DEFAULT_BINDINGS, ...bindings };
@@ -195,13 +202,30 @@ export class InputManager {
   /**
    * Resolve the current aim point in WORLD coordinates.
    *
-   * On mobile, the touch layer writes `aimOverride` (auto-aim toward
-   * the nearest threat). On desktop, falls back to mouse position
-   * translated by the camera. Game core should call this instead of
-   * computing aim from mouseX/mouseY directly.
+   * On mobile, the right joystick writes `aimDirection` — a normalized
+   * direction vector. This method computes the world-space point ON DEMAND
+   * from the caller's CURRENT player position, so it is always fresh and
+   * never stale regardless of when the joystick last fired.
+   *
+   * On desktop, falls back to mouse position translated by the camera.
+   *
+   * @param camera  Camera instance for screen→world conversion (desktop).
+   * @param playerPos  Current player world position. Required on mobile so
+   *   the aim world point tracks player movement exactly. On desktop this
+   *   parameter is ignored — the mouse cursor is already in screen space.
    */
-  getAimWorld(camera: Camera): Vec {
-    if (this.aimOverride) return this.aimOverride;
+  getAimWorld(camera: Camera, playerPos?: Vec): Vec {
+    if (this.aimDirection) {
+      // Compute world-space aim point from CURRENT player position + direction.
+      // Using a large distance (1000px) is sufficient for all angle calculations
+      // (Math.atan2 only needs direction, not magnitude).
+      const px = playerPos?.x ?? 0;
+      const py = playerPos?.y ?? 0;
+      return {
+        x: px + this.aimDirection.x * 1000,
+        y: py + this.aimDirection.y * 1000,
+      };
+    }
     return camera.screenToWorld({ x: this.mouseX, y: this.mouseY });
   }
 }

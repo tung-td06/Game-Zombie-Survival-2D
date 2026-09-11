@@ -5,22 +5,20 @@
 // Pointer Events with its own pointerId so it never steals the left
 // joystick / action buttons (multitouch safe). While the stick is dragged
 // beyond the dead zone it:
-//   • sets the aim direction (world-space point via InputManager.aimOverride,
-//     which getAimWorld() already consumes in the game core), and
+//   • sets input.aimDirection (normalized Vec) — the single source of truth
+//     for mobile aim, read by InputManager.getAimWorld() at game-loop time
+//     using the CURRENT player position, so it can never be stale.
 //   • holds fire (input.fireHeld mirrors mouseHeld → the existing weapon
 //     system fires exactly like a held left-click).
-// Releasing stops fire but keeps the last aim direction, so the player
-// keeps facing where they were aiming. No new firing system is created —
-// this is only an input device feeding the existing surface.
+// Releasing stops fire but keeps the last aimDirection so the player
+// keeps facing where they were aiming. No new firing system, no RAF tick —
+// only the game loop RAF is responsible for reading aim.
 
 import { useEffect, useRef } from "react";
 import type { InputManager } from "@/game/input";
-import type { Game } from "@/game/game";
-import type { RefObject } from "react";
 
 interface Props {
   input: InputManager;
-  gameRef: RefObject<Game | null>;
   size?: number;
   thumbSize?: number;
   /** Dead zone as a fraction of the max stick radius (0..1). */
@@ -31,7 +29,6 @@ const RING_INSET = 10;
 
 export default function RightJoystick({
   input,
-  gameRef,
   size = 130,
   thumbSize = 60,
   deadZone = 0.35,
@@ -41,34 +38,25 @@ export default function RightJoystick({
   const captured = useRef<number | null>(null);
   const origin = useRef<{ x: number; y: number } | null>(null);
   const lastDir = useRef<{ x: number; y: number }>({ x: 1, y: 0 });
-  const rafId = useRef<number>(0);
-  const active = useRef(false);
 
   const RADIUS = size / 2 - thumbSize / 2 - RING_INSET;
+
+  // Initialise aimDirection once on mount so it is never null before the
+  // player first touches the joystick (prevents fallback to mouse(0,0)).
+  useEffect(() => {
+    if (input.aimDirection === null) {
+      input.aimDirection = { ...lastDir.current };
+    }
+  }, [input]);
 
   useEffect(() => {
     const ring = ringRef.current;
     if (!ring) return;
 
     const stop = () => {
-      // Only release fire — the persistent aimOverride tick keeps running so
-      // the last aimed direction is preserved for the FIRE button to consume.
-      active.current = false;
+      // Only release fire — aimDirection keeps its last value so the player
+      // continues facing the last aimed direction (used by the FIRE button).
       input.fireHeld = false;
-    };
-
-    // Writes the aim override every frame (persistent, mount → unmount).
-    // aimOverride is ALWAYS kept fresh so the FIRE button always reads the
-    // correct direction — no null fallback, no stale world-space position.
-    const tick = () => {
-      const game = gameRef.current;
-      if (game?.player) {
-        input.aimOverride = {
-          x: game.player.pos.x + lastDir.current.x * 1000,
-          y: game.player.pos.y + lastDir.current.y * 1000,
-        };
-      }
-      rafId.current = requestAnimationFrame(tick);
     };
 
     const setStick = (dx: number, dy: number) => {
@@ -80,7 +68,14 @@ export default function RightJoystick({
         thumbRef.current.style.transform = `translate(calc(-50% + ${tx}px), calc(-50% + ${ty}px))`;
       }
       if (len > deadZone * RADIUS) {
-        lastDir.current = { x: dx / (len || 1), y: dy / (len || 1) };
+        // Normalise and write directly — no RAF, no world-space computation.
+        // InputManager.getAimWorld() computes the world point from the
+        // CURRENT player position at game-loop time, so this direction
+        // vector is the only thing we need to store.
+        const nx = dx / len;
+        const ny = dy / len;
+        lastDir.current = { x: nx, y: ny };
+        input.aimDirection = { x: nx, y: ny };
         if (!input.fireHeld) input.fireHeld = true;
       } else if (input.fireHeld) {
         input.fireHeld = false;
@@ -101,7 +96,6 @@ export default function RightJoystick({
         // some browsers throw if pointer is no longer down
       }
       ring.style.setProperty("--joy-active", "1");
-      active.current = true;
       setStick(e.clientX - origin.current.x, e.clientY - origin.current.y);
     };
 
@@ -124,6 +118,8 @@ export default function RightJoystick({
       if (thumbRef.current) {
         thumbRef.current.style.transform = "translate(-50%, -50%)";
       }
+      // Keep aimDirection at its last value so the weapon keeps pointing
+      // in the last aimed direction when the FIRE button is used.
       stop();
     };
 
@@ -131,18 +127,14 @@ export default function RightJoystick({
     ring.addEventListener("pointermove", onMove);
     ring.addEventListener("pointerup", onUp);
     ring.addEventListener("pointercancel", onUp);
-    // Start the persistent aim tick immediately so aimOverride is valid
-    // before any joystick interaction (prevents null → top-left default).
-    rafId.current = requestAnimationFrame(tick);
     return () => {
       ring.removeEventListener("pointerdown", onDown);
       ring.removeEventListener("pointermove", onMove);
       ring.removeEventListener("pointerup", onUp);
       ring.removeEventListener("pointercancel", onUp);
-      cancelAnimationFrame(rafId.current);
       stop();
     };
-  }, [input, gameRef, RADIUS, deadZone]);
+  }, [input, RADIUS, deadZone]);
 
   return (
     <div

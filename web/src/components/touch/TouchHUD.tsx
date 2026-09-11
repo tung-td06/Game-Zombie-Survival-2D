@@ -171,7 +171,7 @@ export default function TouchHUD({ input, gameRef }: Props) {
   const showPause = inPlay || PAUSE_STATES.includes(gameState);
 
   // Leaving real gameplay (pause, upgrade, game over…) releases any held
-  // touch state so nothing lingers into a menu. aimOverride is deliberately
+  // touch state so nothing lingers into a menu. aimDirection is deliberately
   // kept — the last aim direction stays until the player aims again.
   const wasPlayingRef = useRef(false);
   useEffect(() => {
@@ -294,7 +294,6 @@ export default function TouchHUD({ input, gameRef }: Props) {
       >
         <RightJoystick
           input={input}
-          gameRef={gameRef}
           size={c.aim.w}
           thumbSize={sizes.thumb}
         />
